@@ -1,6 +1,6 @@
-# Open Questions & TODO
+# Open Decisions
 
-> Active research areas, decisions to make, known unknowns.
+> Active decisions to make, research areas, known unknowns.
 
 ---
 
@@ -9,22 +9,22 @@
 ### 1. Format: YAML vs JSON vs Custom DSL
 
 **YAML:**
-- ✓ Human readable, easy to edit
-- ✓ Comments support
-- ✗ Verbose, larger files
-- ✗ Parsing ambiguities
+- [ok] Human readable, easy to edit
+- [ok] Comments support
+- [x] Verbose, larger files
+- [x] Parsing ambiguities
 
 **JSON:**
-- ✓ Universal support
-- ✓ Strict schema
-- ✗ No comments
-- ✗ Verbose, hard to edit
+- [ok] Universal support
+- [ok] Strict schema
+- [x] No comments
+- [x] Verbose, hard to edit
 
 **Custom DSL:**
-- ✓ Optimized for domain
-- ✓ Could be concise
-- ✗ Learning curve
-- ✗ Tooling overhead
+- [ok] Optimized for domain
+- [ok] Could be concise
+- [x] Learning curve
+- [x] Tooling overhead
 
 **Hybrid approach:**
 - Store as YAML (human-friendly)
@@ -39,13 +39,13 @@
 
 **Option A: Per-function specs**
 - `auth.login.yaml`, `auth.register.yaml`, etc.
-- ✓ Precise, easy to find
-- ✗ Thousands of files for large projects
+- [ok] Precise, easy to find
+- [x] Thousands of files for large projects
 
 **Option B: Per-module specs**
 - `auth.yaml` contains all auth functions
-- ✓ Fewer files
-- ✗ Harder to find specific function
+- [ok] Fewer files
+- [x] Harder to find specific function
 
 **Option C: Hybrid**
 - Small modules: single file
@@ -132,7 +132,7 @@ How to handle 1000+ specs?
 Relationship between specs and tests:
 
 **Option A: Specs generate tests**
-- FunctionSpec → test file
+- FunctionSpec -> test file
 - Pros: Tests always match spec
 - Cons: Generated tests may be shallow
 
@@ -166,8 +166,6 @@ How do we capture runtime behavior?
 - Real-world error patterns
 - Data shape observations
 
----
-
 ### AST Parsing Strategy
 
 What parsing tools to use?
@@ -181,8 +179,6 @@ What parsing tools to use?
 | Universal | Tree-sitter |
 
 **Decision:** Language-specific for accuracy, Tree-sitter as fallback.
-
----
 
 ### Storage Evolution
 
@@ -216,8 +212,6 @@ What's the actual day-to-day like?
 
 **Question:** Which is more natural? Does it vary by developer?
 
----
-
 ### Review Fatigue
 
 If agents generate 500 specs, how do humans review without burnout?
@@ -228,14 +222,44 @@ If agents generate 500 specs, how do humans review without burnout?
 - "Trust this pattern" (auto-approve similar specs)
 - Diff highlighting of what's new/changed
 
----
-
 ### Integration with Existing Tools
 
 - **IDEs:** VSCode extension? JetBrains plugin?
 - **CI/CD:** GitHub Actions, GitLab CI?
 - **Docs:** Docusaurus, Storybook?
 - **API tools:** OpenAPI generator?
+
+---
+
+## Open Questions
+
+### From Spec Format
+1. Should we support multiple representations (YAML for humans, JSON for agents)?
+2. How do we handle spec versioning when code evolves?
+3. Should references be validated (fail if target doesn't exist)?
+4. How granular should FunctionSpec be? Per function, per module, per class?
+5. How do we capture visual UI specs (CSS, spacing, colors)?
+
+### From CLI Design
+1. Should we have a `blueprint watch` daemon for continuous sync?
+2. How do we handle large monorepos (1000+ specs)?
+3. Should agents be pluggable (Claude, GPT-4, local models)?
+4. What's the fallback if agent exploration fails/conflicts?
+
+### From Agent Orchestration
+1. Should agents be model-specific or pluggable (Claude, GPT-4, local)?
+2. How do we handle agent hallucinations in exploration?
+3. What's the cost model for agent-heavy operations?
+4. Should agents learn from project-specific patterns over time?
+5. How do we parallelize exploration across large codebases?
+6. What's the fallback if agent API is unavailable?
+
+### From Bidirectional Sync
+1. How do we handle long-running sync operations (hours for large codebases)?
+2. Should sync be blocking (CI fails) or advisory (warnings)?
+3. How do we recover from "sync went wrong" scenarios?
+4. What's the story for teams without AI agents (fallback mode)?
+5. How do we sync across branches (feature branches vs main)?
 
 ---
 
@@ -257,16 +281,31 @@ Agent-heavy workflows = API costs.
 
 ---
 
-## Prototype Priorities
+## Evolution System Questions
 
-What to build first:
+### Agent Lifecycle
 
-1. **Week 1:** Spec format definition (YAML schema)
-2. **Week 2:** Exploration agent (scan code → generate spec)
-3. **Week 3:** CLI skeleton (init, scan, review commands)
-4. **Week 4:** Basic sync (detect code changes → flag drift)
-5. **Week 5:** Implementation agent (read spec → generate code)
-6. **Week 6:** Integration test on real codebase
+Are agents cleared on every evolution cycle, or only after they reached some number of cycles? We lean toward clearing every cycle with full documentation in persistent state files. We document because agents have limited context -- we can't keep the same agent working indefinitely.
+
+### How Many Golden Behaviors Per Project?
+
+Enough to measure recall, but not so many it's unsustainable for the human curating them.
+
+### How Does the Mutator Know What "Different" Means?
+
+If tier 1 (prompt change) failed, what's the systematic way to try tier 2 (step change)? The mutator needs a structured exploration of the mutation space, not random changes.
+
+### Who Orchestrates?
+
+Is the orchestrator itself an agent, or is it a simpler state machine / script? A script might be more reliable for the loop management, with agents only handling the creative work.
+
+### When to Introduce Fine-Tuned Judge?
+
+After how many evolution cycles do we have enough data to train a dedicated evaluator model? Research shows fine-tuned judges achieve 90%+ human alignment vs ~70% for prompted judges.
+
+### Formulas: Universal vs Ecosystem-Specific
+
+We agreed on a baseline backbone shared across all formulas, with ecosystem specializations. But how thin should the baseline be? Too thin and each ecosystem reinvents everything. Too thick and formulas carry irrelevant blocks.
 
 ---
 
@@ -279,28 +318,3 @@ Questions for early users:
 3. What's your codebase size (LOC, files)?
 4. What languages/frameworks matter most?
 5. Do you already use Claude Code / Copilot / other agents?
-
----
-
-## Done
-
-- [x] Core vision and principles
-- [x] Spec format brainstorm (all types)
-- [x] CLI command structure
-- [x] Agent orchestration concept
-- [x] Bidirectional sync concept
-
-## In Progress
-
-- [ ] Refine spec schema with real examples
-- [ ] Design agent prompt templates
-- [ ] Plan MVP prototype
-- [ ] Research UI/layout spec options
-
-## Todo
-
-- [ ] Create reference implementation
-- [ ] Test on sample brownfield project
-- [ ] Write agent prompt library
-- [ ] Design review UI mockups
-- [ ] Benchmark sync performance

@@ -1,7 +1,7 @@
 # Agent Orchestration
 
-> How agents work within blueprint-mode — exploration, generation, implementation.
-> Status: BRAINSTORM — this is the core innovation area.
+> How agents work within blueprint-mode -- exploration, generation, implementation.
+> Status: BRAINSTORM -- this is the core innovation area.
 
 ---
 
@@ -9,7 +9,7 @@
 
 Traditional spec tools rely on **static analysis** (AST parsing, regex). Blueprint Mode uses **agents as first-class explorers**.
 
-The agent doesn't just parse code — it **understands intent, identifies patterns, infers edge cases**.
+The agent doesn't just parse code -- it **understands intent, identifies patterns, infers edge cases**.
 
 ---
 
@@ -32,20 +32,20 @@ The agent doesn't just parse code — it **understands intent, identifies patter
 **Process:**
 ```
 1. Read module structure
-   ↓
+   |
 2. Identify entry points (exports, public APIs)
-   ↓
+   |
 3. Deep dive into each function/component:
    - Read implementation
    - Identify inputs/outputs
    - Trace data flow
    - Find error handling
    - Look for edge cases in tests/comments
-   ↓
+   |
 4. Cross-reference with existing specs
-   ↓
+   |
 5. Generate structured spec
-   ↓
+   |
 6. Emit confidence score + reasoning
 ```
 
@@ -65,10 +65,10 @@ Agent: Looking at tests... found edge cases:
        - unicode email handling
 
 Agent: Cross-referencing with existing specs...
-       Found related spec: auth.register — should reference this
+       Found related spec: auth.register -- should reference this
 
 Agent: Generating FunctionSpec for auth.login
-       Confidence: 0.92 (high — well-documented, good test coverage)
+       Confidence: 0.92 (high -- well-documented, good test coverage)
 ```
 
 ---
@@ -90,24 +90,24 @@ Agent: Generating FunctionSpec for auth.login
 **Process:**
 ```
 1. Read canonical specs for the change
-   ↓
+   |
 2. Study existing code patterns in target area
    - Naming conventions
    - Error handling style
    - Import patterns
-   ↓
+   |
 3. Generate implementation matching spec
    - Function signatures
    - Business logic per spec.process
    - Error handling per spec.edge_cases
-   ↓
+   |
 4. Verify against spec (self-check)
-   ↓
+   |
 5. Emit code + confidence score
 ```
 
 **Key Constraint:**
-Implementation agent must respect **existing code style**. It doesn't invent new patterns — it extends what's there.
+Implementation agent must respect **existing code style**. It doesn't invent new patterns -- it extends what's there.
 
 ---
 
@@ -129,16 +129,16 @@ Implementation agent must respect **existing code style**. It doesn't invent new
 **Process:**
 ```
 1. Compare current code to spec source_refs
-   ↓
+   |
 2. For each function/component:
    a) If code changed but spec didn't:
       - Analyze what changed
       - Infer intent (refactor, bugfix, feature)
       - Propose spec update
-      
+
    b) If spec changed but code didn't:
       - Flag for implementation
-      
+
    c) If both changed:
       - Deep analysis required
       - Flag as conflict for human review
@@ -158,11 +158,11 @@ Implementation agent must respect **existing code style**. It doesn't invent new
 **Process:**
 ```
 1. Parse the question
-   ↓
+   |
 2. Identify relevant code areas
-   ↓
+   |
 3. Read and analyze
-   ↓
+   |
 4. Synthesize answer with evidence (file:line references)
 ```
 
@@ -224,7 +224,7 @@ exploration_result:
   agent_id: "explore-v1.2.0"
   timestamp: "2026-04-04T12:00:00Z"
   target: "src/auth/login.ts"
-  
+
   specs_generated:
     - spec_id: "auth.login"
       type: "FunctionSpec"
@@ -233,15 +233,15 @@ exploration_result:
       reasoning: |
         Well-documented function with comprehensive tests.
         Clear input/output contract. Error handling explicit.
-      
+
   notes:
     - "Found 3 edge cases in test file"
     - "Function delegates to 2 database queries"
     - "Async operation with side effects (session creation)"
-    
+
   warnings:
     - "Partial type definition found in separate file"
-    
+
   cross_refs_found:
     - "References types.User (found in src/types/user.ts)"
     - "Calls db.users.findByEmail"
@@ -256,27 +256,27 @@ exploration_result:
 When human runs `blueprint review`:
 
 ```
-┌────────────────────────────────────────────────────────┐
-│ Review: auth.login (FunctionSpec)                     │
-│ Confidence: 92% | Agent: explore-v1.2.0               │
-├────────────────────────────────────────────────────────┤
-│                                                        │
-│ Generated from: src/auth/login.ts:45-120              │
-│                                                        │
-│ ┌────────────────────────────────────────────────────┐ │
-│ │ FUNCTION SIGNATURE                                 │ │
-│ │ async login(credentials, options?)                │ │
-│ │   → { token, user } | AuthError                   │ │
-│ └────────────────────────────────────────────────────┘ │
-│                                                        │
-│ Edge Cases Detected:                                  │
-│   ✓ concurrent_logins                                  │
-│   ✓ brute_force_protection                            │
-│   ✓ unicode_email                                     │
-│   ? expired_token (detected in comments, unverified)  │
-│                                                        │
-│ [a]pprove  [r]eject  [e]dit  [s]kip  [v]iew_source   │
-└────────────────────────────────────────────────────────┘
++----------------------------------------------------+
+| Review: auth.login (FunctionSpec)                  |
+| Confidence: 92% | Agent: explore-v1.2.0            |
++----------------------------------------------------+
+|                                                    |
+| Generated from: src/auth/login.ts:45-120           |
+|                                                    |
+| +------------------------------------------------+ |
+| | FUNCTION SIGNATURE                              | |
+| | async login(credentials, options?)              | |
+| |   -> { token, user } | AuthError                | |
+| +------------------------------------------------+ |
+|                                                    |
+| Edge Cases Detected:                               |
+|   [ok] concurrent_logins                           |
+|   [ok] brute_force_protection                      |
+|   [ok] unicode_email                               |
+|   [?] expired_token (detected in comments)         |
+|                                                    |
+| [a]pprove  [r]eject  [e]dit  [s]kip  [v]iew_src   |
++----------------------------------------------------+
 ```
 
 ### Feedback Loop
@@ -285,10 +285,10 @@ Human corrections improve future agent behavior:
 
 ```
 Human rejects spec:
-  → Flag reason (missing edge case, wrong type, etc.)
-  → Agent re-explores with new context
-  → Store correction in meta/feedback.yaml
-  → Use for future explorations of similar patterns
+  -> Flag reason (missing edge case, wrong type, etc.)
+  -> Agent re-explores with new context
+  -> Store correction in meta/feedback.yaml
+  -> Use for future explorations of similar patterns
 ```
 
 ---
@@ -320,23 +320,12 @@ For large changes, multiple agents collaborate:
 
 ```
 Coordinator Agent
-       │
-       ├── Exploration Agent → Maps affected code
-       │
-       ├── Spec Agent → Generates/updates specs
-       │
-       ├── Implementation Agent → Writes code
-       │
-       └── Validation Agent → Runs tests, checks alignment
+       |
+       +-- Exploration Agent -> Maps affected code
+       |
+       +-- Spec Agent -> Generates/updates specs
+       |
+       +-- Implementation Agent -> Writes code
+       |
+       +-- Validation Agent -> Runs tests, checks alignment
 ```
-
----
-
-## Open Questions
-
-1. Should agents be model-specific or pluggable (Claude, GPT-4, local)?
-2. How do we handle agent hallucinations in exploration?
-3. What's the cost model for agent-heavy operations?
-4. Should agents learn from project-specific patterns over time?
-5. How do we parallelize exploration across large codebases?
-6. What's the fallback if agent API is unavailable?
