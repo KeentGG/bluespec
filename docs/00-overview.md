@@ -137,13 +137,13 @@ The project's end goal is to follow how basic neural models are made: they follo
 
 ## Further Reading
 
-- [Spec Format](01-spec-format.md) -- Philosophy, spec kinds, and YAML schemas
-- [CLI Design](02-cli-design.md) -- Commands, configuration, workflows
-- [Agent Orchestration](03-agent-orchestration.md) -- Agent roles, context, failures
-- [Bidirectional Sync](04-bidirectional-sync.md) -- Sync algorithm, conflicts, git hooks
-- [Decisions](05-decisions.md) -- Open questions and research areas
-- [Roadmap](06-roadmap.md) -- Tasks, prototype priorities, next steps
-- [Spec Formula](07-spec-formula.md) -- The recipe for producing specs
-- [Evolution System](08-evolution-system.md) -- How formulas are trained and improved
-- [Multi-Agent Harness](09-multi-agent-harness.md) -- The agents that automate evolution
-- [Research](10-research.md) -- Scientific papers and findings
+- [Spec Format](production/00-spec-format.md) -- Philosophy, spec kinds, and YAML schemas
+- [CLI Design](production/01-cli-design.md) -- Commands, configuration, workflows
+- [Agent Orchestration](production/02-agent-orchestration.md) -- Agent roles, context, failures
+- [Bidirectional Sync](production/03-bidirectional-sync.md) -- Sync algorithm, conflicts, git hooks
+- [Decisions](01-decisions.md) -- Open questions and research areas
+- [Roadmap](02-roadmap.md) -- Tasks, prototype priorities, next steps
+- [Spec Formula](evolution/00-spec-formula.md) -- The recipe for producing specs
+- [Evolution System](evolution/01-evolution-system.md) -- How formulas are trained and improved
+- [Multi-Agent Harness](evolution/02-multi-agent-harness.md) -- The agents that automate evolution
+- [Research](evolution/03-research.md) -- Scientific papers and findings

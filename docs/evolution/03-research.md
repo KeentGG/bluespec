@@ -137,6 +137,6 @@ research_papers/
 
 ## Further Reading
 
-- [Spec Formula](07-spec-formula.md) -- What gets evolved
-- [Evolution System](08-evolution-system.md) -- The training loop
-- [Multi-Agent Harness](09-multi-agent-harness.md) -- The agents
+- [Spec Formula](evolution/00-spec-formula.md) -- What gets evolved
+- [Evolution System](evolution/01-evolution-system.md) -- The training loop
+- [Multi-Agent Harness](evolution/02-multi-agent-harness.md) -- The agents

@@ -149,7 +149,7 @@ The project will go through iterative process and evolution to create the best a
 
 ## Further Reading
 
-- [Evolution System](08-evolution-system.md) -- How formulas are evolved
-- [Multi-Agent Harness](09-multi-agent-harness.md) -- The agents that run formulas
-- [Spec Format](01-spec-format.md) -- The YAML schemas formulas produce
-- [Research](10-research.md) -- Scientific papers and findings
+- [Evolution System](evolution/01-evolution-system.md) -- How formulas are evolved
+- [Multi-Agent Harness](evolution/02-multi-agent-harness.md) -- The agents that run formulas
+- [Spec Format](production/00-spec-format.md) -- The YAML schemas formulas produce
+- [Research](evolution/03-research.md) -- Scientific papers and findings

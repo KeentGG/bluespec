@@ -202,7 +202,7 @@ The harness needs to be **resilient to imperfect agents**, not dependent on perf
 
 ## Further Reading
 
-- [Evolution System](08-evolution-system.md) -- The loop these agents execute
-- [Spec Formula](07-spec-formula.md) -- What the agents produce and evolve
-- [Agent Orchestration](03-agent-orchestration.md) -- Original agent roles and context management
-- [Research](10-research.md) -- Papers on agent evaluation, context drift, self-reflection
+- [Evolution System](evolution/01-evolution-system.md) -- The loop these agents execute
+- [Spec Formula](evolution/00-spec-formula.md) -- What the agents produce and evolve
+- [Agent Orchestration](production/02-agent-orchestration.md) -- Original agent roles and context management
+- [Research](evolution/03-research.md) -- Papers on agent evaluation, context drift, self-reflection

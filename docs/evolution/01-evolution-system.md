@@ -195,6 +195,6 @@ Each failure type requires a different mutation. Getting the diagnosis right is 
 
 ## Further Reading
 
-- [Multi-Agent Harness](09-multi-agent-harness.md) -- The agents that run the evolution loop
-- [Spec Formula](07-spec-formula.md) -- What gets evolved
-- [Research](10-research.md) -- Papers on evolutionary prompt optimization, learning from failure
+- [Multi-Agent Harness](evolution/02-multi-agent-harness.md) -- The agents that run the evolution loop
+- [Spec Formula](evolution/00-spec-formula.md) -- What gets evolved
+- [Research](evolution/03-research.md) -- Papers on evolutionary prompt optimization, learning from failure

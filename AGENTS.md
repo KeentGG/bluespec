@@ -50,20 +50,24 @@ When the user says **"checkpoint convo"** or similar (e.g., "checkpoint", "save 
 
 ```
 docs/
-  00-overview.md              -- Vision, thesis, competitive landscape
-  01-spec-format.md           -- Spec philosophy + YAML schemas
-  02-cli-design.md            -- CLI commands, config, workflows
-  03-agent-orchestration.md   -- Agent roles, context management
-  04-bidirectional-sync.md    -- Sync algorithm, conflicts, git hooks
-  05-decisions.md             -- Open questions and research areas
-  06-roadmap.md               -- Tasks, milestones, next steps
-  07-spec-formula.md          -- Spec formula concept, ecosystem taxonomy
-  08-evolution-system.md      -- Evolutionary loop, golden set, mutations
-  09-multi-agent-harness.md   -- Generator/Evaluator/Analyzer/Mutator
-  10-research.md              -- Papers, findings, insights
+  00-overview.md                -- Vision, thesis, competitive landscape
+  01-decisions.md               -- Open questions and research areas
+  02-roadmap.md                 -- Tasks, milestones, next steps
 
-conversation_sessions/        -- Full session logs (chronological)
-research_papers/              -- PDFs of scientific papers
+  evolution/                    -- Phase 1: How formulas are trained
+    00-spec-formula.md          -- Spec formula concept, ecosystem taxonomy
+    01-evolution-system.md      -- Evolutionary loop, golden set, mutations
+    02-multi-agent-harness.md   -- Generator/Evaluator/Analyzer/Mutator
+    03-research.md              -- Papers, findings, insights
+
+  production/                   -- Phase 2: How formulas are used to produce specs
+    00-spec-format.md           -- Spec philosophy + YAML schemas
+    01-cli-design.md            -- CLI commands, config, workflows
+    02-agent-orchestration.md   -- Agent roles, context management
+    03-bidirectional-sync.md    -- Sync algorithm, conflicts, git hooks
+
+conversation_sessions/          -- Full session logs (chronological)
+research_papers/                -- PDFs of scientific papers
 ```
 
 ---
