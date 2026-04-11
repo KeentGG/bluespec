@@ -45,6 +45,13 @@
 5. **Week 5:** Implementation agent (read spec -> generate code)
 6. **Week 6:** Integration test on real codebase
 
+## Evolution Prototype (Weeks 7-10)
+
+7. **Week 7:** Evaluator agent with golden set (static rubric)
+8. **Week 8:** Analyzer agent with 5 failure types + rubric gap detection
+9. **Week 9:** Mutator agent with tiered mutations (1-5)
+10. **Week 10:** Rubric discovery prototype -- test if Analyzer can identify missing evaluation criteria
+
 ---
 
 ## Key Distinctions We've Nailed Down
@@ -65,8 +72,10 @@
 
 - [ ] **Milestone 1:** Build the harness -- backbone, baseline formula, orchestrator loop, golden set structure, lessons_learned format
 - [ ] **Milestone 2:** First evolution cycle -- run against a real codebase, evaluate, diagnose, mutate
+- [ ] **Milestone 2b:** Rubric discovery v1 -- Analyzer can identify rubric gaps (diagnose only)
 - [ ] **Milestone 3:** Ecosystem specialization -- frontend/backend/mobile formulas diverge from baseline
-- [ ] **Milestone 4:** Fine-tuned judge model -- train on accumulated evaluation data
+- [ ] **Milestone 3b:** Rubric discovery v2 -- Mutator can add discovered criteria to rubric (full Self-Evolving)
+- [ ] **Milestone 4:** Fine-tuned judge model -- train on accumulated evaluation data (after rubric stabilizes)
 - [ ] **Milestone 5:** Community formulas -- share evolved formulas across project types
 
 ---
@@ -96,4 +105,6 @@
 ### E. Evaluation Deep Dive
 - Structure the golden set format
 - Design the lessons_learned.json schema
-- Define the tiered mutation operators
+- Define the tiered mutation operators (6 tiers, including rubric mutation)
+- Design rubric provenance tracking
+- Test rubric discovery mechanisms (contextual inference first)

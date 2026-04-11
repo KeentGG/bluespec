@@ -60,6 +60,13 @@
 ### New Insights to Incorporate
 
 1. **Adaptive rubrics (AdaRubric).** Evaluation criteria should be generated per project type, not fixed. The formula should also produce the rubric for evaluating its own output.
+   
+   **Three mechanisms of rubric discovery** (see [concepts/rubric-discovery.md](../../concepts/rubric-discovery.md)):
+   - **External Discovery** (EvalAgents [53]): Query Generator plans web searches to discover implicit criteria from domain sources
+   - **Contextual Inference** (AGENT-X [45]): Adaptive Router infers domain context and generates appropriate rubrics dynamically
+   - **Comparative Learning** (OnlineRubrics [55]): Learn evaluation criteria from pairwise comparisons using RL
+   
+   **Key insight:** The rubric itself evolves *during* evaluation, not just before it. This is the hallmark of Self-Evolving Agent-as-a-Judge.
 
 2. **Preference pairs (DPO insight from RLHF).** "Which spec is better?" is cheaper than full scoring. The evaluator could compare two spec drafts instead of producing detailed scores. Lower effort for human, easier for evaluator agent.
 

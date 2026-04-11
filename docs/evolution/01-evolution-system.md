@@ -111,6 +111,9 @@ When the formula fails, mutations have escalating severity. If a simple prompt f
 | 3 | Parent guideline | Re-word base instructions |
 | 4 | Format/schema changes | Add block type, change YAML schema |
 | 5 | Tool change / overall formula | Add explicit instruction in base guidelines, change tools used |
+| 6 | Rubric mutation | Add new evaluation dimension, modify rubric weights, discover new criteria |
+
+**Tier 6 (Rubric Mutation)** is for Self-Evolving stage: the formula not only changes how it evaluates, but *what* it evaluates. This happens when the Analyzer identifies a "rubric gap failure"—critical behaviors that weren't in the evaluation criteria.
 
 The rule: if tier 1 failed, don't try tier 1 again. Escalate to tier 2. If tier 2 failed, escalate to tier 3. This is the "insanity prevention" -- never teach the same fault with the same teaching method since it's called insanity.
 
@@ -132,6 +135,16 @@ lessons_learned:
     result: PASSED - conditional visibility caught
     teaching_method: "verification_crosscheck"
     works_on: ["conditional_rendering", "feature_flags", "permission_gating"]
+
+  - failure_type: "rubric_gap_failure"
+    scenario: "Agent didn't document conditional routing in auth flow"
+    first_tried: "Add prompt: look for conditional redirects"
+    result: FAILED - still missed it
+    second_tried: "Add 'conditional_flow_documentation' to evaluation rubric"
+    result: PASSED - now checks for conditional routing
+    teaching_method: "rubric_mutation"
+    works_on: ["conditional_routing", "state_dependent_behavior", "feature_flags"]
+    discovered_criterion: "conditional_flow_documentation"
 
   - failure_type: "search_failure"
     scenario: "Agent didn't explore shared utility module"
@@ -188,8 +201,11 @@ The analyzer must identify WHY the formula missed something:
 - **Recognition failure** -- saw the code but didn't understand the behavior
 - **Format failure** -- understood it but the spec schema had no place to put it
 - **Prompt failure** -- instructions didn't ask for this kind of behavior
+- **Rubric gap failure** -- the spec is complete by current rubric standards, but misses critical behavior that should have been in the rubric
 
 Each failure type requires a different mutation. Getting the diagnosis right is what makes the evolutionary loop converge instead of randomly flailing.
+
+**Rubric gap failure** is unique: it means the formula "succeeded" (produced a valid spec) but the evaluation criteria themselves were incomplete. The fix isn't changing how we find behaviors—it's adding new criteria to the rubric.
 
 ---
 

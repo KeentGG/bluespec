@@ -57,11 +57,30 @@ A formula produces more than just spec files:
 formula_output = {
   spec_format: { ... },      # what specs look like
   steps: [ ... ],            # how to produce them
-  evaluation_rubric: { ... } # how to judge them (generated, not fixed)
+  evaluation_rubric: {      # how to judge them (evolves, not fixed)
+    static_criteria: [...],  # from golden set (seed)
+    dynamic_criteria: [...], # discovered during evaluation
+    discovery_mechanism: "contextual_inference", # or external/comparative
+    provenance: [...]        # track what was discovered, when, why
+  }
 }
 ```
 
 The evaluation rubric itself should be generated per project type, not hardcoded. The formula doesn't just produce specs -- it also produces the rubric for evaluating those specs.
+
+**Clarification: Dynamic vs Static Rubric Generation**
+
+There are two interpretations of "generated per project type":
+
+1. **Static generation** (Procedural stage): Rubric is created once when the formula is initialized, then fixed
+2. **Dynamic generation** (Self-Evolving stage): Rubric evolves *during* evaluation based on what the agent discovers
+
+Blueprint Mode targets **dynamic rubric generation** through three mechanisms:
+- **External Discovery**: Search domain sources for criteria (like EvalAgents)
+- **Contextual Inference**: Infer appropriate criteria from codebase analysis (like AGENT-X)
+- **Comparative Learning**: Learn from pairwise spec comparisons (like OnlineRubrics)
+
+The rubric is not just produced by the formula—it is a **first-class output** that evolves alongside the specs.
 
 ---
 

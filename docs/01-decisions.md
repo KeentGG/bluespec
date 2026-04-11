@@ -283,6 +283,26 @@ Agent-heavy workflows = API costs.
 
 ## Evolution System Questions
 
+### Rubric Discovery Strategy
+
+**Decision:** Which rubric discovery mechanism(s) should we implement?
+
+**Options:**
+1. **External Discovery** - Web search for domain criteria (like EvalAgents)
+2. **Contextual Inference** - Infer criteria from codebase analysis (like AGENT-X)
+3. **Comparative Learning** - Learn from pairwise comparisons (like OnlineRubrics)
+4. **Hybrid** - Combine multiple mechanisms
+
+**Considerations:**
+- External requires search tool access, may introduce latency
+- Contextual is self-contained but limited to code patterns
+- Comparative requires human/Oracle feedback loop
+- Hybrid is most powerful but most complex
+
+**Status:** Leaning toward **Contextual first, Comparative second, External later**
+
+---
+
 ### Agent Lifecycle
 
 Are agents cleared on every evolution cycle, or only after they reached some number of cycles? We lean toward clearing every cycle with full documentation in persistent state files. We document because agents have limited context -- we can't keep the same agent working indefinitely.
@@ -291,9 +311,21 @@ Are agents cleared on every evolution cycle, or only after they reached some num
 
 Enough to measure recall, but not so many it's unsustainable for the human curating them.
 
+**Update with Rubric Discovery:** Start with minimal seed (10-20 behaviors), let the system discover additional criteria dynamically. Human effort shifts from comprehensive curation to validation of discovered criteria.
+
 ### How Does the Mutator Know What "Different" Means?
 
 If tier 1 (prompt change) failed, what's the systematic way to try tier 2 (step change)? The mutator needs a structured exploration of the mutation space, not random changes.
+
+**Resolution:** Tiered mutation system with 6 tiers (see [Evolution System](evolution/01-evolution-system.md)):
+1. Prompt tweaks
+2. Step management
+3. Parent guideline
+4. Format/schema changes
+5. Tool change
+6. **Rubric mutation** (new)
+
+The "insanity prevention" rule: never try the same teaching method on the same failure type twice.
 
 ### Who Orchestrates?
 
@@ -302,6 +334,8 @@ Is the orchestrator itself an agent, or is it a simpler state machine / script? 
 ### When to Introduce Fine-Tuned Judge?
 
 After how many evolution cycles do we have enough data to train a dedicated evaluator model? Research shows fine-tuned judges achieve 90%+ human alignment vs ~70% for prompted judges.
+
+**Update with Rubric Discovery:** Wait until the rubric stabilizes—once we know *what* to evaluate (discovered criteria), then train the judge on *how* to evaluate it. Training on a moving rubric (still discovering criteria) wastes data.
 
 ### Formulas: Universal vs Ecosystem-Specific
 

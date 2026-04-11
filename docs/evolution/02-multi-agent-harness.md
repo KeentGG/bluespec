@@ -32,38 +32,75 @@ The generator follows the formula's steps: explore -> analyze -> draft -> verify
 
 Checks specs against golden behaviors (recall) and spot-checks for hallucinations (precision).
 
-**Inputs:** generated specs, golden set, source code
-**Outputs:** { hits: [], misses: [], false_positives: [] }
+**Inputs:** generated specs, golden set, source code, evaluation rubric
+**Outputs:** { hits: [], misses: [], false_positives: [], rubric_gaps: [] }
 
-The evaluator also scores:
+The evaluator scores:
 - Coverage: does the spec set cover all exported functions/components?
 - Completeness: does each spec have inputs, outputs, edge cases, error handling?
 - Accuracy: if you generate code from the spec, does it match the original?
 - Consistency: do cross-references resolve? No contradictions?
+- **Rubric completeness: does the current rubric cover all important behaviors in this codebase?**
+
+**Rubric Discovery Mode:** When enabled, the Evaluator identifies behaviors in the code that aren't captured by the current evaluation rubric (potential rubric gaps). These feed into the Analyzer for rubric mutation decisions.
 
 ### Analyzer Agent
 
-Reads misses + false_positives. Diagnoses WHY the formula missed this.
+Reads misses + false_positives + rubric_gaps. Diagnoses WHY the formula missed this.
 
-**Inputs:** evaluation results, execution trace, formula
-**Outputs:** { diagnosis: "...", suggested_mutation: "..." }
+**Inputs:** evaluation results, execution trace, formula, current rubric
+**Outputs:** { diagnosis: "...", suggested_mutation: "...", rubric_mutation: "..." }
 
 The analyzer diagnoses failure types:
 - Was it a **search failure**? (didn't look in the right files)
 - Was it a **recognition failure**? (saw the code but didn't understand the behavior)
 - Was it a **format failure**? (understood it but the spec schema had no place to put it)
 - Was it a **prompt failure**? (instructions didn't ask for this kind of behavior)
+- Was it a **rubric gap failure**? (the spec is valid but the evaluation criteria missed a critical behavior type)
 
 Each failure type requires a different mutation. Getting the diagnosis right is what makes the evolutionary loop converge.
+
+**Rubric Gap Analysis:** When the Evaluator flags potential rubric gaps, the Analyzer determines:
+1. Is this a genuinely important behavior pattern? (not noise)
+2. Should it be added to the rubric as a new criterion?
+3. What teaching method should be used to incorporate it?
+
+**Output for rubric mutations:**
+```yaml
+rubric_mutation:
+  action: "add_criterion"
+  criterion_name: "conditional_flow_documentation"
+  description: "Document all conditional routing based on user state"
+  applies_to: ["auth flows", "payment flows", "multi-step wizards"]
+  teaching_method: "add_verification_step"
+```
 
 ### Mutator Agent
 
 Takes the suggested mutation. Produces a new candidate formula.
 
-**Inputs:** current formula, diagnosis, lessons_learned
-**Outputs:** new candidate formula
+**Inputs:** current formula, diagnosis, lessons_learned, rubric_mutation (optional)
+**Outputs:** new candidate formula, updated rubric
 
 The mutator also checks the teaching method tracker: has this type of fix been tried on this type of failure before? If yes, try something different.
+
+**Rubric Mutation Handling:**
+When the Analyzer suggests a rubric mutation, the Mutator:
+1. Updates the evaluation rubric (add/modify/remove criteria)
+2. Updates the formula to include verification steps for new criteria
+3. Records the rubric provenance (what was discovered, when, why)
+4. Tests the new rubric against a validation set to ensure it doesn't break existing evaluations
+
+**Rubric Provenance Tracking:**
+```yaml
+rubric_provenance:
+  - criterion: "conditional_flow_documentation"
+    discovered_at: "2026-04-11T10:00:00Z"
+    discovery_method: "rubric_gap_analysis"
+    triggered_by: "auth.login spec review"
+    teaching_method: "add_verification_step"
+    validation_result: "passed"
+```
 
 ---
 
