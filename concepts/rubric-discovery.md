@@ -1,6 +1,6 @@
 # Rubric Discovery
 
-> The Self-Evolving capability where agents autonomously formulate and refine evaluation criteria, rather than operating against fixed human-defined rubrics.
+> The Self-Evolving capability where agents discover possible evaluation criteria, but only promote them through a governed lifecycle.
 
 **Source:** Analysis of "A Survey on Agent-as-a-Judge" (You et al., 2026) [research_papers/04-agent-as-judge-survey-2026.pdf]
 
@@ -8,14 +8,50 @@
 
 ## Core Concept
 
-**Traditional evaluation** uses fixed criteria defined upfront by humans. The agent's job is to measure outputs against these predetermined standards.
+**Traditional evaluation** uses fixed criteria defined upfront by humans.
 
-**Rubric Discovery** enables agents to:
-- **Discover what to evaluate** dynamically based on the evaluand
-- **Formulate evaluation criteria** appropriate to the specific context
-- **Refine rubrics** as they encounter new types of inputs
+**Rubric Discovery** adds a second capability:
+- discover what else may need to be evaluated
+- formulate candidate criteria appropriate to the codebase or project type
+- refine those candidates over time
 
-> *"Unlike general agents focused on task completion, Judge Agents have the distinct capability to autonomously formulate and refine rubrics, representing a hallmark of the Self-Evolving stage."*
+The key Blueprint Mode interpretation is stricter than the broad research framing:
+
+> discovered criteria are **hypotheses first**, not live scoring rules.
+
+That distinction matters. Without it, the evaluator can change the test after seeing the answer.
+
+---
+
+## Why Govern Discovery Instead of Updating the Rubric Immediately
+
+Research on self-evolving judges is useful, but Blueprint Mode cannot safely use same-run live rubric mutation.
+
+### 1. Same-run updates shift the goalpost
+
+If the evaluator discovers a criterion and immediately scores the current formula with it, the system is redefining success after the output already exists.
+
+### 2. It destroys comparability across runs
+
+Two formulas cannot be compared fairly if they were graded under different rubrics inside the same experiment window.
+
+### 3. It enables self-justifying criteria
+
+A weak formula could indirectly cause the system to invent criteria that reward its own style instead of truthfulness.
+
+### 4. Many “rubric gaps” are not real rubric gaps
+
+What looks like a missing criterion is often:
+- search failure
+- recognition failure
+- prompt failure
+- format failure
+
+Rubric mutation should be the late diagnosis, not the convenient one.
+
+### 5. Good criteria need repeated evidence
+
+If a criterion is real, it should recur across multiple runs or adjacent projects. One run is too weak a basis for promotion.
 
 ---
 
@@ -26,17 +62,13 @@
 **Approach:** Query Generator plans web searches to discover implicit evaluation criteria.
 
 **How it works:**
-- Agent searches external sources for domain-specific standards
-- Discovers criteria like "vivid sensory details" for travel writing or "prop validation" for React components
-- Incorporates discovered criteria into the evaluation rubric
+- search external sources for domain standards
+- discover criteria that may matter for a given project shape
+- convert findings into candidate criteria
 
-**Example:**
-```
-Input: Travel blog post to evaluate
-Action: Search "what makes good travel writing"
-Discovered criteria: ["vivid sensory details", "practical tips", "personal narrative arc"]
-Rubric updated: Now evaluates against these discovered criteria
-```
+**Blueprint Mode use:**
+- best used as a weak prior or seed source
+- should not directly activate a new criterion without internal evidence from code/spec evaluation
 
 **Paper:** Wadhwa et al., "EvalAgents: Discovering implicit evaluation criteria from the web" (2025)
 
@@ -44,25 +76,16 @@ Rubric updated: Now evaluates against these discovered criteria
 
 ### 2. Contextual Inference (AGENT-X [45])
 
-**Approach:** Adaptive Router infers domain context and generates appropriate evaluation guidelines.
+**Approach:** Infer domain context and generate appropriate evaluation guidelines.
 
 **How it works:**
-- Router agent analyzes the input to detect domain/type
-- Dynamically selects or generates rubric appropriate to that domain
-- Different rubrics for different contexts (React components vs API docs vs math solutions)
+- analyze the evaluand to detect project type or behavior shape
+- propose criteria that match that context
+- emit candidate criteria with scope and rationale
 
-**Example:**
-```
-Input: Code file to evaluate
-Analysis: Detects React component with hooks
-Generated rubric: ["prop validation", "hook usage", "accessibility attributes"]
-
-Input: API documentation
-Analysis: Detects endpoint documentation
-Generated rubric: ["endpoint coverage", "example completeness", "error code documentation"]
-```
-
-**Key capability:** *"Dynamically selects the most relevant base agents based on intermediate analysis results"*
+**Blueprint Mode use:**
+- likely the most useful first mechanism
+- grounded in actual code and spec misses rather than outside theory
 
 **Paper:** Li et al., "Agent-x: Adaptive guideline-based evaluation" (ACL Findings 2025)
 
@@ -70,115 +93,154 @@ Generated rubric: ["endpoint coverage", "example completeness", "error code docu
 
 ### 3. Comparative Learning (OnlineRubrics [55])
 
-**Approach:** Learn evaluation criteria from pairwise comparisons using reinforcement learning.
+**Approach:** Learn evaluation criteria from pairwise comparisons.
 
 **How it works:**
-- Present agent with pairwise comparisons (A vs B)
-- Human or oracle indicates which is better
-- Agent infers implicit criteria from comparison patterns
-- Rubric evolves to detect reward hacking (models gaming the metric)
+- compare spec A vs spec B
+- determine which is better
+- infer latent criteria from repeated preferences
+- convert those criteria into candidate rubric updates
 
-**Example:**
-```
-Comparison: Code solution A vs B
-Feedback: B is better
-Inference: B has more complete error handling
-Learned criterion: "error handling completeness"
-
-Next evaluation: Check error handling completeness
-```
-
-**Key innovation:** The rubric itself is a learned parameter, not a fixed prompt.
+**Blueprint Mode use:**
+- useful once enough run history exists
+- especially good for surfacing criteria humans find easier to compare than score directly
 
 **Paper:** Rezaei et al., "Online rubrics elicitation from pairwise comparisons" (2025)
 
 ---
 
-## Comparison: Fixed vs. Discovered Rubrics
+## Comparison: Fixed vs. Governed Discovery
 
-| Dimension | Fixed Rubric (Traditional) | Discovered Rubric (Self-Evolving) |
-|-----------|---------------------------|-----------------------------------|
-| **Source of criteria** | Human-defined upfront | Agent-discovered or inferred |
-| **Adaptability** | Static across all evaluations | Dynamic per evaluand |
-| **Coverage** | Limited to human foresight | Expands to cover discovered patterns |
-| **Domain specificity** | Generic or manually specialized | Automatically context-appropriate |
-| **Evolution** | Manual updates only | Continuous learning from comparisons |
+| Dimension | Fixed Rubric | Governed Rubric Discovery |
+|-----------|--------------|---------------------------|
+| **Source of criteria** | Human-defined upfront | Human-seeded + agent-proposed |
+| **Adaptability** | Static | Adaptive, but versioned |
+| **Scoring stability** | High | High if frozen per batch |
+| **Coverage growth** | Limited to human foresight | Expands through evidence-backed discovery |
+| **Failure risk** | Misses unseen patterns | Risks bloat/drift without governance |
 
 ---
 
 ## Implications for Blueprint Mode
 
-### Current State (Fixed Rubric)
+### Current State
 
-Blueprint Mode uses a **golden set**—human-provided behaviors that serve as ground truth:
+Blueprint Mode already has a strong anchor:
 
 ```yaml
 evaluation:
   criteria:
-    - coverage: "does spec cover all exported functions?"
-    - completeness: "does each spec have inputs, outputs, edge cases?"
-    - accuracy: "if you generate code from spec, does it match original?"
-    - consistency: "do cross-references resolve?"
+    - coverage: does spec cover all exported functions/components?
+    - completeness: does each spec have inputs, outputs, edge cases?
+    - accuracy: if code were generated from the spec, would it match the original?
+    - consistency: do cross-references resolve?
 ```
 
-The **what** is hardcoded. Evolution only optimizes **how** to achieve these metrics.
+The golden set and fixed rubric establish what official fitness means.
+
+### Governed Evolution
+
+With rubric discovery enabled, the system can notice patterns the seed rubric missed.
+
+Example:
+1. Evaluator sees a spec for an auth flow marked “complete” by the active rubric
+2. Analyzer notices the spec omitted conditional redirect behavior tied to user state
+3. System records a **candidate criterion** such as `conditional_flow_documentation`
+4. Future runs test it in shadow mode
+5. Only after repeated support does it enter an official rubric snapshot
+
+The rubric evolves, but on a slower, governed cadence.
 
 ---
 
-### Potential Evolution (Dynamic Rubric Discovery)
+## What Rubric Discovery Should Output
 
-**Scenario:** Generator produces a spec for a complex authentication flow with conditional redirects.
+Rubric discovery should output **structured candidate artifacts**, not immediate rubric edits.
 
-**Current approach:**
-- Evaluator checks against fixed criteria
-- May miss that "conditional routing" is a critical pattern worth documenting
+### Candidate Criterion Proposal
 
-**With Rubric Discovery:**
-1. **Analyzer detects:** "This auth flow has conditional redirects based on user state"
-2. **Analyzer infers:** "Conditional routing is a critical pattern that should be in the rubric"
-3. **Mutator updates:** Formula now includes `conditional_flow_documentation` as a criterion
-4. **Next run:** Evaluator checks whether specs document conditional behavior
+```yaml
+candidate_criteria:
+  - id: conditional_flow_documentation
+    description: Specs should capture routing or behavior changes caused by runtime state
+    source: contextual_inference
+    rationale: Current rubric marked auth spec complete despite missing user-state redirect logic
+    confidence: 0.81
+    recommended_state: probation
+```
 
-**The rubric itself evolves** based on what the codebase actually contains.
+### Discovery Summary
+
+```yaml
+rubric_discovery_summary:
+  run_id: run_014
+  total_candidates: 3
+  high_confidence: 1
+  rejected_as_noise: 1
+  reclassified_as_recognition_failure: 1
+```
+
+### Reclassification Output
+
+```yaml
+reclassified_findings:
+  - finding_id: gap_022
+    original_label: suspected_rubric_gap
+    final_label: recognition_failure
+    reason: Active rubric already covered the behavior class; the generator failed to interpret it
+```
+
+### Promotion Recommendation
+
+```yaml
+promotion_recommendation:
+  criterion_id: conditional_flow_documentation
+  recommendation: promote
+  reasons:
+    - repeated support across multiple runs
+    - positive holdout impact
+    - low overlap with current active criteria
+```
 
 ---
 
 ## New Failure Mode: Rubric Gap
 
-With Rubric Discovery, the Analyzer gains a new failure category:
+Rubric discovery adds a new failure type, but it should be used carefully.
 
-| Current Failure Types | New Failure Type |
-|----------------------|------------------|
-| Search failure | **Rubric gap failure** |
-| Recognition failure | "The spec is complete by current rubric standards, |
-| Format failure | but misses critical behavior that should have been |
-| Prompt failure | in the rubric" |
+**Rubric gap failure** means:
+
+> the spec is acceptable by current rubric standards, yet still misses an important behavior class that the rubric itself should have penalized.
+
+This should only be diagnosed after ruling out lower-tier failures.
 
 ---
 
 ## New Mutation Type: Rubric Mutation
 
-The Mutator Agent gains a new mutation category:
+Rubric mutation is the act of adding, modifying, merging, weighting, or retiring criteria.
 
-| Current Mutations | New Mutation |
-|-------------------|--------------|
-| Prompt changes | **Rubric mutation** |
-| Step insertion | Add/remove/modify evaluation dimensions |
-| Step reordering | Based on discovered patterns |
-| Format changes | |
-| Tool changes | |
+In Blueprint Mode, rubric mutation should happen through lifecycle states:
+
+```text
+candidate -> probation -> active -> deprecated/rejected
+```
+
+Not through direct same-run replacement.
 
 ---
 
 ## Key Insight
 
-The Self-Evolving stage isn't just about *improving how you evaluate*—it's about *discovering what to evaluate in the first place*.
+The Self-Evolving stage is not just about improving **how** the system evaluates.
 
-| | Fixed Rubric | Discovered Rubric |
-|---|---|---|
-| **Initial state** | Human defines what matters | Minimal or no human criteria |
-| **Evolution target** | Learn how to find those things | Learn both *what matters* and *how to find it* |
-| **Human role** | Curate golden sets | Provide pairwise feedback or minimal seed |
+It is also about discovering **what else matters**.
+
+But the moment that discovery affects official scoring, it becomes part of governance, not just research.
+
+That is why Blueprint Mode needs both:
+- the research idea of dynamic rubric discovery
+- the operational discipline of frozen snapshots, provenance, and delayed promotion
 
 ---
 
@@ -187,7 +249,8 @@ The Self-Evolving stage isn't just about *improving how you evaluate*—it's abo
 - **Procedural Agent-as-a-Judge** - Fixed workflows, predetermined rubrics
 - **Reactive Agent-as-a-Judge** - Adaptive routing, conditional rubric selection
 - **Self-Evolving Agent-as-a-Judge** - Autonomous rubric formulation and refinement
-- **Golden Set** - Human-provided ground truth behaviors (Blueprint Mode's current approach)
+- **Golden Set** - Human-provided ground truth behaviors
+- **Rubric Lifecycle** - The governed promotion path from candidate criterion to official scoring
 - **Teaching Method Tracker** - Records which fixes work for which failure types
 
 ---
@@ -203,4 +266,5 @@ The Self-Evolving stage isn't just about *improving how you evaluate*—it's abo
 
 **Status:** Research synthesis  
 **Created:** 2026-04-11  
-**Related:** [Spec Formula](../docs/evolution/00-spec-formula.md), [Evolution System](../docs/evolution/01-evolution-system.md), [Multi-Agent Harness](../docs/evolution/02-multi-agent-harness.md)
+**Updated:** 2026-04-15  
+**Related:** [Rubric Lifecycle](../docs/evolution/04-rubric-lifecycle.md), [Spec Formula](../docs/evolution/00-spec-formula.md), [Evolution System](../docs/evolution/01-evolution-system.md), [Multi-Agent Harness](../docs/evolution/02-multi-agent-harness.md)
