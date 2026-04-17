@@ -1,0 +1,14 @@
+id: backend-seed
+version: v001
+ecosystem: backend
+behavior_shapes:
+  - auth_flow
+  - request_pipeline
+compatible_rubric_snapshots:
+  - v001
+extends: formulas/seed/universal.yaml
+specializations:
+  - request_response_contracts
+  - auth_and_permission_checks
+  - validation_and_error_modes
+  - integration_boundary_capture

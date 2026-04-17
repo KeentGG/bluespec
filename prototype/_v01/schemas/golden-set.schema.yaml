@@ -1,0 +1,30 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: GoldenSet
+type: object
+required:
+  - project_id
+  - behaviors
+properties:
+  project_id:
+    type: string
+  ecosystem:
+    type: string
+  behaviors:
+    type: array
+    items:
+      type: object
+      required: [id, description, priority]
+      properties:
+        id:
+          type: string
+        description:
+          type: string
+        priority:
+          type: string
+          enum: [high, medium, low]
+        category:
+          type: string
+        evidence_refs:
+          type: array
+          items:
+            type: string

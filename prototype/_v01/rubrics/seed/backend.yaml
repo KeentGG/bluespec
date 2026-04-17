@@ -1,0 +1,16 @@
+rubric_id: backend-seed
+version: v001
+extends: rubrics/seed/universal.yaml
+criteria:
+  - id: request_contract_documentation
+    status: active
+    description: specs describe request and response expectations
+    weight: 1.0
+  - id: auth_and_permission_logic
+    status: active
+    description: specs capture auth, permission checks, and gating behavior
+    weight: 1.0
+  - id: failure_mode_documentation
+    status: active
+    description: specs capture error paths, validation failures, and integration faults
+    weight: 0.9

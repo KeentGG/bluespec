@@ -1,0 +1,12 @@
+id: conditional_flow_documentation
+status: active
+description: Specs should capture user-state-driven redirects and gated transitions
+source: contextual_inference
+rationale: Seed rubric misses state-gated redirect behavior.
+confidence: 0.81
+recommended_state: probation
+discovered_in_run: run-0001
+created_at: 2026-04-16T09:52:07.631Z
+evidence_refs:
+  - src/routes/project-edit.tsx
+  - specs/auth.login.yaml

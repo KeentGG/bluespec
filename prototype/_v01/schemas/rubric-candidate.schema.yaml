@@ -1,0 +1,33 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: RubricCandidate
+type: object
+required:
+  - id
+  - status
+  - description
+  - source
+  - discovered_in_run
+properties:
+  id:
+    type: string
+  status:
+    type: string
+    enum: [candidate, probation, active, deprecated, rejected]
+  description:
+    type: string
+  source:
+    type: string
+  rationale:
+    type: string
+  confidence:
+    type: number
+  recommended_state:
+    type: string
+  discovered_in_run:
+    type: string
+  created_at:
+    type: string
+  evidence_refs:
+    type: array
+    items:
+      type: string

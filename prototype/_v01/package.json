@@ -1,0 +1,25 @@
+{
+  "name": "blueprint-evolution-prototype-v01",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Thin Node CLI for the Blueprint Mode evolution prototype",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "init-run": "node scripts/cli.js init_run",
+    "freeze-inputs": "node scripts/cli.js freeze_inputs",
+    "validate": "node scripts/cli.js validate_artifacts",
+    "validate-seed-rubrics": "node scripts/cli.js validate_seed_rubrics",
+    "register-rubric-candidate": "node scripts/cli.js register_rubric_candidate",
+    "approve-rubric-candidate": "node scripts/cli.js approve_rubric_candidate",
+    "reject-rubric-candidate": "node scripts/cli.js reject_rubric_candidate",
+    "promote-rubric-snapshot": "node scripts/cli.js promote_rubric_snapshot",
+    "register-formula-candidate": "node scripts/cli.js register_formula_candidate",
+    "advance-formula": "node scripts/cli.js advance_formula"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "yaml": "^2.8.1"
+  }
+}

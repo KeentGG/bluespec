@@ -1,0 +1,15 @@
+project_id: sample-project
+ecosystem: frontend
+behaviors:
+  - id: auth-conditional-redirect
+    description: editing project routes through a gated edit flow only when agreement state is satisfied
+    priority: high
+    category: conditional_flow
+    evidence_refs:
+      - src/routes/project-edit.tsx
+  - id: download-button-visibility
+    description: download button becomes visible only after report progress reaches the download stage
+    priority: high
+    category: state_dependent_visibility
+    evidence_refs:
+      - src/components/ReportActions.tsx

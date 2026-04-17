@@ -1,0 +1,1 @@
+{"failure_type":"recognition_failure","scenario":"conditional UI visibility missed","teaching_method":"verification_crosscheck","result":"PASSED","works_on":["conditional_rendering","feature_flags","permission_gating"]}

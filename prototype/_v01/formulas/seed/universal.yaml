@@ -1,0 +1,40 @@
+id: universal-seed
+version: v001
+ecosystem: universal
+behavior_shapes: []
+compatible_rubric_snapshots:
+  - v001
+steps:
+  - id: explore
+    name: Explore structure and dependencies
+    prompt: prompts/generator.md
+    outputs:
+      - trace
+      - exploration_notes
+  - id: analyze
+    name: Analyze discovered behavior
+    outputs:
+      - behavior_map
+  - id: draft
+    name: Draft specs
+    outputs:
+      - spec_set
+  - id: verify
+    name: Verify schema and reference consistency
+    outputs:
+      - verification_report
+  - id: cross_ref
+    name: Link related specs and evidence
+    outputs:
+      - reference_map
+validations:
+  - schema_valid
+  - references_resolve
+  - no_internal_contradictions
+mutation_tiers:
+  - prompt_tweak
+  - step_management
+  - parent_guideline
+  - schema_change
+  - tool_change
+  - rubric_mutation

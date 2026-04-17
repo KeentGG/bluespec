@@ -1,0 +1,7 @@
+policy:
+  append_only: true
+  reuse_successful_methods: true
+  avoid_repeating_failed_method_on_same_failure: true
+files:
+  learned: lessons/learned.jsonl
+  failed: lessons/failed.jsonl

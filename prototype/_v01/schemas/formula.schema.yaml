@@ -1,0 +1,94 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: Formula
+type: object
+required:
+  - id
+  - version
+  - ecosystem
+oneOf:
+  - required:
+      - steps
+      - validations
+  - required:
+      - extends
+properties:
+  id:
+    type: string
+  version:
+    type: string
+  ecosystem:
+    type: string
+  extends:
+    type: string
+  parent:
+    type: string
+    description: "Reference to parent formula for derived (fine-tuned) formulas"
+  fine_tune_run:
+    type: string
+    description: "The fine-tune run that produced this derived formula"
+  fine_tuned_criteria:
+    type: array
+    description: "Project-specific criteria added or weight-adjusted during fine-tuning"
+    items:
+      type: object
+      required: [id, weight, source]
+      properties:
+        id:
+          type: string
+        weight:
+          type: number
+        source:
+          type: string
+        reason:
+          type: string
+  suppressed_criteria:
+    type: array
+    description: "Parent criteria suppressed for this project"
+    items:
+      type: object
+      required: [id, reason]
+      properties:
+        id:
+          type: string
+        reason:
+          type: string
+  inherited_criteria:
+    type: string
+    description: "How to handle parent criteria not explicitly overridden (default: parent)"
+    enum: [parent, none]
+  behavior_shapes:
+    type: array
+    items:
+      type: string
+  compatible_rubric_snapshots:
+    type: array
+    items:
+      type: string
+  steps:
+    type: array
+    items:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        prompt:
+          type: string
+        outputs:
+          type: array
+          items:
+            type: string
+  validations:
+    type: array
+    items:
+      type: string
+  mutation_tiers:
+    type: array
+    items:
+      type: string
+  specializations:
+    type: array
+    items:
+      type: string

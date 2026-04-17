@@ -1,0 +1,43 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: SeedRubric
+description: Baseline rubric definitions used to bootstrap evaluation. Stored in rubrics/seed/.
+type: object
+required:
+  - rubric_id
+  - version
+  - criteria
+properties:
+  rubric_id:
+    type: string
+  version:
+    type: string
+  extends:
+    type: string
+    description: "Optional parent seed rubric to inherit criteria from"
+  criteria:
+    type: array
+    items:
+      type: object
+      required:
+        - id
+        - status
+        - description
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [active, deprecated]
+          description: "Seed criteria are always active; deprecated is a terminal state"
+        description:
+          type: string
+        weight:
+          type: number
+        scope:
+          type: object
+          description: "Optional ecosystem or project scope for this criterion"
+          properties:
+            ecosystem:
+              type: string
+            project:
+              type: string

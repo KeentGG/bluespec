@@ -1,0 +1,1 @@
+{"failure_type":"prompt_failure","scenario":"agent missed conditional routing after prompt wording change","teaching_method":"prompt_reword_only","result":"FAILED","works_on":["conditional_routing"]}

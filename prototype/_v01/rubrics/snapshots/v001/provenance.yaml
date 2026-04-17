@@ -1,0 +1,8 @@
+rubric_version: v001
+created_for: prototype bootstrap
+promotion_notes:
+  - initial frozen snapshot built from universal seed rubric only
+  - frontend and backend seeds remain available for project-specific merges later
+guardrails:
+  - same-run candidate activation is forbidden
+  - candidate and probationary criteria are excluded from official scoring

@@ -1,0 +1,11 @@
+rubric_version: v002
+created_at: 2026-04-17T04:32:25.798Z
+parent_version: v001
+promoted_candidates:
+  - id: conditional_flow_documentation
+    description: Specs should capture user-state-driven redirects and gated transitions
+    from_status: probation
+    to_status: active
+governance_notes: First governed rubric promotion.
+  conditional_flow_documentation promoted from probation after evidence review.
+guardrails: []

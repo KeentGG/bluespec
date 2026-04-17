@@ -1,0 +1,14 @@
+id: frontend-seed
+version: v001
+ecosystem: frontend
+behavior_shapes:
+  - stateful_ui
+  - conditional_flow
+compatible_rubric_snapshots:
+  - v001
+extends: formulas/seed/universal.yaml
+specializations:
+  - component_state_tracking
+  - conditional_rendering_checks
+  - accessibility_review
+  - layout_intent_capture

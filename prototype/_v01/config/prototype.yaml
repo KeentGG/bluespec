@@ -1,0 +1,27 @@
+name: evolution-prototype-v01
+workspace_root: prototype/_v01
+status: scaffolded
+goals:
+  - build persistent-file backbone for evolution loop
+  - support diagnose-only rubric discovery first
+  - keep provider-neutral integration boundaries
+scoring:
+  official_channel:
+    uses_frozen_rubric_snapshot: true
+    uses_golden_set: true
+    allows_same_run_rubric_updates: false
+  shadow_channel:
+    enabled: false
+    reserved_for_candidate_and_probationary_criteria: true
+providers:
+  default: local
+  supported:
+    - local
+    - opencode
+    - hermes
+hooks:
+  enabled: false
+  policy: hooks may observe or enrich but must not bypass lifecycle enforcement
+state:
+  current_file: state/current.yaml
+  queue_file: state/queue.yaml

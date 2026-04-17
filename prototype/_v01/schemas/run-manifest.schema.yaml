@@ -1,0 +1,30 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: RunManifest
+type: object
+required:
+  - run_id
+  - formula_ref
+  - rubric_snapshot_ref
+  - golden_set_ref
+  - project_ref
+properties:
+  run_id:
+    type: string
+  formula_ref:
+    type: string
+  rubric_snapshot_ref:
+    type: string
+  golden_set_ref:
+    type: string
+  project_ref:
+    type: string
+  mode:
+    type: string
+    enum: [official, shadow, compare]
+  lifecycle_policy:
+    type: object
+    properties:
+      same_run_rubric_activation:
+        type: boolean
+      official_uses_shadow_criteria:
+        type: boolean

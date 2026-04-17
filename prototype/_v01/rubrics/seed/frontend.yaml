@@ -1,0 +1,16 @@
+rubric_id: frontend-seed
+version: v001
+extends: rubrics/seed/universal.yaml
+criteria:
+  - id: state_transition_documentation
+    status: active
+    description: specs describe key UI state transitions
+    weight: 1.0
+  - id: conditional_visibility_documentation
+    status: active
+    description: specs capture state-driven or permission-driven visibility rules
+    weight: 1.0
+  - id: accessibility_expectations
+    status: active
+    description: specs capture accessibility-relevant interaction and semantics where appropriate
+    weight: 0.6

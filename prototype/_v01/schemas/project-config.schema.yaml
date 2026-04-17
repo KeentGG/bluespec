@@ -1,0 +1,30 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: ProjectConfig
+type: object
+required:
+  - project_id
+  - ecosystem
+  - golden_set_ref
+  - seed_formula_ref
+  - seed_rubric_ref
+properties:
+  project_id:
+    type: string
+  label:
+    type: string
+  ecosystem:
+    type: string
+  behavior_shapes:
+    type: array
+    items:
+      type: string
+  codebase_path:
+    type: string
+  golden_set_ref:
+    type: string
+  seed_formula_ref:
+    type: string
+  seed_rubric_ref:
+    type: string
+  notes:
+    type: string

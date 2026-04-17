@@ -1,0 +1,23 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: Lesson
+type: object
+required:
+  - failure_type
+  - teaching_method
+  - result
+properties:
+  failure_type:
+    type: string
+  scenario:
+    type: string
+  teaching_method:
+    type: string
+  result:
+    type: string
+    enum: [PASSED, FAILED, PARTIAL]
+  works_on:
+    type: array
+    items:
+      type: string
+  discovered_criterion:
+    type: string

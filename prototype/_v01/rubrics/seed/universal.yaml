@@ -1,0 +1,19 @@
+rubric_id: universal-seed
+version: v001
+criteria:
+  - id: coverage_core_behavior
+    status: active
+    description: specs capture the core behavior actually implemented in code
+    weight: 1.0
+  - id: completeness_inputs_outputs
+    status: active
+    description: specs describe inputs, outputs, edge cases, and error handling
+    weight: 1.0
+  - id: consistency_cross_refs
+    status: active
+    description: references resolve and specs do not contradict each other
+    weight: 0.8
+  - id: golden_set_recall
+    status: active
+    description: specs capture human-curated behaviors from the golden set
+    weight: 1.2

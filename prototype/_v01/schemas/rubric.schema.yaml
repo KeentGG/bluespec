@@ -1,0 +1,40 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: RubricCriterionOrSnapshot
+type: object
+deprecated: true
+properties:
+  criterion:
+    type: object
+    required: [id, status, description]
+    properties:
+      id:
+        type: string
+      status:
+        type: string
+        enum: [seed, candidate, probation, active, deprecated, rejected]
+      description:
+        type: string
+      source:
+        type: string
+      confidence:
+        type: number
+      scope:
+        type: object
+  snapshot:
+    type: object
+    required: [rubric_version, active_criteria]
+    properties:
+      rubric_version:
+        type: string
+      parent_version:
+        type: string
+      active_criteria:
+        type: array
+        items:
+          type: string
+      weights:
+        type: object
+        additionalProperties:
+          type: number
+      effective_from_run:
+        type: string
