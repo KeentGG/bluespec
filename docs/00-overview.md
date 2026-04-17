@@ -135,6 +135,40 @@ The project's end goal is to follow how basic neural models are made: they follo
 
 ---
 
+## The Three-Phase Model
+
+Blueprint Mode follows the same lifecycle as foundation models: **pre-training → inference → fine-tuning**.
+
+### Phase 1: Evolution (Pre-training)
+
+The multi-agent harness evolves general-purpose spec formulas per ecosystem (frontend, backend, mobile, etc.). Formulas compete against golden sets, get evaluated by rubric snapshots, and mutate through 6 tiers. This produces promoted formulas like `frontend-v008` or `backend-v012` that are good for most projects of their shape.
+
+This phase stays long and thorough. The goal is a strong general-purpose starting point.
+
+### Phase 2: Production (Inference)
+
+Users run evolved formulas as-is against their projects. `blueprint scan` executes the formula, produces specs. No learning, no adaptation. This is the default mode for users who want specs without any setup.
+
+### Phase 3: Fine-Tuning
+
+Users can optionally fine-tune a promoted formula to their specific project. Each fine-tune run:
+
+1. Scans the project structure (what patterns, frameworks, concerns exist)
+2. Runs the current formula on a sample of files
+3. Runs adaptive rubric discovery on the results
+4. Proposes rubric additions, weight changes, and criteria suppressions
+5. User approves or rejects proposals
+6. Writes a derived formula layered on top of the parent
+
+The fine-tuned formula inherits from the parent (e.g., `frontend-v008`) so upstream evolution improvements can be rebased. The adaptive rubric machinery -- previously confined to the evolution phase -- is the core engine of fine-tuning.
+
+**Anchor signal:** In evolution, golden sets anchor the rubric. In fine-tuning, three signals replace the golden set:
+- **Codebase structure analysis** -- the system infers what matters from the project itself (automatic)
+- **User review feedback** -- the user flags misses during spec review, which feeds back into rubric adaptation
+- **Explicit user goals** -- the user declares priorities ("auth flows matter most, styling matters least")
+
+---
+
 ## Further Reading
 
 - [Spec Format](production/00-spec-format.md) -- Philosophy, spec kinds, and YAML schemas

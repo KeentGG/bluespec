@@ -78,6 +78,14 @@
 - [ ] **Milestone 4:** Fine-tuned judge model -- train on accumulated evaluation data (after rubric stabilizes)
 - [ ] **Milestone 5:** Community formulas -- share evolved formulas across project types
 
+## Fine-Tuning Milestones
+
+- [ ] **Milestone F1:** Derived formula schema -- parent reference, fine_tuned_criteria, suppressed_criteria, rebase support
+- [ ] **Milestone F2:** `blueprint fine-tune` CLI command -- codebase structure analysis, adaptive rubric discovery for project-specific criteria
+- [ ] **Milestone F3:** Fine-tune anchor signals -- codebase structure analysis (automatic), user review feedback, explicit user goals
+- [ ] **Milestone F4:** Parent rebase -- when upstream formula is promoted, rebase fine-tuned layer onto new parent
+- [ ] **Milestone F5:** Fine-tune history -- track fine-tune runs, what was proposed, what the user approved/rejected
+
 ---
 
 ## Next Brainstorm Directions
@@ -108,3 +116,10 @@
 - Define the tiered mutation operators (6 tiers, including rubric mutation)
 - Design rubric provenance tracking
 - Test rubric discovery mechanisms (contextual inference first)
+
+### F. Fine-Tuning Architecture
+- Design derived formula schema (parent + layer model)
+- Define fine-tune run workflow (scan → discover → propose → approve → write)
+- Design anchor signals for production rubric adaptation (codebase analysis, user feedback, explicit goals)
+- Plan parent rebase mechanism for upstream formula updates
+- Design temporal isolation rules for fine-tuning (activate next scan, not retroactively)

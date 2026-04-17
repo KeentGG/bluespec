@@ -166,6 +166,58 @@ The project will go through iterative process and evolution to create the best a
 
 ---
 
+## Derived Formulas (Fine-Tuning)
+
+Evolution produces general-purpose promoted formulas per ecosystem. But every React project is different -- a dashboard app, an e-commerce storefront, and a design tool have wildly different spec needs.
+
+Users can **fine-tune** a promoted formula for their specific project. This produces a **derived formula** that layers project-specific criteria on top of the parent:
+
+```yaml
+id: my-dashboard-fine-tuned
+parent: formulas/promoted/frontend-v008
+project: my-dashboard-app
+ecosystem: frontend
+fine_tune_run: fine-tune-003
+
+fine_tuned_criteria:
+  - id: state_machine_coverage
+    weight: 1.3
+    source: fine_tune_run_001
+    reason: "40+ state machines detected in project"
+  - id: permission_gating_documentation
+    weight: 1.1
+    source: fine_tune_run_002
+    reason: "auth gating on 80% of routes"
+
+suppressed_criteria:
+  - id: animation_documentation
+    reason: "no animations in this project"
+
+inherited_criteria: parent  # everything else comes from parent
+```
+
+### Why Derivation, Not Forking
+
+The derived formula isn't a fork -- it's a layer. When the evolution phase promotes `frontend-v009`, the user can **rebase** their fine-tuned layer onto the new parent. This means:
+
+- Upstream improvements flow down automatically
+- Project-specific tuning is preserved
+- No manual formula maintenance for the user
+
+### What Drives Fine-Tuning
+
+Each `blueprint fine-tune` run uses the adaptive rubric machinery (previously confined to the evolution phase) to discover project-specific criteria:
+
+1. **Codebase structure analysis** (automatic) -- scans the project and infers what matters. "This project has 40 state machines and zero animations → weight state transitions up, suppress animation criteria."
+2. **User review feedback** -- after reviewing generated specs, the user flags misses. The system asks: what criterion would have caught this? If nothing in the current rubric covers it, propose a candidate.
+3. **Explicit user goals** -- the user declares priorities: "I care most about auth flows and error handling, less about styling."
+
+### Temporal Isolation in Fine-Tuning
+
+Fine-tuning relaxes some evolution constraints (no multi-run probation when the user provides direct signal) but preserves one key rule: discovered criteria activate for the **next** scan, not retroactively. This prevents the system from re-scoring all existing specs and creating churn.
+
+---
+
 ## Further Reading
 
 - [Evolution System](evolution/01-evolution-system.md) -- How formulas are evolved

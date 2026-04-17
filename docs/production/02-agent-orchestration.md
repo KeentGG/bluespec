@@ -249,6 +249,50 @@ exploration_result:
 
 ---
 
+## Fine-Tune Agent
+
+**Purpose:** Run adaptive rubric discovery to produce project-specific formula tuning.
+
+**When invoked:** User runs `blueprint fine-tune`.
+
+**Inputs:**
+- Current formula (promoted parent or existing derived formula)
+- Project codebase
+- Optional: user-declared goals/priorities
+- Optional: accumulated review feedback from `blueprint review`
+
+**Process:**
+```
+1. Scan project structure
+   - Identify frameworks, patterns, dominant concerns
+   - Count behavioral shapes (state machines, auth flows, data pipelines, etc.)
+   |
+2. Run current formula on a sample of files
+   - Produce draft specs for ~10 representative files
+   |
+3. Adaptive rubric discovery
+   - Which active criteria had no signal? → propose suppression
+   - What codebase patterns lack matching criteria? → propose additions
+   - What existing criteria should be weighted differently? → propose weight changes
+   - If user goals provided, align proposals with declared priorities
+   |
+4. Present proposals interactively
+   - Each proposal shows: evidence, confidence, proposed weight, reasoning
+   - User accepts, rejects, or adjusts weight per proposal
+   |
+5. Write derived formula
+   - Parent ref, fine_tuned_criteria, suppressed_criteria
+   - Changes activate for next scan, not retroactively
+```
+
+**Outputs:**
+- Derived formula file (layered on parent)
+- Fine-tune discovery log (what was proposed, accepted, rejected)
+
+**Key constraint:** The fine-tune agent does not modify the parent formula. It produces a derived layer that can be rebased when the parent is updated through upstream evolution.
+
+---
+
 ## Human-Agent Collaboration
 
 ### Review Interface

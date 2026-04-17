@@ -15,6 +15,7 @@ blueprint apply             Apply spec changes to code
 blueprint status            Show drift between code and specs
 blueprint sync              Bidirectional sync with conflict resolution
 blueprint validate          Validate spec completeness and correctness
+blueprint fine-tune         Adaptive rubric discovery for project-specific formula tuning
 blueprint agent             Serve specs to agents in consumable format
 blueprint explore           Agent explores specific module/area
 blueprint propose           Create a new change proposal
@@ -236,6 +237,59 @@ Output:
   auth.register: WARNING - missing edge cases
   payments.process: ERROR - invalid reference to "stripe.v1"
 ```
+
+---
+
+### `blueprint fine-tune`
+
+Adaptive rubric discovery for project-specific formula tuning.
+
+```bash
+blueprint fine-tune [options]
+
+Options:
+  --formula=<name>          Parent formula to fine-tune (default: auto-detect ecosystem)
+  --sample=<n>              Number of files to sample for discovery (default: 10)
+  --goals=<list>            Explicit user priorities (comma-separated)
+  --accept-all              Auto-approve all proposals (non-interactive)
+  --dry-run                 Show proposals without writing derived formula
+
+Behavior:
+  1. Scans project structure (frameworks, patterns, concerns)
+  2. Runs current formula on a sample of files
+  3. Runs adaptive rubric discovery on the results:
+     - Codebase structure analysis (automatic)
+     - Infers what matters for THIS project
+  4. Proposes rubric additions, weight changes, and suppressions
+  5. User approves or rejects each proposal interactively
+  6. Writes a derived formula layered on top of the parent
+
+Interactive Mode:
+  Shows each discovered criterion with:
+  - Evidence (code references that triggered discovery)
+  - Confidence score
+  - Proposed weight adjustment
+  - Reasoning
+
+  Commands:
+    [a]ccept                Add to derived formula
+    [r]eject                Skip this criterion
+    [w]eight <n>            Accept with custom weight
+    [s]kip                  Decide later
+    [q]uit                  Exit, write accepted so far
+
+Output:
+  /blueprints/meta/derived-formula.yaml
+  Contains: parent ref, fine_tuned_criteria, suppressed_criteria
+
+Examples:
+  blueprint fine-tune                                    # Interactive fine-tune
+  blueprint fine-tune --formula=frontend-v008            # Explicit parent
+  blueprint fine-tune --goals="auth flows,error handling" # With priorities
+  blueprint fine-tune --dry-run                           # Preview only
+```
+
+Fine-tune can be run multiple times. Each run discovers additional criteria based on the current derived formula state. Discovered criteria activate for the **next** `blueprint scan`, not retroactively.
 
 ---
 

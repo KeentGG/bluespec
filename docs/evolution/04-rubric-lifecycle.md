@@ -457,6 +457,49 @@ If criteria can only be added, the rubric will bloat. The system should force me
 
 ---
 
+## Adaptive Rubric in Fine-Tuning (Production)
+
+The rubric lifecycle described above governs the **evolution phase**. A parallel but lighter-weight rubric adaptation happens during the **fine-tuning phase**, where users tune promoted formulas to their specific project.
+
+### How It Differs from Evolution
+
+| Aspect | Evolution | Fine-Tuning |
+|--------|-----------|-------------|
+| **Anchor** | Golden set (human-curated behaviors) | Codebase analysis + user feedback + explicit goals |
+| **Cadence** | Multi-run probation before promotion | User can approve immediately |
+| **Scope** | Ecosystem-wide (all frontend projects) | Project-specific (this dashboard app) |
+| **Output** | Rubric snapshot (frozen, versioned) | Derived formula layer (fine_tuned_criteria + suppressions) |
+| **Temporal isolation** | Strict (no same-run activation) | Relaxed (user approval replaces multi-run probation) but still forward-only |
+
+### Fine-Tune Discovery Workflow
+
+```text
+1. Scan project structure → infer dominant patterns
+   (state machines? auth gating? data pipelines? event-driven?)
+2. Run current formula on a sample of files
+3. Adaptive rubric discovery:
+   a. Which active criteria had no signal? → propose suppression
+   b. What codebase patterns lack matching criteria? → propose additions
+   c. What existing criteria should be weighted differently? → propose weight changes
+4. User reviews proposals interactively
+5. Accepted proposals become fine_tuned_criteria or suppressed_criteria in derived formula
+6. Changes activate for next scan, not retroactively
+```
+
+### Forward-Only Activation
+
+Even though fine-tuning allows faster promotion (direct user approval), discovered criteria still activate for the **next** `blueprint scan`. This prevents the system from retroactively re-scoring all existing specs and creating churn. The rule: discover → propose → user approves → activate next scan.
+
+### Anchor Signals
+
+In the absence of golden sets, three signals anchor fine-tune rubric discovery:
+
+1. **Codebase structure analysis** (automatic, no human input) -- the system scans the project and infers what matters. "This project has 40 state machines and zero animations."
+2. **User review feedback** (from `blueprint review`) -- when the user flags a miss, the system asks: what criterion would have caught this? If nothing in the current rubric covers it, propose a candidate.
+3. **Explicit user goals** (from `blueprint fine-tune --goals`) -- the user declares priorities directly.
+
+---
+
 ## Further Reading
 
 - [Rubric Discovery](../../concepts/rubric-discovery.md) -- Research background and discovery mechanisms
