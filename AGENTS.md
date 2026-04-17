@@ -83,6 +83,63 @@ research_papers/                -- PDFs of scientific papers
 
 ---
 
+## Verification Handover Protocol
+
+When an agent performs a task that changes code or machine-readable behavior, it must not treat the work as complete immediately after the implementation itself.
+
+### Mandatory rule for code updates
+
+Before claiming a code-update task is done, the agent must first invoke the local OpenCode subagent:
+
+- `@verifier-handover`
+
+This is a required handoff step for implementation work.
+
+### Purpose of the verifier-handover subagent
+
+The verifier-handover subagent exists to produce a verification plan that is grounded in the actual changed area, not a generic checklist.
+
+It should:
+
+- inspect the changed files and nearby related files
+- trace relevant call paths, state transitions, contracts, and dependencies
+- identify the behavior that actually changed
+- produce concrete verification steps that would meaningfully validate the change
+- call out risks, blind spots, and unverified assumptions
+
+### Expected handoff behavior
+
+The implementation agent should give the verifier-handover subagent enough context to do real verification planning, including:
+
+- what files changed
+- what behavior was intended to change
+- what commands or tests seem relevant
+- any known uncertainty or risk areas
+
+### What counts as a valid verifier output
+
+The verifier-handover result should return a structured verification plan with:
+
+1. the change surface being verified
+2. related files or subsystems inspected
+3. exact verification steps
+4. what each step proves
+5. remaining gaps or things still not verified
+
+### Scope notes
+
+- This protocol is mandatory for code updates and behavior-affecting config updates.
+- It is optional for pure documentation changes.
+- The verifier-handover subagent generates the verification plan; it does not replace actual verification work.
+
+### Enforcement intent
+
+This is currently enforced primarily as a project rule and local subagent workflow.
+
+Later, this may also be reinforced through prototype runner contracts, lifecycle events, or hooks, but the rule already applies now even before those hard gates exist.
+
+---
+
 ## File Conventions
 
 - Docs are numbered `00-` through `10-` for natural ordering
