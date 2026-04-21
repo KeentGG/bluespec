@@ -70,8 +70,9 @@
 
 ## Evolution System Milestones
 
-- [ ] **Milestone 1:** Build the harness -- backbone, baseline formula, orchestrator loop, golden set structure, lessons_learned format
-- [ ] **Milestone 2:** First evolution cycle -- run against a real codebase, evaluate, diagnose, mutate
+- [x] **Milestone 1:** Build the harness -- backbone, baseline formula, orchestrator loop, golden set structure, lessons_learned format
+- [x] **Milestone 2:** First evolution cycle -- run against a real codebase, evaluate, diagnose, mutate (run-0002, run-0003 fully materialized)
+- [x] **Milestone 2c:** Agent Harness -- OpenCode agent orchestrates the full loop as Option C (fully agentic). Verified on run-0003: full autonomous loop, `frontend-derived-state-boundaries.yaml` registered.
 - [ ] **Milestone 2b:** Rubric discovery v1 -- Analyzer can identify rubric gaps (diagnose only)
 - [ ] **Milestone 3:** Ecosystem specialization -- frontend/backend/mobile formulas diverge from baseline
 - [ ] **Milestone 3b:** Rubric discovery v2 -- Mutator can add discovered criteria to rubric (full Self-Evolving)

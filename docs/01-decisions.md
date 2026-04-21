@@ -343,6 +343,34 @@ We agreed on a baseline backbone shared across all formulas, with ecosystem spec
 
 ---
 
+## Prototype Architecture Decisions (Locked)
+
+These decisions apply to the evolution prototype under `prototype/_v01/`.
+
+### run_generator Decisions
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| Provider adapter location | `integrations/providers/` | Extension point, not internal script detail |
+| Formula `extends` resolution | CLI in `freeze_inputs` | Keeps `run_generator` stateless |
+| Output artifacts | `output.yaml` + `trace.json` + `specs/` | Required by existing Generator prompt contract |
+| Failure mode | Partial write + mark failed | Recoverable, debuggable |
+| AI call cadence | **Option B: per-step calls** | Partial recovery, per-step audit trail, fine-grained retry; ~5x latency overhead acceptable for system running minutes per cycle |
+
+### Other Prototype Decisions
+
+| Decision | Choice | Rationale |
+|---|---|---|
+| `rubric.schema.yaml` | Deprecated (dead weight) | Matches no current artifact shape |
+| `seed-rubric.schema.yaml` | Created | Validates seed rubric files correctly |
+| Formula advancement ≠ rubric promotion | Different lifecycles | Formula = recipe, Rubric = judge |
+| Rubric same-run guardrail | Forbidden | A discovered criterion cannot affect same-run official scoring |
+| Formula `extends` resolution | CLI before freezing | Resolved by `freeze_inputs`, not by `run_generator` |
+| `run_generator` is one execution | Per-step calls with internal phase checkpoints | One provider call with 5 formula steps as internal sub-phases |
+| First AI call | `run_generator` dispatched through provider adapter | `local` first, then OpenCode/Hermes |
+
+---
+
 ## Call for Input
 
 Questions for early users:

@@ -27,6 +27,7 @@ The plan below follows the repo's current intent:
 - **Official scoring must stay stable.** Candidate rubric criteria do not affect same-run scoring.
 - **Prototype scope stays narrow.** Full sync, full codegen, and autonomous promotion are later phases.
 - **A real run matters more than scaffolding purity.** The harness must be exercised on a real brownfield target early.
+- **CLI as tools, agent as orchestrator.** The CLI commands are stateless, machine-readable tools. The agent decides when to call which command. This separates what runs (CLI) from who decides (agent).
 
 ---
 
@@ -51,15 +52,14 @@ The prototype can materialize a run, freeze its inputs, validate its state, and 
 - [x] Define prompt contracts for Generator / Evaluator / Analyzer / Mutator
 - [x] Define provider-neutral integration folders and hook boundaries
 - [x] Add architecture and folder documentation
-- [ ] Add formula candidate registration flow
-- [ ] Add rubric snapshot promotion flow
-- [ ] Add formula advancement flow
-- [ ] Add seed rubric schema and validate seed rubric files (`universal.yaml`, `backend.yaml`, `frontend.yaml`)
-  - *Gap: seed rubrics use a structure (`rubric_id`, `version`, `extends`, `criteria[]`) that no schema validates. If someone edits a seed rubric incorrectly, nothing catches it until a downstream failure.*
-- [ ] Clarify or remove `rubric.schema.yaml` -- no artifact currently uses its shape
-  - *Gap: `rubric.schema.yaml` defines a wrapper with optional `criterion` and `snapshot` sub-objects, but no file in the prototype matches this structure. Seeds, snapshots, and candidates each have their own schemas already. This file is dead weight that could confuse contributors.*
-- [ ] Add queue governance commands: `approve_rubric_candidate`, `reject_rubric_candidate` to drain `state/queue.yaml`
-  - *Gap: `register_rubric_candidate` enqueues items into `state/queue.yaml`, but no command processes them. The queue accumulates indefinitely. The docs say "lifecycle enforcement by thin tooling, not prompt obedience" but the governance half of that tooling doesn't exist.*
+- [x] Add formula candidate registration flow
+- [x] Add rubric snapshot promotion flow
+- [x] Add formula advancement flow
+- [x] Add seed rubric schema and validate seed rubric files (`universal.yaml`, `backend.yaml`, `frontend.yaml`)
+- [x] Clarify or remove `rubric.schema.yaml` -- marked deprecated; dead weight removed
+- [x] Add queue governance commands: `approve_rubric_candidate`, `reject_rubric_candidate` to drain `state/queue.yaml`
+
+> All items completed 2026-04-17. Full governance pipeline tested end-to-end with `conditional_flow_documentation` (rubric) and `frontend-derived` (formula).
 
 ---
 
@@ -78,27 +78,119 @@ The system can execute one end-to-end run using frozen inputs and produce role-s
 - [x] Point the sample project config at a real target (`dashboard-v2`)
 - [x] Regenerate `run-0001` from the updated target config
 - [x] Validate frozen run inputs and candidate registration flow
-- [ ] Implement `run_generator`
-- [ ] Write generator outputs into `runs/run-000X/generator/`
-- [ ] Implement `run_evaluator`
-- [ ] Write evaluator outputs into `runs/run-000X/evaluator/`
-- [ ] Implement `run_analyzer`
-- [ ] Write analyzer outputs into `runs/run-000X/analyzer/`
-- [ ] Implement `run_mutator`
-- [ ] Write mutator outputs into `runs/run-000X/mutator/`
+- [x] Implement `run_generator` — per-step AI calls, `###CURRENT_STEP###` marker for step isolation
+- [x] Write generator outputs into `runs/run-000X/generator/` — `output.yaml`, `trace.json`, `steps/`, `specs/`
+- [x] Implement `run_evaluator` — scores specs against rubric + golden set; `###ROLE### evaluator` marker
+- [x] Write evaluator outputs into `runs/run-000X/evaluator/` — `output.yaml`, `trace.json`
+- [x] Implement `run_analyzer` — diagnoses failures; `###ROLE### analyzer` marker
+- [x] Write analyzer outputs into `runs/run-000X/analyzer/` — `output.yaml`
+- [x] Implement `run_mutator` — proposes mutations; `###ROLE### mutator` marker
+- [x] Write mutator outputs into `runs/run-000X/mutator/` — `output.yaml`
+- [x] Add formula `extends` resolution logic
+  - `freeze_inputs` calls `resolveFormulaExtends()` to inline the full extends chain; verified with `run-0002` (5 steps inlined) and `run-0003`
 - [ ] Add run summary materialization (`summary.md` or equivalent)
-- [ ] Define agent output schemas for each role (generator, evaluator, analyzer, mutator output contracts)
-  - *Gap: the prompt contracts define what each agent should output (`artifacts`, `trace_ref`, `official_scores`, `diagnosis`, etc.) but no schemas validate those outputs. Runs have input validation via `validate_artifacts` but no equivalent gate for outputs. Without output schemas, malformed agent results pass silently.*
-- [ ] Add formula `extends` resolution logic -- merge parent steps/validations into child before freezing inputs
-  - *Gap: `backend.yaml` and `frontend.yaml` declare `extends: formulas/seed/universal.yaml`, but `freeze_inputs` copies the leaf file as-is without resolving inheritance. The frozen formula in `runs/run-0001/inputs/formula.yaml` is just the frontend seed -- it has no steps, only specializations. Any agent reading it would not know the actual step sequence without manually following the `extends` chain.*
-- [ ] Add precision workflow: schema for false-positive findings, spot-check sampling mechanism, precision scoring in evaluator output
-  - *Gap: the loss function is precision + recall, but only recall has a structured workflow (golden set behaviors → recall hits/misses). Precision (did the formula hallucinate behaviors that don't exist?) has no schema for false-positive findings, no sampling mechanism, and no place to record results. Half the fitness signal has no data model.*
+- [ ] Define agent output schemas for each role
+  - ✅ Generator output schema: `schemas/generator-output.schema.yaml`
+  - ✅ Generator step schema: `schemas/generator-step.schema.yaml`
+  - [ ] Evaluator output schema
+  - [ ] Analyzer output schema
+  - [ ] Mutator output schema
+- [ ] Add precision workflow (false-positive schema + spot-check mechanism)
 - [ ] Validate `codebase_path` existence in project config before run materialization
-  - *Gap: `codebase_path` is optional in `project-config.schema.yaml` and nothing checks if the path exists on disk. For a system built on agent-driven code exploration, a missing or nonexistent codebase path would cause silent failure at agent runtime, not at run preparation time where it should be caught.*
+
+> Full evolution loop verified on `run-0002` (all role outputs materialized: generator, evaluator, analyzer, mutator). Full autonomous agentic run on `run-0003` via `node start`: bounded loop completed by OpenCode agent, `frontend-derived-state-boundaries.yaml` registered as formula candidate.
+
+### Run Artifacts
+
+| Run | Generator | Evaluator | Analyzer | Mutator | Registered |
+|-----|-----------|-----------|----------|---------|------------|
+| run-0001 | scaffold only | — | — | — | — |
+| run-0002 | 5/5 steps | 0.74 score | recognition_failure / prompt_tweak | step_management | — |
+| run-0003 | 5/5 steps | 0.74 score | recognition_failure / prompt_tweak | step_management | `frontend-derived-state-boundaries.yaml` (agent-driven) |
+
+### Run-0003 Findings
+
+- **Stub specs**: Generated specs contain only YAML frontmatter (`id`, `type`, `version`). This is a `local` provider stub limitation — real AI provider would produce actual behavioral content.
+- **Canned metrics**: `latency_ms: 0`, `tokens_used` values are hardcoded stub outputs, not real measurements.
+- **Governance guardrails confirmed**: `rubric_gap_proposed: false`, `same_run_rubric_activation: false`, `advance_formula` not called — all correct.
+- **Bug found and fixed**: `writeCheckpoint` had spread-order bug (`...existing` after `phase`/`status` overwrote new values with stale init values). Fixed and verified. Also `resume_run` displayed misleading "remaining phases" for completed runs; fixed to show "none — run is complete".
 
 ---
 
-## Milestone 2b -- Rubric Discovery v1 (Diagnose Only)
+## Milestone 2c -- Agent Harness (Fully Agentic Orchestration)
+
+### Why this phase exists
+
+The CLI loop is complete and machine-readable. The next step is making it agent-driven. Instead of a human deciding when to run each step, an OpenCode agent bootstraps, reads outputs, and orchestrates the full cycle autonomously.
+
+This is **Option C**: `node start` launches an OpenCode agent, the agent reads the CLI reference and run state, and drives generator → evaluator → analyzer → mutator to completion with no per-step human intervention.
+
+### Architecture Decision (locked via Oracle)
+
+```
+node start [--run-id run-XXXX] [--resume]
+  → acquires run lock
+  → spawns 'opencode run <bootstrapMessage> --dir <workspace>'
+  → bootstrapMessage tells agent to load blueprint-harness skill
+  → agent calls CLI via bash tool, reads output.yaml after each phase
+  → agent writes checkpoints after each phase
+  → after register phase, agent stops
+  → lock released
+```
+
+**Key decisions locked:**
+- Entry point: `node start.js` (thin launcher) + repo-versioned `SKILL.md` (not inline system prompt)
+- Agent role: CLI Orchestrator, not virtual teammate — deterministic, bounded, stops at register
+- Bounded loop: one autonomous session = init → freeze → generator → evaluator → analyzer → mutator → register, then STOP
+- `advance_formula` and `promote_rubric_snapshot` excluded from autonomous loop (governance boundary)
+- Context management: `state/current.yaml` only for new-run init; after freeze, trust run-artifacts only
+- Recovery: checkpoint + lock files per run
+
+### Outcome
+
+A human runs `node start`, optionally specifies a run ID, and the OpenCode agent orchestrates the full evolution cycle autonomously.
+
+### Tasks
+
+- [x] Design the `start` script entry point (`node start [--run-id run-XXXX] [--resume]`)
+- [x] Design the system prompt or skill that instructs the agent on:
+  - Available CLI commands
+  - Run directory structure
+  - How to read each role's `output.yaml`
+  - Loop termination signals
+  - Governance escalation path
+- [x] Write `blueprint-harness` skill (`SKILL.md`) for OpenCode agents
+- [x] Implement the skill: command reference, output schemas, driving instructions
+- [x] Test: run `node start` and verify the agent orchestrates the full loop on its own
+  - ✅ run-0003: full autonomous loop completed, formula candidate registered
+- [x] Determine checkpoint model: autonomous full loop with per-phase checkpoints (not per-role human review)
+
+### Subtasks (implemented but not previously listed)
+
+- [x] Add checkpoint helpers to `scripts/lib/common.js`: `writeCheckpoint`, `getCheckpoint`, `acquireLock`, `releaseLock`, `RUN_PHASES`, `phasesFrom`, `nextPhase`
+- [x] Add checkpoint CLI commands: `checkpoint_run`, `resume_run`, `release_lock`
+- [x] Update `state/README.md` with checkpoint and lock documentation
+- [x] Update `runs/README.md` with bounded loop phase documentation
+- [x] Add `package.json` convenience scripts: `start`, `checkpoint-run`, `resume-run`, `release-lock`
+
+### Open Questions Resolved
+
+- ~~**Bootstrap mechanism**~~ — `node start.js` spawns `opencode run <message> --dir <workspace>` ✅
+- ~~**Skill vs system prompt**~~ — SKILL.md at `.opencode/skills/blueprint-harness/SKILL.md`, agent loads via `skill({ name: "blueprint-harness" })` ✅
+- ~~**Agent tool discovery**~~ — CLI commands via bash tool, skill provides command reference ✅
+- ~~**Checkpoint model**~~ — per-phase checkpoints written by agent after each phase; full loop autonomous ✅
+- ~~**Termination**~~ — agent stops after register phase; governance steps (`advance_formula`, `promote_rubric_snapshot`) explicitly excluded from autonomous loop ✅
+- ~~**Skill vs MCP**~~ — bash tool calls `node scripts/cli.js`, no MCP needed ✅
+
+### Key Reference
+
+- `start.js` entry point
+- `SKILL.md`: `.opencode/skills/blueprint-harness/SKILL.md`
+- CLI commands: `prototype/_v01/scripts/cli.js`
+- Checkpoint/lock helpers: `scripts/lib/common.js`
+- State files: `prototype/_v01/state/checkpoints/<run-id>.yaml`, `prototype/_v01/state/locks/<run-id>.lock`
+
+> Implemented and tested. run-0003 completed full autonomous loop. Bug found in `writeCheckpoint` spread order — fixed before run-0003 checkpoint sync.
 
 ### Why this phase exists
 
@@ -114,15 +206,27 @@ The Analyzer can emit suspected rubric gaps as candidate criteria, and those can
 - [x] Implement `register_rubric_candidate`
 - [x] Queue rubric candidate review state in `state/queue.yaml`
 - [x] Document rubric lifecycle and same-run guardrails
-- [ ] Teach Analyzer outputs to distinguish:
-  - search failure
-  - recognition failure
-  - format failure
-  - prompt failure
-  - rubric gap failure
-- [ ] Add candidate provenance fields from real analyzer output
-- [ ] Add shadow-ready metadata for future probation scoring
-- [ ] Add reviewer workflow for accepting / rejecting candidates
+- [x] Teach Analyzer outputs to distinguish: search, recognition, format, prompt, rubric_gap failure
+  - [Decision tree in `prompts/shared/failure-types.md`](./prompts/shared/failure-types.md) — rubric_gap_failure only valid after steps 1–4 exhausted
+  - Analyzer prompt now passes: scored_specs, recall_hits, recall_misses, precision_findings, rubric_gap_candidates, generator step outputs (explore/draft/verify), formula structure
+- [x] Add candidate provenance fields from real analyzer output
+  - Added to `schemas/rubric-candidate.schema.yaml`: source_run, evaluator_score, failure_type, analyzer_confidence, recall_misses_triggered, scored_specs_examined
+- [x] Add shadow-ready metadata for future probation scoring
+  - Added to schema: evidence_count, first_observed_run, last_observed_run, precision_concern, weight_recommendation, probation_runs_remaining
+- [x] Teach Mutator to package rubric_gap_proposal into a registerable criterion
+  - When analyzer.rubric_gap_proposed === true, mutator writes `runs/<run-id>/mutator/rubric-candidate.yaml` with full provenance
+  - Agent registers via `register_rubric_candidate --file runs/<run-id>/mutator/rubric-candidate.yaml`
+  - SKILL.md updated to reflect dual registration path
+- [x] Add reviewer workflow for accepting / rejecting candidates
+  - [Reviewer checklist in `rubrics/candidates/README.md`](./rubrics/candidates/README.md) — 5-question decision guide (repeated evidence, low overlap, holdout effect, precision tradeoff, provenance audit)
+  - Each question linked to the approve/reject CLI commands
+  - Promotion rules table and probation tracking policy documented
+
+---
+
+## Milestone 2b — COMPLETE ✅
+
+> Rubric Discovery v1 (Diagnose Only) is fully implemented. All tasks complete. Rubric gap diagnosis is gated behind steps 1–4 exhaustion, candidates enter governed review without affecting same-run scoring, and reviewers have an explicit checklist before approving or rejecting.
 
 ---
 
@@ -289,27 +393,25 @@ The immediate focus should stay on the shortest path to a real, inspectable evol
 
 ### Now
 
-- [ ] Implement `run_generator`
-- [ ] Implement `run_evaluator`
-- [ ] Implement `run_analyzer`
-- [ ] Implement `run_mutator`
-- [ ] Materialize one full run with role outputs under `runs/run-000X/`
-- [ ] Define agent output schemas for each role
-- [ ] Add formula `extends` resolution logic
-- [ ] Add seed rubric schema and validate seed files
+- [x] Implement `run_generator` — ✅ implemented, verified on run-0002 and run-0003
+- [x] Implement `run_evaluator` — ✅ implemented, verified on run-0002 and run-0003
+- [x] Implement `run_analyzer` — ✅ implemented, verified on run-0002 and run-0003
+- [x] Implement `run_mutator` — ✅ implemented, verified on run-0002 and run-0003
+- [x] Materialize one full run with role outputs under `runs/run-000X/` — ✅ run-0002 and run-0003 fully materialized
+- [x] Agent harness (`node start`) — ✅ implemented and verified on run-0003
+- [x] Rubric Discovery v1 (Diagnose Only) — ✅ complete: 5-type analyzer routing, provenance fields, mutator packaging, reviewer workflow
+- [ ] Define agent output schemas for evaluator, analyzer, mutator
+- [ ] Add precision workflow (false-positive schema + spot-check)
+- [ ] Validate `codebase_path` existence in project config before run materialization
 
 ### Next
 
-- [ ] Add formula candidate registration and advancement
-- [ ] Add rubric snapshot promotion tooling
-- [ ] Add queue governance commands (`approve`, `reject`)
-- [ ] Add precision workflow (false-positive schema + spot-check mechanism)
 - [ ] Add lesson lookup index for insanity prevention
 - [ ] Add shadow/probation artifacts for rubric discovery v2
 
 ### Later
 
-- [ ] Provider adapters
+- [ ] Provider adapters (OpenCode, Hermes)
 - [ ] Ecosystem specialization
 - [ ] Ecosystem rubric merging (compose universal + ecosystem seeds into snapshot)
 - [ ] Production fine-tuning (`blueprint fine-tune`, derived formulas, parent rebase)
@@ -339,11 +441,19 @@ The tasks above address the following architectural gaps identified during proto
 |-----|----------------|
 | Fine-tuning has no prototype presence | Milestone 5b |
 | Rubric snapshot only uses universal seed | Milestone 4 (ecosystem rubric merging) |
-| Formula `extends` has no resolution logic | Milestone 2 |
-| No schema for agent output artifacts | Milestone 2 |
+| Formula `extends` has no resolution logic | **Done (Milestone 2)** |
+| No schema for generator output artifacts | **Done (Milestone 2)** — generator schemas done, evaluator/analyzer/mutator pending |
 | Lesson lookup has no index | Milestone 3 |
-| `rubric.schema.yaml` is ambiguous | Milestone 1 |
-| No golden set precision workflow | Milestone 2 |
-| No seed rubric schema | Milestone 1 |
-| Queue has no governance commands | Milestone 1 |
+| `rubric.schema.yaml` is ambiguous | **Done (Milestone 1)** |
+| No seed rubric schema | **Done (Milestone 1)** |
+| Queue has no governance commands | **Done (Milestone 1)** |
 | `codebase_path` not validated | Milestone 2 |
+| No golden set precision workflow | Milestone 2 |
+| Agent harness (CLI orchestration) | **Done (Milestone 2c)** |
+| Bounded loop / checkpoint model | **Done (Milestone 2c)** |
+| Checkpoint/lock infrastructure for interrupted runs | **Done (Milestone 2c)** |
+| Generated specs are stubs (no real provider) | Milestone 5 (provider adapters) |
+| Rubric gap 5-type diagnosis (analyzer routing) | **Done (Milestone 2b)** |
+| Rubric candidate provenance fields | **Done (Milestone 2b)** |
+| Mutator rubric_gap_proposal packaging | **Done (Milestone 2b)** |
+| Reviewer workflow (checklist + approve/reject) | **Done (Milestone 2b)** |
