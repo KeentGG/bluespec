@@ -1,0 +1,81 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: GeneratorOutput
+description: Structured output written by run_generator after completing (or failing) a generation run.
+type: object
+required:
+  - run_id
+  - generator
+  - status
+  - steps_completed
+  - generation_started_at
+  - generation_completed_at
+properties:
+  run_id:
+    type: string
+    description: "Run this output belongs to"
+  generator:
+    type: string
+    const: "run_generator"
+  status:
+    type: string
+    enum: [complete, partial, failed]
+    description: "complete=all steps finished, partial=some steps finished, failed=abort before first step"
+  provider:
+    type: string
+    description: "Provider adapter used (e.g. opencode, local, hermes)"
+  model:
+    type: string
+    description: "Model identifier used by the provider"
+  steps_completed:
+    type: integer
+    minimum: 0
+    description: "Number of steps successfully completed"
+  failed_at_step:
+    type: [integer, "null"]
+    description: "Step number where failure occurred (null if not failed)"
+  error_reason:
+    type: [string, "null"]
+    description: "Machine-readable error category (network_error, api_error, context_overflow, malformed_response, validation_failed)"
+  confidence_by_section:
+    type: object
+    additionalProperties:
+      type: number
+      minimum: 0
+      maximum: 1
+    description: "Per-step confidence scores"
+  overall_confidence:
+    type: number
+    minimum: 0
+    maximum: 1
+  unresolved_questions:
+    type: array
+    items:
+      type: string
+    description: "Questions the Generator could not resolve during generation"
+  phase_outputs:
+    type: object
+    additionalProperties:
+      type: string
+    description: "Mapping of step id to path of step output file"
+  specs_generated:
+    type: array
+    items:
+      type: string
+    description: "Paths to generated spec files"
+  generation_started_at:
+    type: string
+    format: date-time
+  generation_completed_at:
+    type: string
+    format: date-time
+  latency_ms:
+    type: integer
+    description: "Total wall-clock time in milliseconds"
+  tokens_used:
+    type: integer
+    description: "Total tokens consumed across all steps"
+  flags_for_analyzer:
+    type: array
+    items:
+      type: string
+    description: "Notable observations (e.g. missing files, ambiguous patterns) to pass to the Analyzer"

@@ -31,3 +31,52 @@ properties:
     type: array
     items:
       type: string
+  source_run:
+    type: string
+    description: "Run ID where this candidate was identified"
+  evaluator_score:
+    type: number
+    description: "Overall evaluator score in the source run"
+  failure_type:
+    type: string
+    description: "Analyzer primary_failure_type that triggered this diagnosis"
+  analyzer_confidence:
+    type: number
+    description: "Analyzer's confidence in this diagnosis"
+  recall_misses_triggered:
+    type: array
+    description: "Which recall misses from evaluator triggered this gap diagnosis"
+    items:
+      type: object
+      properties:
+        criterion:
+          type: string
+        spec:
+          type: string
+        gap:
+          type: string
+        severity:
+          type: string
+  scored_specs_examined:
+    type: array
+    description: "Which specs were evaluated in the source run"
+    items:
+      type: string
+  evidence_count:
+    type: integer
+    description: "Number of runs that have observed this gap (for probation gating)"
+  first_observed_run:
+    type: string
+    description: "First run where this gap was observed"
+  last_observed_run:
+    type: string
+    description: "Most recent run where this gap was observed"
+  precision_concern:
+    type: string
+    description: "Analyzer precision concern if any (false-positive risk flag)"
+  weight_recommendation:
+    type: number
+    description: "Suggested rubric weight if promoted (0.0-2.0 scale)"
+  probation_runs_remaining:
+    type: integer
+    description: "Remaining probation runs before eligibility for active promotion"

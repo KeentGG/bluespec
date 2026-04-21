@@ -1,0 +1,46 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: GeneratorStepOutput
+description: Output written after each individual step completes in run_generator.
+type: object
+required:
+  - step
+  - step_number
+  - status
+properties:
+  step:
+    type: string
+    description: "Step identifier (e.g. explore, analyze, draft)"
+  step_number:
+    type: integer
+    minimum: 1
+  status:
+    type: string
+    enum: [complete, partial, failed]
+  confidence:
+    type: number
+    minimum: 0
+    maximum: 1
+  summary:
+    type: string
+    description: "Human-readable summary of what the step did"
+  files_analyzed:
+    type: array
+    items:
+      type: string
+    description: "Source files the step examined"
+  artifacts_produced:
+    type: array
+    items:
+      type: string
+    description: "Artifact names or paths produced by this step"
+  unresolved_questions:
+    type: array
+    items:
+      type: string
+  flags_for_analyzer:
+    type: array
+    items:
+      type: string
+    description: "Observations to pass to Analyzer (ambiguous patterns, missing context, etc.)"
+  error_reason:
+    type: [string, "null"]

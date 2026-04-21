@@ -11,5 +11,9 @@ These schemas define valid shapes for:
 - rubric candidates → `rubric-candidate.schema.yaml`
 - seed rubrics → `seed-rubric.schema.yaml`
 - lessons → `lesson.schema.yaml`
+- generator output → `generator-output.schema.yaml`
+- generator step output → `generator-step.schema.yaml`
+
+> `rubric.schema.yaml` is deprecated — its union shape (criterion | snapshot) matches no current artifact.
 
 > `rubric.schema.yaml` is deprecated — its union shape (criterion | snapshot) matches no current artifact.
