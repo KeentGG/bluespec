@@ -1,0 +1,37 @@
+run_id: run-0003
+evaluator: run_evaluator
+status: complete
+provider: local
+confidence: 0.82
+summary: Evaluated 3 specs against active rubric and golden set
+recall_hits:
+  - criterion: conditional_flow_documentation
+    spec: specs/app.state.yaml
+    evidence: spec captures state transitions and conditional rendering
+    weight: 0.81
+  - criterion: schema_valid
+    spec: specs/auth.session.yaml
+    evidence: all required fields present
+    weight: 1
+recall_misses:
+  - criterion: completeness_inputs_outputs
+    spec: specs/app.layout.yaml
+    gap: Layout spec does not document responsive breakpoint behavior
+    severity: medium
+precision_findings:
+  - spec: specs/app.state.yaml
+    concern: State transitions documented but trigger conditions implied rather than
+      explicit
+    severity: low
+consistency_findings:
+  - type: reference_resolution
+    status: pass
+    details: All cross-spec references resolve correctly
+rubric_gap_candidates: []
+overall_score: 0.74
+tokens_used: 521
+scored_specs:
+  - app-layout-yaml
+  - app-state-yaml
+  - auth-session-yaml
+scoring_timestamp: 2026-04-21T04:02:24.848Z

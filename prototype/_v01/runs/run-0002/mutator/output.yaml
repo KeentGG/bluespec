@@ -1,0 +1,19 @@
+run_id: run-0002
+mutator: run_mutator
+status: complete
+provider: local
+confidence: 0.71
+proposed_change:
+  type: step_management
+  target_step: explore
+  change: Add sub-step for state-machine boundary detection before analyze phase
+  expected_improvement: coverage on stateful behavior patterns
+  risk: medium
+  rationale: Search failure suggests explore phase needs explicit state-machine
+    boundary enumeration step before analyze
+insanity_check:
+  method_already_failed: false
+  failed_runs: []
+  justification: No prior attempt used prompt_tweak on draft phase for recognition_failure
+tokens_used: 425
+mutator_timestamp: 2026-04-17T13:40:31.157Z

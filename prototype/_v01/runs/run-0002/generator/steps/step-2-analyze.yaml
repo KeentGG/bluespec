@@ -1,0 +1,14 @@
+step: analyze
+step_number: 2
+status: complete
+confidence: 0.79
+summary: Mapped discovered behaviors to spec-ready units
+files_analyzed:
+  - src/state.ts
+  - src/components/App.tsx
+artifacts_produced:
+  - behavior_map.yaml
+unresolved_questions:
+  - Some state transitions lack clear triggers — treated as event-driven
+flags_for_analyzer:
+  - State machine patterns detected; boundary definitions are ambiguous

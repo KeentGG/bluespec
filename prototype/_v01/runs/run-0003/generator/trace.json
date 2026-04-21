@@ -1,0 +1,154 @@
+{
+  "run_id": "run-0003",
+  "provider": "local",
+  "model": "local",
+  "steps": [
+    {
+      "step": "explore",
+      "request": [
+        {
+          "role": "system",
+          "content": "# Generator Prompt Contract\n\n## Role\n\nGenerate spec artifacts from a frozen formula and a target project.\n\n## Inputs\n\n- run manifest\n- formula artifact\n- project config\n- optional prior lessons\n\n## Must Produce\n\n- generated specs\n- execution trace\n- confidence notes\n- unresolved questions\n\n## Must Not Do\n\n- mutate rubric state\n- mutate official formula state\n- claim behaviors without code evidence\n\n## Output Contract\n\nFollow `prompts/shared/output-contracts.md`.\n\n\nProject: undefined\nEcosystem: frontend\nCodebase: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2\nExcluded paths: none\n\nActive rubric criteria:\n  - coverage_core_behavior\n  - completeness_inputs_outputs\n  - consistency_cross_refs\n  - golden_set_recall\n  - conditional_flow_documentation\n\nGolden set behaviors (primary anchor):\n  - auth-conditional-redirect: editing project routes through a gated edit flow only when agreement state is satisfied\n  - download-button-visibility: download button becomes visible only after report progress reaches the download stage\n"
+        },
+        {
+          "role": "user",
+          "content": "###CURRENT_STEP### explore\n=== FORMULA STEP ===\nStep: explore\nName: Explore structure and dependencies\nPrompt hint: prompts/generator.md\nOutputs expected: trace, exploration_notes\n\n\n=== INSTRUCTION ===\nExecute step \"explore: Explore structure and dependencies\" and produce the expected outputs.\nFormat your output as a structured step result with this header:\nstep: explore\nstep_number: 1\nstatus: complete|partial|failed\nconfidence: <0.0-1.0>\nsummary: \"<what this step did>\"\nfiles_analyzed: [<list of files examined>]\nartifacts_produced: [<list of output artifacts>]\nunresolved_questions: [<questions this step could not answer>]\nflags_for_analyzer: [<notable observations for the analyzer>]\n"
+        }
+      ],
+      "response": {
+        "content": "step: explore\nstep_number: 1\nstatus: complete\nconfidence: 0.85\nsummary: \"Explored project structure and identified key behavioral areas\"\nfiles_analyzed:\n  - src/index.ts\n  - src/state.ts\n  - src/components/App.tsx\nartifacts_produced:\n  - explored_behaviors.yaml\nunresolved_questions:\n  - \"Confirm whether legacy auth module is still in use\"\nflags_for_analyzer: []\n",
+        "usage": {
+          "prompt_tokens": 173,
+          "completion_tokens": 91,
+          "total_tokens": 264
+        },
+        "metadata": {
+          "model": "local",
+          "temperature": 0.3,
+          "latency_ms": 0,
+          "role": "generator.explore"
+        }
+      },
+      "latency_ms": 0,
+      "status": "complete"
+    },
+    {
+      "step": "analyze",
+      "request": [
+        {
+          "role": "system",
+          "content": "# Generator Prompt Contract\n\n## Role\n\nGenerate spec artifacts from a frozen formula and a target project.\n\n## Inputs\n\n- run manifest\n- formula artifact\n- project config\n- optional prior lessons\n\n## Must Produce\n\n- generated specs\n- execution trace\n- confidence notes\n- unresolved questions\n\n## Must Not Do\n\n- mutate rubric state\n- mutate official formula state\n- claim behaviors without code evidence\n\n## Output Contract\n\nFollow `prompts/shared/output-contracts.md`.\n\n\nProject: undefined\nEcosystem: frontend\nCodebase: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2\nExcluded paths: none\n\nActive rubric criteria:\n  - coverage_core_behavior\n  - completeness_inputs_outputs\n  - consistency_cross_refs\n  - golden_set_recall\n  - conditional_flow_documentation\n\nGolden set behaviors (primary anchor):\n  - auth-conditional-redirect: editing project routes through a gated edit flow only when agreement state is satisfied\n  - download-button-visibility: download button becomes visible only after report progress reaches the download stage\n"
+        },
+        {
+          "role": "user",
+          "content": "###CURRENT_STEP### analyze\n=== FORMULA STEP ===\nStep: analyze\nName: Analyze discovered behavior\n\nOutputs expected: behavior_map\n\n=== PRIOR STEP OUTPUTS ===\n=== Output from explore ===\nstep: explore\nstep_number: 1\nstatus: complete\nconfidence: 0.85\nsummary: \"Explored project structure and identified key behavioral areas\"\nfiles_analyzed:\n  - src/index.ts\n  - src/state.ts\n  - src/components/App.tsx\nartifacts_produced:\n  - explored_behaviors.yaml\nunresolved_questions:\n  - \"Confirm whether legacy auth module is still in use\"\nflags_for_analyzer: []\n\n\n=== INSTRUCTION ===\nExecute step \"analyze: Analyze discovered behavior\" and produce the expected outputs.\nFormat your output as a structured step result with this header:\nstep: analyze\nstep_number: 2\nstatus: complete|partial|failed\nconfidence: <0.0-1.0>\nsummary: \"<what this step did>\"\nfiles_analyzed: [<list of files examined>]\nartifacts_produced: [<list of output artifacts>]\nunresolved_questions: [<questions this step could not answer>]\nflags_for_analyzer: [<notable observations for the analyzer>]\n"
+        }
+      ],
+      "response": {
+        "content": "step: analyze\nstep_number: 2\nstatus: complete\nconfidence: 0.79\nsummary: \"Mapped discovered behaviors to spec-ready units\"\nfiles_analyzed:\n  - src/state.ts\n  - src/components/App.tsx\nartifacts_produced:\n  - behavior_map.yaml\nunresolved_questions:\n  - \"Some state transitions lack clear triggers — treated as event-driven\"\nflags_for_analyzer:\n  - \"State machine patterns detected; boundary definitions are ambiguous\"\n",
+        "usage": {
+          "prompt_tokens": 264,
+          "completion_tokens": 104,
+          "total_tokens": 368
+        },
+        "metadata": {
+          "model": "local",
+          "temperature": 0.3,
+          "latency_ms": 0,
+          "role": "generator.analyze"
+        }
+      },
+      "latency_ms": 0,
+      "status": "complete"
+    },
+    {
+      "step": "draft",
+      "request": [
+        {
+          "role": "system",
+          "content": "# Generator Prompt Contract\n\n## Role\n\nGenerate spec artifacts from a frozen formula and a target project.\n\n## Inputs\n\n- run manifest\n- formula artifact\n- project config\n- optional prior lessons\n\n## Must Produce\n\n- generated specs\n- execution trace\n- confidence notes\n- unresolved questions\n\n## Must Not Do\n\n- mutate rubric state\n- mutate official formula state\n- claim behaviors without code evidence\n\n## Output Contract\n\nFollow `prompts/shared/output-contracts.md`.\n\n\nProject: undefined\nEcosystem: frontend\nCodebase: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2\nExcluded paths: none\n\nActive rubric criteria:\n  - coverage_core_behavior\n  - completeness_inputs_outputs\n  - consistency_cross_refs\n  - golden_set_recall\n  - conditional_flow_documentation\n\nGolden set behaviors (primary anchor):\n  - auth-conditional-redirect: editing project routes through a gated edit flow only when agreement state is satisfied\n  - download-button-visibility: download button becomes visible only after report progress reaches the download stage\n"
+        },
+        {
+          "role": "user",
+          "content": "###CURRENT_STEP### draft\n=== FORMULA STEP ===\nStep: draft\nName: Draft specs\n\nOutputs expected: spec_set\n\n=== PRIOR STEP OUTPUTS ===\n=== Output from explore ===\nstep: explore\nstep_number: 1\nstatus: complete\nconfidence: 0.85\nsummary: \"Explored project structure and identified key behavioral areas\"\nfiles_analyzed:\n  - src/index.ts\n  - src/state.ts\n  - src/components/App.tsx\nartifacts_produced:\n  - explored_behaviors.yaml\nunresolved_questions:\n  - \"Confirm whether legacy auth module is still in use\"\nflags_for_analyzer: []\n\n\n=== Output from analyze ===\nstep: analyze\nstep_number: 2\nstatus: complete\nconfidence: 0.79\nsummary: \"Mapped discovered behaviors to spec-ready units\"\nfiles_analyzed:\n  - src/state.ts\n  - src/components/App.tsx\nartifacts_produced:\n  - behavior_map.yaml\nunresolved_questions:\n  - \"Some state transitions lack clear triggers — treated as event-driven\"\nflags_for_analyzer:\n  - \"State machine patterns detected; boundary definitions are ambiguous\"\n\n\n=== INSTRUCTION ===\nExecute step \"draft: Draft specs\" and produce the expected outputs.\nFormat your output as a structured step result with this header:\nstep: draft\nstep_number: 3\nstatus: complete|partial|failed\nconfidence: <0.0-1.0>\nsummary: \"<what this step did>\"\nfiles_analyzed: [<list of files examined>]\nartifacts_produced: [<list of output artifacts>]\nunresolved_questions: [<questions this step could not answer>]\nflags_for_analyzer: [<notable observations for the analyzer>]\n"
+        }
+      ],
+      "response": {
+        "content": "step: draft\nstep_number: 3\nstatus: complete\nconfidence: 0.76\nsummary: \"Drafted 3 spec files covering auth session, app state, and layout\"\nfiles_analyzed: []\nartifacts_produced:\n  - specs/auth.session.yaml\n  - specs/app.state.yaml\n  - specs/app.layout.yaml\nunresolved_questions:\n  - \"Data table behavior may need separate spec depending on user feedback\"\nflags_for_analyzer: []\n",
+        "usage": {
+          "prompt_tokens": 364,
+          "completion_tokens": 95,
+          "total_tokens": 459
+        },
+        "metadata": {
+          "model": "local",
+          "temperature": 0.3,
+          "latency_ms": 0,
+          "role": "generator.draft"
+        }
+      },
+      "latency_ms": 0,
+      "status": "complete"
+    },
+    {
+      "step": "verify",
+      "request": [
+        {
+          "role": "system",
+          "content": "# Generator Prompt Contract\n\n## Role\n\nGenerate spec artifacts from a frozen formula and a target project.\n\n## Inputs\n\n- run manifest\n- formula artifact\n- project config\n- optional prior lessons\n\n## Must Produce\n\n- generated specs\n- execution trace\n- confidence notes\n- unresolved questions\n\n## Must Not Do\n\n- mutate rubric state\n- mutate official formula state\n- claim behaviors without code evidence\n\n## Output Contract\n\nFollow `prompts/shared/output-contracts.md`.\n\n\nProject: undefined\nEcosystem: frontend\nCodebase: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2\nExcluded paths: none\n\nActive rubric criteria:\n  - coverage_core_behavior\n  - completeness_inputs_outputs\n  - consistency_cross_refs\n  - golden_set_recall\n  - conditional_flow_documentation\n\nGolden set behaviors (primary anchor):\n  - auth-conditional-redirect: editing project routes through a gated edit flow only when agreement state is satisfied\n  - download-button-visibility: download button becomes visible only after report progress reaches the download stage\n"
+        },
+        {
+          "role": "user",
+          "content": "###CURRENT_STEP### verify\n=== FORMULA STEP ===\nStep: verify\nName: Verify schema and reference consistency\n\nOutputs expected: verification_report\n\n=== PRIOR STEP OUTPUTS ===\n=== Output from explore ===\nstep: explore\nstep_number: 1\nstatus: complete\nconfidence: 0.85\nsummary: \"Explored project structure and identified key behavioral areas\"\nfiles_analyzed:\n  - src/index.ts\n  - src/state.ts\n  - src/components/App.tsx\nartifacts_produced:\n  - explored_behaviors.yaml\nunresolved_questions:\n  - \"Confirm whether legacy auth module is still in use\"\nflags_for_analyzer: []\n\n\n=== Output from analyze ===\nstep: analyze\nstep_number: 2\nstatus: complete\nconfidence: 0.79\nsummary: \"Mapped discovered behaviors to spec-ready units\"\nfiles_analyzed:\n  - src/state.ts\n  - src/components/App.tsx\nartifacts_produced:\n  - behavior_map.yaml\nunresolved_questions:\n  - \"Some state transitions lack clear triggers — treated as event-driven\"\nflags_for_analyzer:\n  - \"State machine patterns detected; boundary definitions are ambiguous\"\n\n\n=== Output from draft ===\nstep: draft\nstep_number: 3\nstatus: complete\nconfidence: 0.76\nsummary: \"Drafted 3 spec files covering auth session, app state, and layout\"\nfiles_analyzed: []\nartifacts_produced:\n  - specs/auth.session.yaml\n  - specs/app.state.yaml\n  - specs/app.layout.yaml\nunresolved_questions:\n  - \"Data table behavior may need separate spec depending on user feedback\"\nflags_for_analyzer: []\n\n\n=== INSTRUCTION ===\nExecute step \"verify: Verify schema and reference consistency\" and produce the expected outputs.\nFormat your output as a structured step result with this header:\nstep: verify\nstep_number: 4\nstatus: complete|partial|failed\nconfidence: <0.0-1.0>\nsummary: \"<what this step did>\"\nfiles_analyzed: [<list of files examined>]\nartifacts_produced: [<list of output artifacts>]\nunresolved_questions: [<questions this step could not answer>]\nflags_for_analyzer: [<notable observations for the analyzer>]\n"
+        }
+      ],
+      "response": {
+        "content": "step: verify\nstep_number: 4\nstatus: complete\nconfidence: 0.83\nsummary: \"Verified schema validity and reference consistency; no contradictions detected\"\nfiles_analyzed: []\nartifacts_produced:\n  - verification_report.yaml\nunresolved_questions: []\nflags_for_analyzer: []\n",
+        "usage": {
+          "prompt_tokens": 483,
+          "completion_tokens": 67,
+          "total_tokens": 550
+        },
+        "metadata": {
+          "model": "local",
+          "temperature": 0.3,
+          "latency_ms": 0,
+          "role": "generator.verify"
+        }
+      },
+      "latency_ms": 0,
+      "status": "complete"
+    },
+    {
+      "step": "cross_ref",
+      "request": [
+        {
+          "role": "system",
+          "content": "# Generator Prompt Contract\n\n## Role\n\nGenerate spec artifacts from a frozen formula and a target project.\n\n## Inputs\n\n- run manifest\n- formula artifact\n- project config\n- optional prior lessons\n\n## Must Produce\n\n- generated specs\n- execution trace\n- confidence notes\n- unresolved questions\n\n## Must Not Do\n\n- mutate rubric state\n- mutate official formula state\n- claim behaviors without code evidence\n\n## Output Contract\n\nFollow `prompts/shared/output-contracts.md`.\n\n\nProject: undefined\nEcosystem: frontend\nCodebase: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2\nExcluded paths: none\n\nActive rubric criteria:\n  - coverage_core_behavior\n  - completeness_inputs_outputs\n  - consistency_cross_refs\n  - golden_set_recall\n  - conditional_flow_documentation\n\nGolden set behaviors (primary anchor):\n  - auth-conditional-redirect: editing project routes through a gated edit flow only when agreement state is satisfied\n  - download-button-visibility: download button becomes visible only after report progress reaches the download stage\n"
+        },
+        {
+          "role": "user",
+          "content": "###CURRENT_STEP### cross_ref\n=== FORMULA STEP ===\nStep: cross_ref\nName: Link related specs and evidence\n\nOutputs expected: reference_map\n\n=== PRIOR STEP OUTPUTS ===\n=== Output from explore ===\nstep: explore\nstep_number: 1\nstatus: complete\nconfidence: 0.85\nsummary: \"Explored project structure and identified key behavioral areas\"\nfiles_analyzed:\n  - src/index.ts\n  - src/state.ts\n  - src/components/App.tsx\nartifacts_produced:\n  - explored_behaviors.yaml\nunresolved_questions:\n  - \"Confirm whether legacy auth module is still in use\"\nflags_for_analyzer: []\n\n\n=== Output from analyze ===\nstep: analyze\nstep_number: 2\nstatus: complete\nconfidence: 0.79\nsummary: \"Mapped discovered behaviors to spec-ready units\"\nfiles_analyzed:\n  - src/state.ts\n  - src/components/App.tsx\nartifacts_produced:\n  - behavior_map.yaml\nunresolved_questions:\n  - \"Some state transitions lack clear triggers — treated as event-driven\"\nflags_for_analyzer:\n  - \"State machine patterns detected; boundary definitions are ambiguous\"\n\n\n=== Output from draft ===\nstep: draft\nstep_number: 3\nstatus: complete\nconfidence: 0.76\nsummary: \"Drafted 3 spec files covering auth session, app state, and layout\"\nfiles_analyzed: []\nartifacts_produced:\n  - specs/auth.session.yaml\n  - specs/app.state.yaml\n  - specs/app.layout.yaml\nunresolved_questions:\n  - \"Data table behavior may need separate spec depending on user feedback\"\nflags_for_analyzer: []\n\n\n=== Output from verify ===\nstep: verify\nstep_number: 4\nstatus: complete\nconfidence: 0.83\nsummary: \"Verified schema validity and reference consistency; no contradictions detected\"\nfiles_analyzed: []\nartifacts_produced:\n  - verification_report.yaml\nunresolved_questions: []\nflags_for_analyzer: []\n\n\n=== INSTRUCTION ===\nExecute step \"cross_ref: Link related specs and evidence\" and produce the expected outputs.\nFormat your output as a structured step result with this header:\nstep: cross_ref\nstep_number: 5\nstatus: complete|partial|failed\nconfidence: <0.0-1.0>\nsummary: \"<what this step did>\"\nfiles_analyzed: [<list of files examined>]\nartifacts_produced: [<list of output artifacts>]\nunresolved_questions: [<questions this step could not answer>]\nflags_for_analyzer: [<notable observations for the analyzer>]\n"
+        }
+      ],
+      "response": {
+        "content": "step: cross_ref\nstep_number: 5\nstatus: complete\nconfidence: 0.81\nsummary: \"Linked related specs and evidence; created reference map\"\nfiles_analyzed: []\nartifacts_produced:\n  - reference_map.yaml\nunresolved_questions:\n  - \"Cross-ref with golden set pending evaluator run\"\nflags_for_analyzer: []\n",
+        "usage": {
+          "prompt_tokens": 555,
+          "completion_tokens": 74,
+          "total_tokens": 629
+        },
+        "metadata": {
+          "model": "local",
+          "temperature": 0.3,
+          "latency_ms": 0,
+          "role": "generator.cross_ref"
+        }
+      },
+      "latency_ms": 0,
+      "status": "complete"
+    }
+  ],
+  "overall_latency_ms": 0,
+  "total_tokens": 2270
+}

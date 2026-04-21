@@ -1,0 +1,11 @@
+step: cross_ref
+step_number: 5
+status: complete
+confidence: 0.81
+summary: Linked related specs and evidence; created reference map
+files_analyzed: []
+artifacts_produced:
+  - reference_map.yaml
+unresolved_questions:
+  - Cross-ref with golden set pending evaluator run
+flags_for_analyzer: []

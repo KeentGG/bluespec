@@ -1,0 +1,71 @@
+id: frontend-derived
+version: v001
+ecosystem: frontend
+behavior_shapes:
+  - stateful_ui
+  - conditional_flow
+  - data_dashboard_layout
+compatible_rubric_snapshots:
+  - v002
+steps:
+  - id: explore
+    name: Explore structure and dependencies
+    prompt: prompts/generator.md
+    outputs:
+      - trace
+      - exploration_notes
+  - id: analyze
+    name: Analyze discovered behavior
+    outputs:
+      - behavior_map
+  - id: draft
+    name: Draft specs
+    outputs:
+      - spec_set
+  - id: verify
+    name: Verify schema and reference consistency
+    outputs:
+      - verification_report
+  - id: cross_ref
+    name: Link related specs and evidence
+    outputs:
+      - reference_map
+validations:
+  - schema_valid
+  - references_resolve
+  - no_internal_contradictions
+mutation_tiers:
+  - prompt_tweak
+  - step_management
+  - parent_guideline
+  - schema_change
+  - tool_change
+  - rubric_mutation
+_extends_chain:
+  - formulas/seed/universal.yaml
+  - formulas/seed/frontend.yaml
+  - formulas/promoted/frontend-derived.yaml
+specializations:
+  - component_state_tracking
+  - conditional_rendering_checks
+  - accessibility_review
+  - layout_intent_capture
+  - data_table_behavior
+parent: frontend-seed
+fine_tune_run: run-0001
+fine_tuned_criteria:
+  - id: conditional_rendering_checks
+    weight: 1.2
+    source: run-0001
+    reason: Higher weight justified after observing complex conditional flows in
+      dashboard-v2
+suppressed_criteria:
+  - id: layout_intent_capture
+    reason: Not applicable to dashboard-v2 admin context
+inherited_criteria: parent
+status: active
+discovered_in_run: run-0001
+created_at: 2026-04-17T04:35:00.000Z
+promoted_at: 2026-04-17T04:52:11.971Z
+governance_notes: First formula candidate promotion. Fine-tuned from
+  frontend-seed with dashboard-v2 run data.

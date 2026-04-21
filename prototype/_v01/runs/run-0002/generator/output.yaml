@@ -1,0 +1,36 @@
+run_id: run-0002
+generator: run_generator
+status: complete
+provider: local
+model: local
+steps_completed: 5
+failed_at_step: null
+error_reason: null
+confidence_by_section:
+  explore: 0.85
+  analyze: 0.79
+  draft: 0.76
+  verify: 0.83
+  cross_ref: 0.81
+overall_confidence: 0.81
+unresolved_questions:
+  - Confirm whether legacy auth module is still in use
+  - Some state transitions lack clear triggers — treated as event-driven
+  - Data table behavior may need separate spec depending on user feedback
+  - Cross-ref with golden set pending evaluator run
+phase_outputs:
+  explore: generator/steps/step-1-explore.yaml
+  analyze: generator/steps/step-2-analyze.yaml
+  draft: generator/steps/step-3-draft.yaml
+  verify: generator/steps/step-4-verify.yaml
+  cross_ref: generator/steps/step-5-cross_ref.yaml
+specs_generated:
+  - generator/specs/auth.session.yaml
+  - generator/specs/app.state.yaml
+  - generator/specs/app.layout.yaml
+generation_started_at: 2026-04-17T13:40:30.920Z
+generation_completed_at: 2026-04-17T13:40:30.929Z
+latency_ms: 0
+tokens_used: 2270
+flags_for_analyzer:
+  - State machine patterns detected; boundary definitions are ambiguous
