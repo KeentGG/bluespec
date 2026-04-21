@@ -16,7 +16,11 @@
     "reject-rubric-candidate": "node scripts/cli.js reject_rubric_candidate",
     "promote-rubric-snapshot": "node scripts/cli.js promote_rubric_snapshot",
     "register-formula-candidate": "node scripts/cli.js register_formula_candidate",
-    "advance-formula": "node scripts/cli.js advance_formula"
+    "advance-formula": "node scripts/cli.js advance_formula",
+    "start": "node start.js",
+    "checkpoint-run": "node scripts/cli.js checkpoint_run",
+    "resume-run": "node scripts/cli.js resume_run",
+    "release-lock": "node scripts/cli.js release_lock"
   },
   "dependencies": {
     "ajv": "^8.17.1",
