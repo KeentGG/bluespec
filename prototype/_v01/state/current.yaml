@@ -2,9 +2,9 @@ current_formula_ref: formulas/promoted/frontend-derived.yaml
 current_rubric_snapshot_ref: rubrics/snapshots/v002/rubric.yaml
 current_project_ref: config/projects/sample-project.yaml
 current_golden_set_ref: goldens/projects/sample-project/behaviors.yaml
-next_run_id: run-0002
+next_run_id: run-0005
 mode: official
 notes:
   - prototype bootstrapped
   - rubric discovery remains diagnose-only until shadow scoring is added
-last_prepared_run_id: run-0001
+last_prepared_run_id: run-0004

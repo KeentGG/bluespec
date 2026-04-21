@@ -1,5 +1,9 @@
 pending_runs: []
 pending_promotions:
-  formulas: []
+  formulas:
+    - frontend-derived-state-boundaries
+    - frontend-derived-draft-state-transitions
   rubric_criteria: []
-pending_reviews: []
+pending_reviews:
+  - formula:frontend-derived-state-boundaries
+  - formula:frontend-derived-draft-state-transitions
