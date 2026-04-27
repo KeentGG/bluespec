@@ -1,0 +1,279 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: BehavioralSpec
+description: |
+  A structured behavioral specification derived from source code analysis.
+  Each spec captures the actual state machine, conditions, inputs/outputs, and
+  evidence from the codebase for one or more golden set behaviors.
+  NOT documentation — a precise behavioral contract with evidence.
+type: object
+required:
+  - id
+  - version
+  - type
+  - golden_behaviors
+  - description
+  - evidence_refs
+  - confidence
+
+properties:
+
+  # Identity
+  id:
+    type: string
+    description: |
+      Stable identifier matching the golden behavior id.
+      Use the behavior id converted to a safe filename, e.g.
+      auth-conditional-redirect -> auth.conditional-redirect.yaml
+  version:
+    type: string
+    description: "Spec version (e.g. 1.0)"
+  type:
+    type: string
+    const: spec
+  ecosystem:
+    type: string
+    description: "Project ecosystem (e.g. frontend, backend, mobile, cli)"
+
+  # Behavioral coverage
+  golden_behaviors:
+    type: array
+    description: "Which golden set behaviors this spec covers"
+    minItems: 1
+    items:
+      type: object
+      required:
+        - id
+        - coverage
+      properties:
+        id:
+          type: string
+          description: "Golden behavior id from the golden set"
+        coverage:
+          type: string
+          enum: [full, partial, none]
+          description: |
+            full — spec documents the complete behavior
+            partial — spec documents part of the behavior
+            none — behavior is absent from this spec's scope
+        notes:
+          type: string
+          description: "What is or is not covered, gaps identified"
+
+  # Human-readable summary
+  description:
+    type: string
+    description: |
+      One-paragraph human-readable summary of what this spec specifies.
+      Describe WHAT the behavior does, not HOW the code is structured.
+      Use present tense: "redirects to gated edit flow when agreement
+      is signed" not "the login function checks if agreement is signed".
+
+  # State machine (present if behavior is stateful)
+  state_machine:
+    type: [object, "null"]
+    description: "State machine definition — omit if behavior has no distinct states"
+    properties:
+      initial:
+        type: string
+        description: "The initial state id"
+      states:
+        type: array
+        description: "All possible states"
+        minItems: 1
+        items:
+          type: object
+          required: [id, description]
+          properties:
+            id:
+              type: string
+              description: "Unique state identifier, e.g. anonymous, authenticating"
+            description:
+              type: string
+              description: "What this state means in business terms"
+      transitions:
+        type: array
+        description: "Valid state transitions"
+        items:
+          type: object
+          required: [id, from, to, trigger]
+          properties:
+            id:
+              type: string
+              description: "Transition identifier, e.g. login_submit, logout"
+            from:
+              type: string
+              description: "Source state id"
+            to:
+              type: string
+              description: "Target state id"
+            trigger:
+              type: string
+              description: "What initiates this transition, e.g. user clicks login"
+            guards:
+              type: array
+              description: "Conditions that must be true for the transition to fire"
+              items:
+                type: object
+                properties:
+                  field:
+                    type: string
+                    description: "What is being checked, e.g. credentials_present"
+                  condition:
+                    type: string
+                    description: "The condition, e.g. email is non-empty AND valid format"
+            effects:
+              type: array
+              description: "Side effects of this transition"
+              items:
+                type: string
+                description: "Effect description, e.g. store token in httpOnly cookie"
+
+  # Conditional behaviors (non-state-machine conditions)
+  conditions:
+    type: array
+    description: "Conditional behaviors that are not state transitions, e.g. visibility gates"
+    items:
+      type: object
+      required: [id, description, trigger]
+      properties:
+        id:
+          type: string
+          description: "Unique identifier for this condition"
+        description:
+          type: string
+          description: "What the condition does in business terms"
+        trigger:
+          type: string
+          description: "What event or state causes this condition to be evaluated"
+        guards:
+          type: array
+          description: "Conditions that must be satisfied"
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                description: "What is being checked"
+              condition:
+                type: string
+                description: "The condition expression"
+        then:
+          type: array
+          description: "Actions to take when guards pass"
+          items:
+            type: string
+        else:
+          type: array
+          description: "Actions to take when guards fail or are absent"
+          items:
+            type: string
+
+  # Inputs
+  inputs:
+    type: array
+    description: "Inputs this behavior requires from external sources"
+    items:
+      type: object
+      required: [id, type, source]
+      properties:
+        id:
+          type: string
+          description: "Input identifier, e.g. credentials, return_url"
+        type:
+          type: string
+          description: "Type description, e.g. email+password object, string URL"
+        source:
+          type: string
+          description: "Where the input comes from, e.g. user form, query parameter, API"
+        required:
+          type: boolean
+          description: "Whether this input is mandatory"
+        validation:
+          type: object
+          description: "Validation rules"
+          additionalProperties:
+            type: string
+
+  # Outputs
+  outputs:
+    type: array
+    description: "Outputs this behavior produces"
+    items:
+      type: object
+      required: [id, type, destination]
+      properties:
+        id:
+          type: string
+          description: "Output identifier, e.g. session_token, redirect_url"
+        type:
+          type: string
+          description: "Type description, e.g. JWT string, HTTP redirect"
+        destination:
+          type: string
+          description: "Where the output goes, e.g. httpOnly cookie, browser redirect"
+        lifespan:
+          type: string
+          description: "How long the output persists, e.g. session, 7 days, immediate"
+
+  # Evidence from source code
+  evidence_refs:
+    type: array
+    description: "Source code evidence for each claim in this spec"
+    minItems: 1
+    items:
+      type: object
+      required: [path, snippet, covers]
+      properties:
+        path:
+          type: string
+          description: "Absolute or relative path to source file"
+        snippet:
+          type: string
+          description: |
+            Relevant code. MUST be actual source code, not a summary.
+            Include enough context to be verifiable. Can be multi-line.
+        covers:
+          type: array
+          items:
+            type: string
+          description: |
+            What aspects of the spec this snippet evidences.
+            Use state ids, transition ids, input/output ids, or condition ids
+            from this spec, e.g. [transition: login_success, output: session_token]
+        line_range:
+          type: object
+          description: "Optional line range for precision"
+          properties:
+            start:
+              type: integer
+            end:
+              type: integer
+
+  # Confidence
+  confidence:
+    type: number
+    minimum: 0
+    maximum: 1
+    description: "Confidence this spec accurately represents the actual behavior"
+  confidence_rationale:
+    type: string
+    description: |
+      Why this confidence level. List what was confirmed and what is
+      unknown or ambiguous, e.g. "State transitions confirmed in 3 files.
+      Guard conditions are inferred. Token cleanup not found."
+
+  # Open questions
+  unresolved_questions:
+    type: array
+    description: "Questions this spec could not answer from the available code"
+    items:
+      type: string
+
+  # Spec status
+  status:
+    type: string
+    enum: [complete, partial, stub]
+    description: |
+      complete — behavior fully specified with evidence
+      partial — behavior specified but gaps remain
+      stub — placeholder, behavior not yet analyzed

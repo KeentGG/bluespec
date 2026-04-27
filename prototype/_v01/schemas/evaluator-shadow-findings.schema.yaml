@@ -1,0 +1,182 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: EvaluatorShadowFindings
+description: Qualitative evaluator findings written by run_evaluator to runs/<run-id>/evaluator/shadow-findings.yaml.
+type: object
+required:
+  - run_id
+  - evaluator
+  - status
+  - provider
+  - recall_hits
+  - recall_misses
+  - precision_findings
+  - consistency_findings
+  - rubric_gap_candidates
+properties:
+  run_id:
+    type: string
+    description: Run this output belongs to.
+  evaluator:
+    type: string
+    description: Evaluator role name or adapter label.
+  status:
+    type: string
+    enum: [complete, completed, partial, failed]
+    description: Canonical run status; completed is allowed for legacy local adapters.
+  provider:
+    type: string
+    description: Provider adapter used (e.g. opencode, local, hermes).
+  recall_hits:
+    type: array
+    description: Qualitative recall hits surfaced by the evaluator.
+    items:
+      $ref: '#/$defs/findingsItem'
+  recall_misses:
+    type: array
+    description: Qualitative recall misses surfaced by the evaluator.
+    items:
+      $ref: '#/$defs/findingsItem'
+  precision_findings:
+    type: array
+    description: Unsupported, hallucinated, or over-claimed findings.
+    items:
+      $ref: '#/$defs/findingsItem'
+  consistency_findings:
+    type: array
+    description: Internal or cross-spec contradictions.
+    items:
+      $ref: '#/$defs/findingsItem'
+  rubric_gap_candidates:
+    anyOf:
+      - type: array
+        description: Proposed-only rubric gap suspects; do not activate in the same run.
+        items:
+          $ref: '#/$defs/findingsItem'
+      - type: object
+        description: Legacy object-shaped rubric-gap payload retained for compatibility.
+        additionalProperties: true
+        properties:
+          proposed_only:
+            type: boolean
+          gaps:
+            type: array
+            items:
+              $ref: '#/$defs/findingsItem'
+  scored_specs:
+    type: array
+    description: Optional compatibility field used by some legacy adapters.
+    items:
+      anyOf:
+        - type: string
+        - $ref: '#/$defs/specScore'
+  spec_scores:
+    type: array
+    description: Optional compatibility field used by some legacy adapters.
+    items:
+      $ref: '#/$defs/specScore'
+  overall_score:
+    type: number
+    minimum: 0
+    maximum: 1
+  overall_score_breakdown:
+    type: object
+    additionalProperties: true
+    properties:
+      recall:
+        type: number
+        minimum: 0
+        maximum: 1
+      precision:
+        type: number
+        minimum: 0
+        maximum: 1
+      consistency:
+        type: number
+        minimum: 0
+        maximum: 1
+  confidence:
+    type: number
+    minimum: 0
+    maximum: 1
+  confidence_rationale:
+    type: string
+  scoring_timestamp:
+    type: string
+    format: date-time
+  summary:
+    type: string
+  tokens_used:
+    type: integer
+    minimum: 0
+
+$defs:
+  specScore:
+    type: object
+    additionalProperties: true
+    properties:
+      spec_id:
+        type: string
+      id:
+        type: string
+      recall:
+        type: number
+        minimum: 0
+        maximum: 1
+      precision:
+        type: number
+        minimum: 0
+        maximum: 1
+      consistency:
+        type: number
+        minimum: 0
+        maximum: 1
+      overall_score:
+        type: number
+        minimum: 0
+        maximum: 1
+      coverage:
+        type: string
+      severity:
+        type: string
+      notes:
+        type: string
+      detail:
+        type: string
+      evidence:
+        type: array
+        items:
+          type: string
+  findingsItem:
+    type: object
+    additionalProperties: true
+    properties:
+      spec_id:
+        type: string
+      spec:
+        type: string
+      behavior_id:
+        type: string
+      criterion:
+        type: string
+      coverage:
+        type: string
+      severity:
+        type: string
+      finding:
+        type: string
+      issue:
+        type: string
+      concern:
+        type: string
+      description:
+        type: string
+      detail:
+        type: string
+      rationale:
+        type: string
+      evidence:
+        anyOf:
+          - type: string
+          - type: array
+            items:
+              type: string

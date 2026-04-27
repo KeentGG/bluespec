@@ -1,0 +1,196 @@
+$schema: "https://json-schema.org/draft/2020-12/schema"
+title: EvaluatorOutput
+description: Official machine-comparable score report written by run_evaluator to runs/<run-id>/evaluator/output.yaml.
+type: object
+required:
+  - run_id
+  - evaluator
+  - status
+  - provider
+  - overall_score
+  - overall_score_breakdown
+  - confidence
+  - scoring_timestamp
+anyOf:
+  - required:
+      - scored_specs
+  - required:
+      - spec_scores
+properties:
+  run_id:
+    type: string
+    description: Run this output belongs to.
+  evaluator:
+    type: string
+    description: Evaluator role name or adapter label.
+  status:
+    type: string
+    enum: [complete, completed, partial, failed]
+    description: Canonical run status; completed is allowed for legacy local adapters.
+  provider:
+    type: string
+    description: Provider adapter used (e.g. opencode, local, hermes).
+  model:
+    type: string
+    description: Model identifier used by the provider.
+  scored_specs:
+    type: array
+    description: Canonical per-spec score data for the official score report.
+    items:
+      anyOf:
+        - type: string
+        - $ref: '#/$defs/specScore'
+  spec_scores:
+    type: array
+    description: Legacy alias used by some local adapters for per-spec score data.
+    items:
+      $ref: '#/$defs/specScore'
+  overall_score:
+    type: number
+    minimum: 0
+    maximum: 1
+    description: Overall weighted score in the 0.0-1.0 range.
+  overall_score_breakdown:
+    type: object
+    additionalProperties: true
+    properties:
+      recall:
+        type: number
+        minimum: 0
+        maximum: 1
+      precision:
+        type: number
+        minimum: 0
+        maximum: 1
+      consistency:
+        type: number
+        minimum: 0
+        maximum: 1
+    description: Weighted sub-scores used to derive the overall score.
+  confidence:
+    type: number
+    minimum: 0
+    maximum: 1
+    description: Confidence in the evaluation result.
+  confidence_rationale:
+    type: string
+    description: Why the evaluator assigned the confidence level.
+  scoring_timestamp:
+    type: string
+    format: date-time
+    description: ISO timestamp for when scoring completed.
+  summary:
+    type: string
+    description: Legacy freeform summary emitted by some adapters.
+  tokens_used:
+    type: integer
+    minimum: 0
+    description: Legacy token count from some adapters.
+  recall_hits:
+    type: array
+    description: Legacy qualitative findings retained for compatibility.
+    items:
+      $ref: '#/$defs/findingsItem'
+  recall_misses:
+    type: array
+    description: Legacy qualitative findings retained for compatibility.
+    items:
+      $ref: '#/$defs/findingsItem'
+  precision_findings:
+    type: array
+    description: Legacy qualitative findings retained for compatibility.
+    items:
+      $ref: '#/$defs/findingsItem'
+  consistency_findings:
+    type: array
+    description: Legacy qualitative findings retained for compatibility.
+    items:
+      $ref: '#/$defs/findingsItem'
+  rubric_gap_candidates:
+    anyOf:
+      - type: array
+        description: Legacy qualitative findings retained for compatibility.
+        items:
+          $ref: '#/$defs/findingsItem'
+      - type: object
+        description: Legacy object-shaped rubric-gap payload retained for compatibility.
+        additionalProperties: true
+        properties:
+          proposed_only:
+            type: boolean
+          gaps:
+            type: array
+            items:
+              $ref: '#/$defs/findingsItem'
+
+$defs:
+  specScore:
+    type: object
+    additionalProperties: true
+    properties:
+      spec_id:
+        type: string
+      id:
+        type: string
+      recall:
+        type: number
+        minimum: 0
+        maximum: 1
+      precision:
+        type: number
+        minimum: 0
+        maximum: 1
+      consistency:
+        type: number
+        minimum: 0
+        maximum: 1
+      overall_score:
+        type: number
+        minimum: 0
+        maximum: 1
+      coverage:
+        type: string
+      severity:
+        type: string
+      notes:
+        type: string
+      detail:
+        type: string
+      evidence:
+        type: array
+        items:
+          type: string
+  findingsItem:
+    type: object
+    additionalProperties: true
+    properties:
+      spec_id:
+        type: string
+      spec:
+        type: string
+      behavior_id:
+        type: string
+      criterion:
+        type: string
+      coverage:
+        type: string
+      severity:
+        type: string
+      finding:
+        type: string
+      issue:
+        type: string
+      concern:
+        type: string
+      description:
+        type: string
+      detail:
+        type: string
+      rationale:
+        type: string
+      evidence:
+        anyOf:
+          - type: string
+          - type: array
+            items:
+              type: string
