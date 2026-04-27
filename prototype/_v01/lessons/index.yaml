@@ -5,3 +5,132 @@ policy:
 files:
   learned: lessons/learned.jsonl
   failed: lessons/failed.jsonl
+generated_at: 2026-04-22T15:53:00.724Z
+stats:
+  total_lessons: 4
+  learned_count: 2
+  failed_count: 2
+lookup:
+  by_failure_type:
+    recognition_failure:
+      total: 1
+      results:
+        PASSED: 1
+        FAILED: 0
+        PARTIAL: 0
+      teaching_methods:
+        verification_crosscheck:
+          total: 1
+          results:
+            PASSED: 1
+            FAILED: 0
+            PARTIAL: 0
+          entries:
+            - source_ref: lessons/learned.jsonl#1
+              result: PASSED
+              scenario: conditional UI visibility missed
+              run_id: null
+              bucket: learned
+    rubric_gap_failure:
+      total: 2
+      results:
+        PASSED: 1
+        FAILED: 1
+        PARTIAL: 0
+      teaching_methods:
+        rubric_candidate_proposal:
+          total: 1
+          results:
+            PASSED: 1
+            FAILED: 0
+            PARTIAL: 0
+          entries:
+            - source_ref: lessons/learned.jsonl#2
+              result: PASSED
+              scenario: predicate-level distinctions (hidden vs disabled, stale-golden route
+                drift) not captured by broad golden_set_recall
+              run_id: run-0010
+              bucket: learned
+        prompt_tweak:
+          total: 1
+          results:
+            PASSED: 0
+            FAILED: 1
+            PARTIAL: 0
+          entries:
+            - source_ref: lessons/failed.jsonl#2
+              result: FAILED
+              scenario: prompt_tweak alone cannot fix rubric gaps - formula improved but
+                rubric still penalized code-faithful partial specs
+              run_id: run-0010
+              bucket: failed
+    prompt_failure:
+      total: 1
+      results:
+        PASSED: 0
+        FAILED: 1
+        PARTIAL: 0
+      teaching_methods:
+        prompt_reword_only:
+          total: 1
+          results:
+            PASSED: 0
+            FAILED: 1
+            PARTIAL: 0
+          entries:
+            - source_ref: lessons/failed.jsonl#1
+              result: FAILED
+              scenario: agent missed conditional routing after prompt wording change
+              run_id: null
+              bucket: failed
+entries:
+  - bucket: learned
+    source_ref: lessons/learned.jsonl#1
+    line_number: 1
+    failure_type: recognition_failure
+    teaching_method: verification_crosscheck
+    result: PASSED
+    scenario: conditional UI visibility missed
+    works_on:
+      - conditional_rendering
+      - feature_flags
+      - permission_gating
+    run_id: null
+    discovered_criterion: null
+  - bucket: learned
+    source_ref: lessons/learned.jsonl#2
+    line_number: 2
+    failure_type: rubric_gap_failure
+    teaching_method: rubric_candidate_proposal
+    result: PASSED
+    scenario: predicate-level distinctions (hidden vs disabled, stale-golden route
+      drift) not captured by broad golden_set_recall
+    works_on:
+      - conditional_flow_documentation
+      - golden_set_recall
+    run_id: run-0010
+    discovered_criterion: null
+  - bucket: failed
+    source_ref: lessons/failed.jsonl#1
+    line_number: 1
+    failure_type: prompt_failure
+    teaching_method: prompt_reword_only
+    result: FAILED
+    scenario: agent missed conditional routing after prompt wording change
+    works_on:
+      - conditional_routing
+    run_id: null
+    discovered_criterion: null
+  - bucket: failed
+    source_ref: lessons/failed.jsonl#2
+    line_number: 2
+    failure_type: rubric_gap_failure
+    teaching_method: prompt_tweak
+    result: FAILED
+    scenario: prompt_tweak alone cannot fix rubric gaps - formula improved but
+      rubric still penalized code-faithful partial specs
+    works_on:
+      - conditional_flow_documentation
+      - golden_set_recall
+    run_id: run-0010
+    discovered_criterion: null

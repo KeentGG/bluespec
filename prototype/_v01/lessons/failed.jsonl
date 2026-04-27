@@ -1,1 +1,2 @@
 {"failure_type":"prompt_failure","scenario":"agent missed conditional routing after prompt wording change","teaching_method":"prompt_reword_only","result":"FAILED","works_on":["conditional_routing"]}
+{"failure_type":"rubric_gap_failure","scenario":"prompt_tweak alone cannot fix rubric gaps - formula improved but rubric still penalized code-faithful partial specs","teaching_method":"prompt_tweak","result":"FAILED","works_on":["conditional_flow_documentation","golden_set_recall"],"run_id":"run-0010"}
