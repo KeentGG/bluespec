@@ -1,0 +1,27 @@
+id: run-0016-step-management-explore
+version: v001
+ecosystem: frontend
+extends: formulas/seed/frontend.yaml
+parent: formulas/seed/frontend.yaml
+fine_tune_run: run-0016
+behavior_shapes:
+  - stateful_ui
+  - conditional_flow
+compatible_rubric_snapshots:
+  - v001
+mutation_tiers:
+  - prompt_tweak
+  - step_management
+  - parent_guideline
+  - schema_change
+  - tool_change
+  - rubric_mutation
+specializations:
+  - component_state_tracking
+  - conditional_rendering_checks
+  - accessibility_review
+  - layout_intent_capture
+  - golden_targeted_discovery
+status: candidate
+discovered_in_run: unknown
+created_at: 2026-04-23T07:54:31.253Z

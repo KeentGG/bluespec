@@ -1,0 +1,141 @@
+id: frontend-derived-v004-evidence-obligation-gates
+version: v004
+ecosystem: frontend
+behavior_shapes:
+  - stateful_ui
+  - conditional_flow
+  - data_dashboard_layout
+compatible_rubric_snapshots:
+  - v002
+steps:
+  - id: explore
+    name: Explore structure, dependencies, and state-machine boundaries
+    prompt: >
+      Follow prompts/generator.md. For each golden behavior, begin from the
+      named evidence surface or a likely renamed successor, then search adjacent
+      route/component/hook/contract files needed to prove or falsify the claim.
+      Emit a per-behavior evidence_plan with unique predicates, fallback files,
+      and required boundary proofs. Emit a discovered_files_matrix keyed by
+      golden_behavior_id. If the named surface is absent, record an explicit
+      not_found_or_renamed status before analyze.
+    outputs:
+      - trace
+      - exploration_notes
+      - state_machine_boundaries
+      - evidence_plan
+      - discovered_files_matrix
+  - id: analyze
+    name: Analyze discovered behavior
+    prompt: >
+      Analyze the explored code to produce a predicate inventory for conditional
+      flows. For each conditional flow discovered: - List each gate predicate
+      separately (e.g. agreement-state, progress-percentage, auth-session) -
+      Label the render mode as exactly one of: hidden, visible-disabled,
+      visible-enabled - Mark the relation to the golden wording as: exact,
+      partial, or mismatch - Preserve agreement-state gating and
+      hidden-vs-disabled differences instead of collapsing them into the nearest
+      live behavior - Flag partial matches with explicit notes about what code
+      evidence supports vs what the golden wording requires - Emit a
+      direct_evidence_matrix that labels every claimed predicate or side effect
+      as direct, adjacent, or inferred - Record whether the unique predicate for
+      the golden behavior is directly proven and whether any redirect or
+      deferred boundary has both upstream and downstream proof.
+    outputs:
+      - behavior_map
+      - predicate_inventory
+      - direct_evidence_matrix
+  - id: draft
+    name: Draft specs with explicit states, transitions, guards, and side effects
+    prompt: >
+      Draft specs from directly evidenced behavior. Split behaviors into
+      separate sections or separate specs whenever render mode differs (for
+      example hidden vs visible-disabled), or when upstream and downstream
+      phases of a redirect or deferred flow are proven by different files. Do
+      not merge row actions, overlay actions, or post-redirect continuations
+      into one artifact unless a single evidence chain proves them as one
+      behavior. Prune implementation details that do not change the named gate
+      or persisted side effect.
+    outputs:
+      - spec_set
+      - state_transition_map
+      - split_behavior_report
+  - id: verify
+    name: Verify schema, reference consistency, and evidence sufficiency
+    prompt: >
+      Verify schema and reference consistency, then enforce evidence
+      sufficiency. For every retained golden behavior id: - Require at least one
+      direct citation for the unique predicate in the direct_evidence_matrix -
+      Reject end-to-end claims across redirect or deferred boundaries unless
+      both the upstream trigger and downstream persisted side effect are
+      directly cited - Reject unsupported enumerants, state labels, or lifecycle
+      stages unless they are directly evidenced - When only adjacent or inferred
+      evidence exists, force the relation to the golden wording to mismatch or
+      unsupported instead of partial substitution.
+    outputs:
+      - verification_report
+      - evidence_sufficiency_report
+  - id: cross_ref
+    name: Link related specs and evidence
+    outputs:
+      - reference_map
+validations:
+  - schema_valid
+  - references_resolve
+  - no_internal_contradictions
+  - unique_predicate_directly_evidenced
+  - redirect_boundary_proven_or_split
+  - unsupported_states_not_invented
+mutation_tiers:
+  - prompt_tweak
+  - step_management
+  - parent_guideline
+  - schema_change
+  - tool_change
+  - rubric_mutation
+_extends_chain:
+  - formulas/seed/universal.yaml
+  - formulas/seed/frontend.yaml
+  - formulas/promoted/frontend-derived-v003-consolidated.yaml
+specializations:
+  - component_state_tracking
+  - conditional_rendering_checks
+  - accessibility_review
+  - layout_intent_capture
+  - data_table_behavior
+  - state_machine_boundary_detection
+  - explicit_state_transition_enumeration
+  - conditional_predicate_inventory
+  - golden_evidence_planning
+  - direct_evidence_accounting
+  - redirect_boundary_proof
+  - behavior_surface_splitting
+parent: frontend-derived-v003
+fine_tune_run: run-0017
+consolidated_mutations:
+  - source: frontend-derived-state-boundaries (run-0003)
+    type: step_management
+    target_step: explore
+    change: Added state_machine_boundaries output to explore step
+  - source: frontend-derived-draft-state-transitions (run-0004)
+    type: prompt_tweak
+    target_step: draft
+    change: Added state_transition_map output to draft step
+  - source: frontend-derived-v002-predicate-inventory (run-0009)
+    type: prompt_tweak
+    target_step: analyze
+    change: Added predicate_inventory output to analyze step with
+      hidden/visible-disabled/visible-enabled distinctions
+  - source: frontend-derived-v004-evidence-obligation-gates (run-0017)
+    type: step_management
+    target_step: multi_step
+    change: Added evidence_plan/discovered_files_matrix in explore,
+      direct_evidence_matrix in analyze, split_behavior_report in draft, and
+      evidence sufficiency gating in verify
+status: candidate
+discovered_in_run: run-0017
+created_at: 2026-04-24T00:00:00.000Z
+governance_notes: >
+  Candidate v004 from run-0017. Addresses the analyzer's search_failure and
+  secondary recognition issue by requiring explicit evidence plans, direct
+  evidence accounting, split behavior drafting, and verification gates that
+  block thematic substitution when the unique predicate is unproven.
