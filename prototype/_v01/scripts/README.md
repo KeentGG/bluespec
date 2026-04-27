@@ -25,9 +25,9 @@ Thin Node.js orchestration CLI for the evolution prototype.
 ## Loop commands (all implemented)
 
 - `run_generator` - execute Generator role for a run (5-step AI cadence)
-- `run_evaluator` - score specs against frozen rubric + golden set
-- `run_analyzer` - diagnose failures, propose rubric gaps
-- `run_mutator` - propose formula mutations with insanity check
+- `run_evaluator` - score specs against frozen rubric + golden set; writes official score report + shadow findings
+- `run_analyzer` - diagnose failures, propose rubric gaps; reads official score report + shadow findings
+- `run_mutator` - propose formula mutations with insanity check; reads official score report + shadow findings
 
 ## Checkpoint commands (agent harness)
 

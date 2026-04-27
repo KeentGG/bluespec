@@ -5,15 +5,16 @@ Each run directory is immutable after completion. One run = one bounded evolutio
 ## Bounded Loop Phases
 
 ```
-init → freeze → generator → evaluator → analyzer → mutator → register
+init → freeze → explore → delegate → evaluate → analyze → mutate → register
 ```
 
-| Phase | CLI Command | Output |
+| Phase | How | Output |
 |---|---|---|
 | init | `node scripts/cli.js init_run` | `manifest.yaml` |
 | freeze | `node scripts/cli.js freeze_inputs` | `inputs/` |
-| generator | `node scripts/cli.js run_generator` | `generator/output.yaml` |
-| evaluator | `node scripts/cli.js run_evaluator` | `evaluator/output.yaml` |
+| explore | Agent uses glob/grep/read to explore codebase | Agent builds mental model |
+| delegate | Agent writes delegation manifests, spawns spec-generator subagents via Task tool | `generator/delegate/` + `generator/specs/` |
+| evaluate | `node scripts/cli.js run_evaluator` | `evaluator/output.yaml` + `evaluator/shadow-findings.yaml` |
 | analyzer | `node scripts/cli.js run_analyzer` | `analyzer/output.yaml` |
 | mutator | `node scripts/cli.js run_mutator` | `mutator/output.yaml` |
 | register | `node scripts/cli.js register_formula_candidate` | `formulas/candidates/` |
@@ -28,21 +29,25 @@ run-0001/
   inputs/                    ← frozen inputs (formula, rubric, golden, project)
     formula.yaml             ← fully-resolved (extends chain inlined)
     rubric.yaml
-    golden-set.yaml
-    project.yaml
+    golden-set.yaml         ← behaviors the evaluator checks against
+    project.yaml             ← codebase_path for exploration
     resolved-inputs.yaml     ← provenance including extends chain
   generator/
-    output.yaml             ← overall result
-    trace.json              ← full AI trace
-    steps/step-{1-5}-*.yaml ← per-step outputs
-    specs/*.yaml            ← generated spec artifacts
+    delegate/               ← agent writes one manifest per spec before spawning subagents
+      <spec-id>.yaml
+    specs/                  ← spec-generator subagents write real behavioral specs here
+      <spec-id>.yaml        ← full spec with state machines, evidence, conditions
+    output.yaml             ← agent summarizes results after all subagents finish
+    trace.json              ← full tool call trace
   evaluator/
-    output.yaml
+    output.yaml            ← official machine-comparable score report
+    shadow-findings.yaml   ← qualitative recall/precision/consistency/rubric-gap findings
     trace.json
   analyzer/
     output.yaml
   mutator/
     output.yaml
+    rubric-candidate.yaml    ← (if analyzer diagnosed rubric_gap_failure)
   summary.md                 ← (optional) run-level summary after register
 ```
 

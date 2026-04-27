@@ -13,7 +13,7 @@ These schemas define valid shapes for:
 - lessons → `lesson.schema.yaml`
 - generator output → `generator-output.schema.yaml`
 - generator step output → `generator-step.schema.yaml`
-
-> `rubric.schema.yaml` is deprecated — its union shape (criterion | snapshot) matches no current artifact.
+- evaluator official score report → `evaluator-output.schema.yaml`
+- evaluator shadow findings → `evaluator-shadow-findings.schema.yaml`
 
 > `rubric.schema.yaml` is deprecated — its union shape (criterion | snapshot) matches no current artifact.

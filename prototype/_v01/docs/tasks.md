@@ -98,7 +98,7 @@ The system can execute one end-to-end run using frozen inputs and produce role-s
 - [ ] Add precision workflow (false-positive schema + spot-check mechanism)
 - [ ] Validate `codebase_path` existence in project config before run materialization
 
-> Full evolution loop verified on `run-0002` (all role outputs materialized: generator, evaluator, analyzer, mutator). Full autonomous agentic run on `run-0003` via `node start`: bounded loop completed by OpenCode agent, `frontend-derived-state-boundaries.yaml` registered as formula candidate.
+> Full evolution loop verified on `run-0002` (all role outputs materialized: generator, evaluator, analyzer, mutator). The autonomous harness was first proven on `run-0003`, and later runs `run-0011` and `run-0012` verified the hardened `node start` path with real spec files, evaluator/analyzer/mutator outputs, and governed candidate registration.
 
 ### Run Artifacts
 
@@ -114,6 +114,13 @@ The system can execute one end-to-end run using frozen inputs and produce role-s
 - **Canned metrics**: `latency_ms: 0`, `tokens_used` values are hardcoded stub outputs, not real measurements.
 - **Governance guardrails confirmed**: `rubric_gap_proposed: false`, `same_run_rubric_activation: false`, `advance_formula` not called — all correct.
 - **Bug found and fixed**: `writeCheckpoint` had spread-order bug (`...existing` after `phase`/`status` overwrote new values with stale init values). Fixed and verified. Also `resume_run` displayed misleading "remaining phases" for completed runs; fixed to show "none — run is complete".
+
+### Later Harness Findings (runs 0009–0012)
+
+- **Real spec generation is now proven**: `run-0010`, `run-0011`, and `run-0012` contain non-stub spec YAML with state machines, conditions, and evidence refs under `runs/<run-id>/generator/specs/`.
+- **`node start` is now resilient, not just functional**: `start.js` retries on provider overload and treats success as `register: complete`, not just subprocess exit.
+- **Governance is live**: `run-0011` registered `stale_golden_vs_observed_implementation` as a rubric candidate, and `run-0012` registered `frontend-derived-stale-reference-recovery` as a formula candidate.
+- **Formula evolution has moved past v001**: the active formula is now `formulas/promoted/frontend-derived-v003-consolidated.yaml`, which combines the run-0003, run-0004, and run-0009 mutations.
 
 ---
 
@@ -163,6 +170,8 @@ A human runs `node start`, optionally specifies a run ID, and the OpenCode agent
 - [x] Implement the skill: command reference, output schemas, driving instructions
 - [x] Test: run `node start` and verify the agent orchestrates the full loop on its own
   - ✅ run-0003: full autonomous loop completed, formula candidate registered
+  - ✅ run-0011: full autonomous loop completed with real generator specs, evaluator/analyzer/mutator outputs, and rubric candidate registration
+  - ✅ run-0012: resumed autonomous loop completed with real generator specs and formula candidate registration
 - [x] Determine checkpoint model: autonomous full loop with per-phase checkpoints (not per-role human review)
 
 ### Subtasks (implemented but not previously listed)
@@ -190,7 +199,7 @@ A human runs `node start`, optionally specifies a run ID, and the OpenCode agent
 - Checkpoint/lock helpers: `scripts/lib/common.js`
 - State files: `prototype/_v01/state/checkpoints/<run-id>.yaml`, `prototype/_v01/state/locks/<run-id>.lock`
 
-> Implemented and tested. run-0003 completed full autonomous loop. Bug found in `writeCheckpoint` spread order — fixed before run-0003 checkpoint sync.
+> Implemented and tested. `run-0003` proved the bounded loop, while `run-0011` and `run-0012` proved the hardened harness path with real agent-written specs and successful register-phase completion. `start.js` now retries provider overloads and only treats the run as successful when the checkpoint reaches `register: complete`.
 
 ### Why this phase exists
 
@@ -230,6 +239,67 @@ The Analyzer can emit suspected rubric gaps as candidate criteria, and those can
 
 ---
 
+## Milestone 2d — Agentic Spec Generation (Partially Complete)
+
+### Why this phase exists
+
+The original generator harness was CLI-driven: CLI calls AI, CLI parses output, CLI writes files. The AI had no ownership and never touched the filesystem. Specs were 6-line stubs. This phase replaces that with a genuine two-tier agent architecture: main orchestrator explores and delegates, spec-generator subagents write real files with real content.
+
+### The Core Problem
+
+The local provider was a hardcoded stub. Even with a real provider, the design had a fundamental issue: the CLI treated AI output as text to parse, not as files to write. The AI said "I produced auth.session.yaml" and the CLI created an empty file with YAML frontmatter. The AI never produced behavioral content.
+
+Additionally, the harness treated agents as stateless text generators rather than autonomous agents with tool access. The agent had no knowledge of the run lifecycle, no ownership of files, and no ability to take meaningful action.
+
+### The Architecture
+
+```
+Main Agent (blueprint-harness skill)
+├─ Reads golden-set.yaml — knows which behaviors to find
+├─ Reads project.yaml — knows codebase_path
+├─ Uses OpenCode tools: glob, grep, read — explores actual source
+├─ Groups files by behavioral area
+├─ Writes delegation manifest per spec (source files + context)
+├─ Invokes spec-generator subagent via Task tool (one per spec)
+│   └─ Subagent reads source files, writes real spec YAML
+├─ Waits for all subagents
+├─ Writes generator/output.yaml
+└─ Proceeds to evaluator phase
+```
+
+### New Files
+
+- `schemas/spec.schema.yaml` — behavioral spec format: state machines, conditions, inputs/outputs, evidence_refs with real code snippets, coverage tracking per golden behavior
+- `.opencode/agents/spec-generator.md` — reusable subagent config with read/write/glob/grep tools, no bash
+- `.opencode/skills/blueprint-harness/SKILL.md` — updated: explore with tools → write delegation manifests → spawn subagents via Task tool → subagents write real specs
+
+### Key Design Decisions
+
+- **Subagent via Task tool** — Task tool is the internal delegation primitive, not @mention (which is manual/user-facing)
+- **Child gets fresh session, no parent context fork** — everything must be in the prompt or delegation manifest
+- **Child writes file, parent verifies** — reliable pattern; subagent returns text, but the real output is the file it wrote
+- **Delegation manifest as context bridge** — writes source files + prior context, subagent reads and produces spec
+- **Sequential subagent spawning** — Task tool blocks parent; for parallelism, outer launcher would spawn multiple `opencode run` processes
+
+### Outcome
+
+Spec-generator subagents produce real behavioral specs — not stubs. Each spec has state machines, conditions, inputs/outputs, and evidence_refs pointing to actual source code with real snippets.
+
+### Tasks
+
+- [x] Behavioral spec schema (`schemas/spec.schema.yaml`) — state machines, conditions, coverage per golden behavior, evidence_refs
+- [x] Spec-generator subagent (`.opencode/agents/spec-generator.md`) — read/write/glob/grep tools, writes one spec per delegation manifest
+- [x] Agentic generator flow in SKILL.md — explore with tools, write delegation manifests, spawn subagents, verify output
+- [x] Test: run `node start` — verify specs are written with real content and evidence_refs
+  - ✅ `run-0011`: full `node start` cycle wrote three real specs and completed through `register`
+  - ✅ `run-0012`: resumed `node start` cycle wrote three real specs and completed through `register`
+- [ ] Wire up normalized real AI provider adapter (OpenCode adapter)
+  - Current state: the agentic path uses OpenCode CLI + Task tool directly and produces real artifacts, but `integrations/providers/` still does not contain an OpenCode adapter implementation
+
+> Practical status: the old local-provider stub path still exists, but the real agentic path is now proven through `node start`. What remains is normalizing that path into the provider adapter layer rather than relying on direct OpenCode orchestration in `start.js`/`cli.js`.
+
+---
+
 ## Milestone 3 -- Stabilize the Evaluation Loop
 
 ### Why this phase exists
@@ -242,16 +312,22 @@ The prototype can run repeated experiments with consistent scoring, reusable fai
 
 ### Tasks
 
-- [ ] Extend evaluator outputs into explicit score reports
-- [ ] Separate official score artifacts from shadow findings
+- [x] Extend evaluator outputs into explicit score reports
+  - `runs/<run-id>/evaluator/output.yaml` is now the official machine-comparable score report
+- [x] Separate official score artifacts from shadow findings
+  - `runs/<run-id>/evaluator/shadow-findings.yaml` now carries recall / precision / consistency / rubric-gap qualitative findings
 - [ ] Strengthen lesson ingestion from analyzer + mutator results
-- [ ] Prevent repeated failed teaching methods for same failure classes
-- [ ] Add lesson index or lookup by failure_type + teaching_method to enforce insanity prevention rule
-  - *Gap: the mutator must not retry the same failed teaching method on the same failure type ("insanity prevention"). But `lessons/failed.jsonl` is a flat append-only log with no index. To check whether a method was already tried, the system must scan the entire file. As lessons accumulate, this becomes a lookup problem. The `lessons/index.yaml` describes policy but doesn't index actual content.*
+- [x] Prevent repeated failed teaching methods for same failure classes
+  - `run_mutator` now rejects retries of previously failed methods for the same `failure_type` unless the output explicitly acknowledges the prior failure and provides justification
+- [x] Add lesson index or lookup by failure_type + teaching_method to enforce insanity prevention rule
+  - `scripts/lib/lessons.js` now generates `lessons/index.yaml` with lookup buckets by failure type and teaching method
+  - `run_mutator` refreshes the index before prompting, injects an indexed lesson summary into the prompt, and rejects retries of previously failed methods unless the output explicitly acknowledges and justifies the retry
 - [ ] Add run-to-run comparison support
 - [ ] Add artifact diffing between formula candidates and promoted formulas
 - [ ] Add richer validation for project config and run manifests
 - [ ] Add checkpoint or resumability support for interrupted runs
+
+> Milestone 3 is now started. The first slice landed as a lesson-index + lookup layer for insanity prevention (`scripts/lib/lessons.js`, generated `lessons/index.yaml`, and mutator-side retry enforcement). The evaluator split slice is now complete: official score report plus shadow findings artifacts and their schemas are in place.
 
 ---
 
@@ -389,25 +465,35 @@ The prototype becomes a credible training substrate for stronger evaluation and 
 
 ## Current Phase Focus
 
-The immediate focus should stay on the shortest path to a real, inspectable evolution cycle.
+The immediate focus is on consolidating the now-working agentic harness: keep real spec generation stable, close the remaining schema/validation gaps, and move the new governance artifacts through review without regressing the proven `node start` path.
 
 ### Now
 
-- [x] Implement `run_generator` — ✅ implemented, verified on run-0002 and run-0003
-- [x] Implement `run_evaluator` — ✅ implemented, verified on run-0002 and run-0003
-- [x] Implement `run_analyzer` — ✅ implemented, verified on run-0002 and run-0003
-- [x] Implement `run_mutator` — ✅ implemented, verified on run-0002 and run-0003
-- [x] Materialize one full run with role outputs under `runs/run-000X/` — ✅ run-0002 and run-0003 fully materialized
-- [x] Agent harness (`node start`) — ✅ implemented and verified on run-0003
+- [x] Implement `run_generator` — ✅ implemented; later real-artifact runs include `run-0010`, `run-0011`, and `run-0012`
+- [x] Implement `run_evaluator` — ✅ implemented; real evaluator outputs now exist through `run-0012`
+- [x] Implement `run_analyzer` — ✅ implemented; real analyzer routing proven for prompt, rubric-gap, and search failures
+- [x] Implement `run_mutator` — ✅ implemented; both formula and rubric candidate packaging proven
+- [x] Materialize one full run with role outputs under `runs/run-000X/` — ✅ multiple full runs now materialized, including `run-0011` and `run-0012`
+- [x] Agent harness (`node start`) — ✅ implemented, hardened, and verified on `run-0003`, `run-0011`, and `run-0012`
 - [x] Rubric Discovery v1 (Diagnose Only) — ✅ complete: 5-type analyzer routing, provenance fields, mutator packaging, reviewer workflow
-- [ ] Define agent output schemas for evaluator, analyzer, mutator
-- [ ] Add precision workflow (false-positive schema + spot-check)
+- [x] Behavioral spec schema — ✅ `schemas/spec.schema.yaml` with state machines, conditions, evidence_refs, coverage tracking
+- [x] Spec-generator subagent — ✅ `.opencode/agents/spec-generator.md` with read/write/glob/grep tools
+- [x] Agentic generator flow — ✅ SKILL.md updated to: explore with tools → write delegation manifests → spawn subagents via Task tool → subagents write real specs
+- [x] Test: run `node start` with agentic generator — ✅ verified on `run-0011` and `run-0012`
+- [x] Consolidate promoted formula mutations into a new active baseline — ✅ `frontend-derived-v003-consolidated.yaml` is active
+- [x] Add lesson index or lookup for insanity prevention — ✅ `scripts/lib/lessons.js` + generated `lessons/index.yaml` + mutator enforcement hook
+- [x] Define evaluator output schemas (official score + shadow findings)
+  - `schemas/evaluator-output.schema.yaml`
+  - `schemas/evaluator-shadow-findings.schema.yaml`
+- [ ] Define analyzer, mutator output schemas (generator schemas done)
+  - [ ] Add precision workflow (false-positive schema + spot-check)
 - [ ] Validate `codebase_path` existence in project config before run materialization
+- [ ] Review current governance queue — pending: `rubric:stale_golden_vs_observed_implementation`, `formula:frontend-derived-stale-reference-recovery`
 
 ### Next
 
-- [ ] Add lesson lookup index for insanity prevention
 - [ ] Add shadow/probation artifacts for rubric discovery v2
+- [ ] Decide whether to promote `stale_golden_vs_observed_implementation` to probation and `frontend-derived-stale-reference-recovery` to active
 
 ### Later
 
@@ -443,7 +529,9 @@ The tasks above address the following architectural gaps identified during proto
 | Rubric snapshot only uses universal seed | Milestone 4 (ecosystem rubric merging) |
 | Formula `extends` has no resolution logic | **Done (Milestone 2)** |
 | No schema for generator output artifacts | **Done (Milestone 2)** — generator schemas done, evaluator/analyzer/mutator pending |
-| Lesson lookup has no index | Milestone 3 |
+| Specs are empty stubs (CLI writes frontmatter, AI never produces real content) | **Done (Milestone 2)** — behavioral spec schema + spec-generator subagent + agentic generator flow |
+| Harness is CLI-driven, not agentic — agent has no ownership | **Done (Milestone 2)** — main agent explores, writes delegation manifests, spawns spec-generator subagents, subagents own file creation |
+| Lesson lookup has no index | **Done (Milestone 3)** — `scripts/lib/lessons.js` generates `lessons/index.yaml` and `run_mutator` consumes it |
 | `rubric.schema.yaml` is ambiguous | **Done (Milestone 1)** |
 | No seed rubric schema | **Done (Milestone 1)** |
 | Queue has no governance commands | **Done (Milestone 1)** |
@@ -452,7 +540,7 @@ The tasks above address the following architectural gaps identified during proto
 | Agent harness (CLI orchestration) | **Done (Milestone 2c)** |
 | Bounded loop / checkpoint model | **Done (Milestone 2c)** |
 | Checkpoint/lock infrastructure for interrupted runs | **Done (Milestone 2c)** |
-| Generated specs are stubs (no real provider) | Milestone 5 (provider adapters) |
+| Generated specs are stubs (no real provider) | Partially closed — real specs are produced in the agentic OpenCode path (`run-0010` onward), but Milestone 5 still needs a normalized OpenCode provider adapter |
 | Rubric gap 5-type diagnosis (analyzer routing) | **Done (Milestone 2b)** |
 | Rubric candidate provenance fields | **Done (Milestone 2b)** |
 | Mutator rubric_gap_proposal packaging | **Done (Milestone 2b)** |
