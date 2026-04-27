@@ -83,10 +83,10 @@ No additional flags. All inputs are frozen in the run manifest.
 |---|---|
 | `runs/run-0001/manifest.yaml` | Run identity, formula ref, rubric ref, project ref |
 | `runs/run-0001/inputs/formula.yaml` | Fully-resolved, frozen formula (extends already inlined) |
-| `runs/run-0001/inputs/rubric.yaml` | Active rubric snapshot |
-| `runs/run-0001/inputs/golden-set.yaml` | Golden set behaviors |
 | `runs/run-0001/inputs/project.yaml` | Project config (path, ecosystem, excluded paths) |
 | `runs/run-0001/inputs/resolved-inputs.yaml` | Provenance metadata for frozen inputs |
+
+**CRITICAL: The Generator does NOT receive the golden set.** The golden set is a hidden test — it is only used by the Evaluator AFTER the Generator produces specs. The Generator must explore the codebase freely and produce whatever specs it discovers, without knowing which behaviors the golden set contains. This ensures the evaluation measures genuine discovery ability, not checklist compliance.
 
 ### What `run_generator` reads from the broader workspace:
 
@@ -111,11 +111,13 @@ Each step is its own AI call. Step N's output becomes part of Step N+1's context
 
 ### Step Context Accumulation
 
-- **Step 1 (explore)**: receives only the frozen inputs (formula, rubric, golden set, project config, lessons)
-- **Step 2 (analyze)**: receives explore output + frozen inputs
-- **Step 3 (draft)**: receives analyze output + frozen inputs
-- **Step 4 (verify)**: receives draft output + frozen inputs
-- **Step 5 (cross_ref)**: receives verify output + frozen inputs
+- **Step 1 (explore)**: receives formula, project config, and lessons. Does NOT receive golden set or rubric.
+- **Step 2 (analyze)**: receives explore output + frozen inputs (formula, project config)
+- **Step 3 (draft)**: receives analyze output + frozen inputs (formula, project config)
+- **Step 4 (verify)**: receives draft output + frozen inputs (formula)
+- **Step 5 (cross_ref)**: receives verify output + frozen inputs (formula)
+
+**Note:** The rubric and golden set are NOT inputs to the Generator. They are consumed only by the Evaluator in the next phase. The Generator explores freely and produces whatever specs it discovers.
 
 Each step's output is written immediately to `runs/run-XXXX/generator/steps/step-N-YYYY.yaml` before the next call starts. If a step fails, all prior steps are preserved.
 
@@ -123,10 +125,12 @@ Each step's output is written immediately to `runs/run-XXXX/generator/steps/step
 
 Each step prompt includes:
 1. **System prompt**: role contract (from `prompts/generator.md`) + step-specific instructions
-2. **Frozen inputs summary**: project path, ecosystem, excluded paths, active rubric summary
+2. **Project context**: project path, ecosystem, excluded paths (from project.yaml)
 3. **Prior step outputs**: the accumulated context from previous steps
 4. **Lessons**: relevant lessons from `lessons/learned.jsonl` filtered by ecosystem + step
 5. **Step-specific instructions**: extracted from the formula's step definition
+
+**Do NOT include:** golden set, rubric, or evaluation criteria. The Generator must explore independently.
 
 ### Step Output Schema
 
@@ -256,13 +260,15 @@ No automatic retry in v01. Retry logic is a future enhancement.
 ## What `run_generator` Does NOT Do
 
 - Does not resolve `extends` — that's `freeze_inputs`
+- Does not read the golden set — that's `run_evaluator` (golden set is a hidden test)
+- Does not read the rubric — that's `run_evaluator`
 - Does not score specs — that's `run_evaluator`
 - Does not propose rubric changes — that's `run_analyzer`
 - Does not mutate formulas — that's `run_mutator`
 - Does not write to `state/current.yaml` or `state/queue.yaml`
 - Does not affect rubric or formula lifecycle state
 
-Its only job: execute the Generator faithfully and write structured output.
+Its only job: execute the Generator faithfully and write structured output. The Generator explores the codebase freely and produces whatever specs it discovers, without knowledge of which behaviors the golden set contains.
 
 ---
 
@@ -274,7 +280,7 @@ freeze_inputs
     → writes runs/run-XXXX/inputs/resolved-inputs.yaml
     ↓
 run_generator
-    → reads frozen inputs
+    → reads frozen inputs (formula, project config — NO golden set, NO rubric)
     → writes runs/run-XXXX/generator/output.yaml
     → writes runs/run-XXXX/generator/trace.json
     → writes runs/run-XXXX/generator/steps/step-N-*.yaml
@@ -283,6 +289,7 @@ run_generator
 run_evaluator
     → reads generator/output.yaml + generator/specs/
     → reads runs/run-XXXX/inputs/rubric.yaml
+    → reads runs/run-XXXX/inputs/golden-set.yaml  ← Golden set used HERE, not by Generator
     → writes runs/run-XXXX/evaluator/output.yaml
     ↓
 run_analyzer

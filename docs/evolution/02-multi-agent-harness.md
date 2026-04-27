@@ -26,6 +26,8 @@ Runs the current formula against a codebase. Produces spec files.
 **Inputs:** formula, codebase path, config
 **Outputs:** spec files, execution trace
 
+**CRITICAL: The Generator does NOT receive the golden set or rubric.** It explores the codebase freely and produces whatever specs it discovers. The golden set is a hidden test — only the Evaluator sees it after specs are produced.
+
 The generator follows the formula's steps: explore -> analyze -> draft -> verify -> cross-ref. It's the worker that produces the actual specs.
 
 ### Evaluator Agent
@@ -114,21 +116,24 @@ Orchestrator (state machine)
   +-- Generator Agent(s)
   |     Runs current formula against codebase
   |     Produces spec files
+  |     NOTE: Does NOT see golden set — explores freely
   |
   +-- Evaluator Agent
   |     Checks specs against golden_behaviors (recall)
   |     Spot-checks for hallucinations (precision)
   |     Scores: coverage, completeness, accuracy
   |     Produces: { hits: [], misses: [], false_positives: [] }
+  |     NOTE: Golden set is used HERE — hidden test for Generator
   |
   +-- Analyzer Agent
   |     Reads misses + false_positives
-  |     Diagnoses: WHY did the formula miss this?
+  |     Diagnoses: WHY did the Generator miss specific golden behaviors?
   |     Produces: { diagnosis: "...", suggested_mutation: "..." }
   |
   +-- Mutator Agent
   |     Takes suggested_mutation
   |     Produces new candidate formula
+  |     NOTE: Changes formula so next run might discover missing behaviors
   |
   Loop back to Generator with new formula
 ```

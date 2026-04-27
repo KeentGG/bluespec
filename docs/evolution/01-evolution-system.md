@@ -15,10 +15,15 @@ The analogy:
 Neural Net Training          Blueprint Mode
 -------------------          -----------
 Labeled training data   <->  Golden set (human-provided behaviors)
+                           |   (HIDDEN from Generator — used only by Evaluator)
 Forward pass            <->  Run formula, generate specs
+                           |   (Generator explores freely, no golden set knowledge)
 Loss function           <->  Precision + recall against golden set
+                           |   (Evaluator checks if specs cover golden behaviors)
 Backpropagation         <->  Analyzer diagnoses failures
+                           |   (WHY did the Generator miss specific golden behaviors?)
 Weight update           <->  Mutator adjusts formula
+                           |   (Changes formula so next run might discover missing behaviors)
 Epoch                   <->  Evolution cycle
 Validation set          <->  Hold-out project for testing generalization
 ```
@@ -31,10 +36,10 @@ This is evolutionary search, not just backprop. Each formula is an organism, fit
 
 ```
 1. Generate a candidate formula (prompts + steps + format + validation)
-2. Run it against a codebase
-3. Evaluate output quality (completeness? accuracy? coverage? human rating?)
-4. Identify what failed and why
-5. Mutate the formula to fix weaknesses
+2. Run it against a codebase (Generator explores freely — NO golden set knowledge)
+3. Evaluate output quality (Evaluator checks if specs cover golden set — recall + precision)
+4. Identify what failed and why (Analyzer diagnoses WHY golden behaviors were missed)
+5. Mutate the formula to fix weaknesses (Mutator proposes changes for next run)
 6. Repeat
 ```
 
@@ -54,6 +59,8 @@ The human provides a list of known hard-to-find business logic behaviors from a 
 - "Only show download button if report progress has made it to download page in the first place"
 - Lots of behaviors where initial observations are made as a list by a human
 
+**CRITICAL: The golden set is a hidden test.** The Generator does NOT see the golden set. It explores the codebase freely and produces whatever specs it discovers. The Evaluator then checks if the generated specs cover the golden set behaviors. This ensures we measure genuine discovery ability, not checklist compliance.
+
 Then another agent checks if a spec has been made to document each of those behaviors. And we're not just documenting behaviors, but everything -- colors, layout, etc.
 
 ### Recall
@@ -67,9 +74,10 @@ Human provides:
     ... etc
   ]
 
-Run formula against codebase -> produces specs
+Step 1: Run formula against codebase -> produces specs
+  (Generator does NOT see golden_behaviors — it explores freely)
 
-Agent checks:
+Step 2: Evaluator checks:
   for each behavior in golden_behaviors:
     is there a spec that documents this?
     YES -> recall hit
