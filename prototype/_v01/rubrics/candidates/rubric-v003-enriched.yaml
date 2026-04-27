@@ -1,0 +1,52 @@
+id: rubric-v003-enriched
+status: candidate
+description: >
+  Proposed rubric v003 that adds four new criteria: ui_gate_pattern_precision,
+  negative_condition_documentation, evidence_ref_existence, and
+  backend_enforcement_documentation. Adjusts golden_set_recall weight from 1.2
+  to 1.0 to prevent over-penalization for golden-behavior mismatches.
+source: mutator-agent
+rationale: >
+  All three recall misses in run-0014 are cases where the spec accurately
+  documents actual code behavior, but the rubric penalizes it for not matching
+  imprecise, stale, or non-existent golden behavior. lessons/failed.jsonl
+  records that prompt_tweak for rubric_gap_failure failed in run-0010, while
+  lessons/learned.jsonl records that rubric_candidate_proposal for the same
+  failure_type passed in run-0010.
+confidence: 0.88
+recommended_state: probation
+discovered_in_run: run-0014
+created_at: 2026-04-23T00:00:00Z
+evidence_refs:
+  - runs/run-0014/evaluator/output.yaml
+  - runs/run-0014/evaluator/shadow-findings.yaml
+  - runs/run-0014/analyzer/output.yaml
+source_run: run-0014
+evaluator_score: 0.79
+failure_type: rubric_gap_failure
+analyzer_confidence: 0.9
+recall_misses_triggered:
+  - criterion: ui_gate_pattern_precision
+    spec: download.button-visibility.yaml
+    gap: visibility-vs-interactivity-toggle
+    severity: medium
+  - criterion: negative_condition_documentation
+    spec: auth-conditional-redirect
+    gap: absent-condition-annotation
+    severity: high
+  - criterion: evidence_ref_existence
+    spec: auth-conditional-redirect
+    gap: stale-evidence
+    severity: medium
+scored_specs_examined:
+  - auth-conditional-redirect
+  - download.button-visibility.yaml
+  - toa-gated-first-report-creation
+evidence_count: 1
+first_observed_run: run-0014
+last_observed_run: run-0014
+precision_concern: >
+  Risk of over-crediting specs that genuinely miss behaviors by attributing them
+  to accurate negative findings. New criteria must be applied rigorously.
+weight_recommendation: 1
+probation_runs_remaining: 3

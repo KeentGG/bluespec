@@ -1,0 +1,56 @@
+rubric_version: v003
+parent_version: v002
+seed_sources:
+  - rubrics/seed/universal.yaml
+active_criteria:
+  - coverage_core_behavior
+  - completeness_inputs_outputs
+  - consistency_cross_refs
+  - golden_set_recall
+  - conditional_flow_documentation
+  - ui_gate_pattern_precision
+  - negative_condition_documentation
+  - evidence_ref_existence
+  - backend_enforcement_documentation
+weights:
+  coverage_core_behavior: 1
+  completeness_inputs_outputs: 1
+  consistency_cross_refs: 0.8
+  golden_set_recall: 1
+  conditional_flow_documentation: 0.81
+  ui_gate_pattern_precision: 0.9
+  negative_condition_documentation: 0.9
+  evidence_ref_existence: 0.8
+  backend_enforcement_documentation: 0.7
+criteria_definitions:
+  coverage_core_behavior: |
+    The spec documents the core behavior described in the golden behavior.
+  completeness_inputs_outputs: >
+    The spec lists all relevant inputs, outputs, side effects, and state changes.
+  consistency_cross_refs: >
+    The spec's internal cross-references and links to other specs are consistent.
+  golden_set_recall: |
+    The spec covers the behaviors described in the golden set.
+  conditional_flow_documentation: |
+    The spec documents conditional flows, branches, and state transitions.
+  ui_gate_pattern_precision: >
+    Distinguish between "visibility" (render/unmount) and "interactivity"
+    (disabled/enabled) as separate UI gate patterns. Credit specs that correctly
+    identify the actual gate pattern in code rather than penalizing them for not
+    matching imprecise golden behavior wording.
+  negative_condition_documentation: >
+    Credit specs for explicitly documenting the absence of a claimed condition
+    when the condition does not exist in the evidenced code, rather than
+    penalizing honest negative findings as recall misses.
+  evidence_ref_existence: >
+    Verify golden-set evidence_refs exist in the codebase before scoring recall
+    against them. Discount or flag recall penalties when golden-set refs are
+    stale or missing.
+  backend_enforcement_documentation: >
+    When a frontend gate is purely cosmetic (e.g., disabled button), require
+    documentation of whether server-side enforcement exists. Credit specs that
+    explicitly note the absence or presence of backend validation.
+proposed_in_run: run-0014
+official_channel_only: false
+status: candidate
+created_at: 2026-04-22T16:38:22.506Z

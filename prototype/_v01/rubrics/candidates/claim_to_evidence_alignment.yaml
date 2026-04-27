@@ -1,0 +1,32 @@
+id: claim_to_evidence_alignment
+description: >
+  Score conditional-flow specs by whether each claim is explicitly traceable to
+  evidence, and treat stale-golden wording drift as a separate signal from
+  generator omission.
+source: rubric_gap_failure
+failure_type: rubric_gap_failure
+evidence_refs:
+  - runs/run-0010/analyzer/output.yaml
+  - runs/run-0010/evaluator/output.yaml
+  - runs/run-0010/generator/output.yaml
+  - runs/run-0010/generator/specs/auth.conditional-redirect.yaml
+  - runs/run-0010/generator/specs/reports.download-button-visibility.yaml
+  - runs/run-0010/inputs/formula.yaml
+  - runs/run-0010/inputs/rubric.yaml
+rationale: >
+  The run produced evidence-backed partial specs, but the current rubric only
+  scores broad recall and conditional-flow documentation. Without an explicit
+  traceability check, stale-golden wording can be mistaken for a generator
+  omission.
+severity: high
+recommended_state: probation
+status: probation
+created_at: 2026-04-22T08:22:15.363Z
+governance:
+  decision: approved
+  decided_at: 2026-04-22T09:21:58.624Z
+  target_state: probation
+  notes: "Governance review: genuine rubric gap (rubric_gap_failure), adds
+    traceability + stale-golden drift axes not covered by existing criteria.
+    Formula cannot self-correct. Precision risk acceptable given evidence_refs
+    already in specs. Probation: watch for second observation in run-0011."
