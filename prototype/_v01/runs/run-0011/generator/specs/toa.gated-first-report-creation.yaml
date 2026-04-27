@@ -1,0 +1,435 @@
+id: toa.gated-first-report-creation
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: toa-gated-first-report-creation
+    coverage: partial
+    notes: >
+      The deferred-creation branch when TOA is not agreed is fully documented.
+      However, the golden behavior mentions "no existing reports" as a condition,
+      but the current codebase only gates on TOA status (agreedToa === true)
+      without any explicit check for existing report count. The calculator-side
+      report creation post-TOA-acceptance is implied by the redirect flow but
+      not verified in the available dashboard source files.
+
+description: >
+  When a user submits the Create Report modal, the dashboard first fetches the
+  user's Terms-of-Agreement (TOA) status. If the user has not agreed to the TOA,
+  the dashboard does NOT persist a report record. Instead, it constructs an
+  introduction-page URL for the selected calculator, appending the chosen
+  businessId and reportName as query parameters, and redirects the browser to
+  that URL after a brief delay. Only when the user has already agreed to the TOA
+  does the dashboard call the createReport API, persist the report, and then
+  navigate to the calculator's edit-style gate handoff.
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: User has opened the Create Report modal and filled in the form
+    - id: validating
+      description: Form inputs (report name, business ID) are being validated locally
+    - id: checking_toa
+      description: User data is being fetched to verify TOA agreement status
+    - id: toa_redirecting
+      description: TOA not agreed; user is being redirected to calculator introduction page
+    - id: creating_report
+      description: TOA agreed; dashboard is persisting the report via API
+    - id: navigating_to_gate
+      description: Report created; navigating to calculator gate for questionnaire
+  transitions:
+    - id: submit_form
+      from: idle
+      to: validating
+      trigger: User clicks the "Create Report" submit button
+      guards:
+        - field: modal_is_open
+          condition: modal state is open
+      effects:
+        - Prevent default form submission
+        - Call handleCreateReport with businessId, calculatorId, and name
+    - id: validation_pass
+      from: validating
+      to: checking_toa
+      trigger: Local validation completes successfully
+      guards:
+        - field: report_name
+          condition: non-empty after trimming
+        - field: business_id
+          condition: non-empty string
+      effects:
+        - Set isCreating to true
+        - Fetch auth token
+        - Call fetchUserData to retrieve user profile
+    - id: toa_not_agreed
+      from: checking_toa
+      to: toa_redirecting
+      trigger: TOA status check completes
+      guards:
+        - field: userResult.data.agreedToa
+          condition: "!== true"
+      effects:
+        - Show success toast about redirecting to introduction page
+        - Build introduction URL with calculatorId, businessId, and reportName
+        - Set a 2-second timeout then call window.location.replace(introUrl)
+        - "Return { success: true, redirected: true, reason: 'toa_redirect' }"
+        - DO NOT call createReport API
+    - id: toa_agreed
+      from: checking_toa
+      to: creating_report
+      trigger: TOA status check completes
+      guards:
+        - field: userResult.data.agreedToa
+          condition: === true
+      effects:
+        - Proceed to createReport API call
+    - id: report_created
+      from: creating_report
+      to: navigating_to_gate
+      trigger: createReport API responds successfully
+      guards:
+        - field: result.ok
+          condition: === true
+      effects:
+        - Show success toast about redirecting to questionnaire
+        - Extract new report ID from response
+        - Set a 2-second timeout then navigate to report gate via navigateToReportGate
+        - Call onSuccess callback
+    - id: report_creation_failed
+      from: creating_report
+      to: idle
+      trigger: createReport API responds with error
+      effects:
+        - Show error toast
+        - Call onError callback
+        - Set isCreating to false
+    - id: validation_fail
+      from: validating
+      to: idle
+      trigger: Local validation fails
+      effects:
+        - Show error toast (missing name or missing business)
+        - "Return { success: false, reason: 'missing_name' | 'missing_business' }"
+        - Set isCreating to false
+
+conditions:
+  - id: toa_gate
+    description: >
+      The primary conditional behavior that determines whether a report is
+      created dashboard-side or deferred to the calculator-side introduction flow.
+    trigger: User submits the Create Report form
+    guards:
+      - field: userResult.data.agreedToa
+        condition: === true
+    then:
+      - Call createReport API with businessId, name, calculatorId, userId, and default progress
+      - Navigate to calculator edit gate after successful creation
+    else:
+      - Show redirect toast
+      - Build introduction URL via buildIntroductionUrl
+      - Redirect browser to calculator introduction page with businessId and reportName query params
+      - Skip dashboard-side report persistence entirely
+
+inputs:
+  - id: business_id
+    type: string (MongoDB ObjectId)
+    source: User selection from company dropdown in CreateReportModal
+    required: true
+    validation:
+      non_empty: Must be a non-empty string
+  - id: calculator_id
+    type: string ("1" | "2" | "3" | "4")
+    source: User selection from calculator tool grid in CreateReportModal
+    required: true
+    validation:
+      one_of: '"1" (VE), "2" (DE), "3" (VGA), "4" (NP)'
+  - id: report_name
+    type: string (max 40 chars)
+    source: User input from report name text field in CreateReportModal
+    required: true
+    validation:
+      non_empty: Must be non-empty after trimming
+      max_length: 40 characters
+  - id: auth_token
+    type: JWT token object with _id field
+    source: Client-side token storage via getToken()
+    required: true
+    validation:
+      has_user_id: token._id must be present for fetchUserData
+
+outputs:
+  - id: introduction_redirect_url
+    type: absolute URL string
+    destination: Browser navigation via window.location.replace()
+    lifespan: immediate
+  - id: created_report_id
+    type: string (MongoDB ObjectId)
+    destination: Report object returned from createReport API
+    lifespan: persisted in database
+  - id: gate_navigation_destination
+    type: absolute URL string or relative path
+    destination: Browser navigation via window.location.replace() or Next.js router.push()
+    lifespan: immediate
+  - id: user_toast_message
+    type: string
+    destination: react-toastify toast notification
+    lifespan: 3-5 seconds
+
+evidence_refs:
+  - path: src/features/reports/hooks/useReportCreation.ts
+    snippet: |
+      const userResult = await fetchUserData({ userId: token?._id });
+      if (!userResult.ok) {
+        throw new Error(userResult.message || "Failed to verify user status.");
+      }
+
+      const hasAgreedToa = userResult.data?.agreedToa === true;
+
+      if (!hasAgreedToa) {
+        toast.success(
+          "Create page in progress. We will be redirecting you to our Introduction and Our Commitment page",
+        );
+
+        const introUrlResult = buildIntroductionUrl({
+          calculatorId,
+          businessId,
+          reportName: name.trim(),
+          env: process.env,
+        });
+
+        if (introUrlResult.ok && introUrlResult.url) {
+          setTimeout(() => {
+            window.location.replace(introUrlResult.url);
+          }, 2000);
+          return { success: true, redirected: true, reason: "toa_redirect" };
+        }
+        ...
+      }
+    covers:
+      - transition: toa_not_agreed
+      - condition: toa_gate
+      - output: introduction_redirect_url
+      - output: user_toast_message
+    line_range:
+      start: 48
+      end: 82
+
+  - path: src/features/reports/hooks/useReportCreation.ts
+    snippet: |
+      const result = await createReport({
+        businessId,
+        name: name.trim(),
+        calculatorId,
+        userId: token?._id,
+        reportProgress:
+          REPORT_DEFAULT_PROGRESS_BY_CALCULATOR_ID[calculatorId] ??
+          REPORT_DEFAULT_PROGRESS_BY_CALCULATOR_ID[REPORT_CALCULATOR_IDS.DE],
+      });
+
+      if (!result.ok) {
+        throw new Error(result.message || "Failed to create report.");
+      }
+
+      toast.success(
+        "Report created successfully! Please wait while we redirect you to the questionnaire...",
+      );
+
+      const createdReport = result.data?.data ?? result.data ?? null;
+      const newReportId = createdReport?._id ?? null;
+
+      if (newReportId) {
+        setTimeout(() => {
+          navigateToReportGate({
+            _id: newReportId,
+            calculatorId: createdReport?.calculatorId ?? calculatorId,
+          });
+        }, 2000);
+      }
+    covers:
+      - transition: toa_agreed
+      - transition: report_created
+      - condition: toa_gate
+      - output: created_report_id
+      - output: gate_navigation_destination
+      - output: user_toast_message
+    line_range:
+      start: 84
+      end: 114
+
+  - path: src/features/auth/contracts/toa-contract.js
+    snippet: |
+      export function buildIntroductionUrl(options = {}) {
+        const { calculatorId, businessId, reportName, env } = options;
+
+        const gatePath = resolveGatePathForCalculator(calculatorId, env);
+
+        if (!gatePath) {
+          return {
+            ok: false,
+            url: null,
+            reason: "missing_gate_path",
+          };
+        }
+
+        const basePath = removeGateFromUrl(gatePath);
+        ...
+        const params = new URLSearchParams();
+        params.set("businessId", normalizedBusinessId);
+        if (normalizedReportName) {
+          params.set("reportname", normalizedReportName);
+        }
+
+        const url = `${basePath.replace(/\/+$/, "")}/introduction/?${params.toString()}`;
+
+        return {
+          ok: true,
+          url,
+          reason: null,
+        };
+      }
+    covers:
+      - output: introduction_redirect_url
+      - transition: toa_not_agreed
+    line_range:
+      start: 80
+      end: 127
+
+  - path: src/shared/lib/routing/gate-finder.js
+    snippet: |
+      export function buildIntroductionUrl(options = {}) {
+        const { calculatorId, businessId, reportName, env } = options;
+
+        const gatePathResolution = resolveGatePathForCalculator(calculatorId, { env });
+
+        if (!gatePathResolution.ok || !gatePathResolution.gatePath) {
+          return {
+            ok: false,
+            url: null,
+            reason: gatePathResolution.reason || "missing_gate_path",
+          };
+        }
+
+        const basePath = removeGateFromUrl(gatePathResolution.gatePath);
+        ...
+        const params = new URLSearchParams();
+        params.set("businessId", normalizedBusinessId);
+        if (normalizedReportName) {
+          params.set("reportname", normalizedReportName);
+        }
+
+        const url = `${basePath.replace(/\/+$/, "")}/introduction/?${params.toString()}`;
+
+        return {
+          ok: true,
+          url,
+          reason: null,
+        };
+      }
+    covers:
+      - output: introduction_redirect_url
+      - transition: toa_not_agreed
+    line_range:
+      start: 377
+      end: 424
+
+  - path: src/features/reports/hooks/useReportNavigation.ts
+    snippet: |
+      function navigateToReportGate(report: Report, options: NavigateToReportOptions = {}) {
+        const handoff = resolveGateHandoffRoute({
+          intent: "edit",
+          target: report?._id,
+          calculatorId: report?.calculatorId,
+          env: process.env,
+          gatePathsByCalculatorId: GATE_PATHS_BY_CALCULATOR_ID,
+        });
+
+        if (!handoff.ok || !handoff.destination) {
+          toast.error("Unable to open the selected report.");
+          if (handoff.fallbackDestination) {
+            router.push(handoff.fallbackDestination);
+          }
+          return;
+        }
+
+        if (handoff.destination.startsWith("http")) {
+          window.location.replace(handoff.destination);
+          return;
+        }
+
+        router.push(handoff.destination);
+      }
+    covers:
+      - transition: report_created
+      - output: gate_navigation_destination
+    line_range:
+      start: 32
+      end: 55
+
+  - path: src/features/auth/api/user-service.js
+    snippet: |
+      export async function checkUserToaStatus(options = {}) {
+        const result = await fetchUserData(options);
+
+        if (!result.ok) {
+          return {
+            ok: false,
+            hasAgreed: false,
+            message: result.message,
+          };
+        }
+
+        return {
+          ok: true,
+          hasAgreed: result.data?.agreedToa === true,
+          data: result.data,
+          message: "TOA status checked successfully.",
+        };
+      }
+    covers:
+      - input: auth_token
+      - condition: toa_gate
+      - transition: checking_toa
+    line_range:
+      start: 109
+      end: 126
+
+confidence: 0.85
+confidence_rationale: >
+  The core TOA-gated deferred-creation behavior is confirmed in useReportCreation.ts:
+  (1) user data is fetched before any report creation, (2) the agreedToa flag is
+  checked explicitly, (3) the createReport API is only called in the hasAgreedToa
+  branch, (4) the non-agreed branch builds an introduction URL and redirects.
+  The URL construction logic is confirmed in both toa-contract.js and gate-finder.js.
+  The post-creation navigation to the calculator gate is confirmed in
+  useReportNavigation.ts. What lowers confidence: (a) the golden behavior mentions
+  "no existing reports" as a condition, but no such check exists in the codebase,
+  (b) the calculator-side report creation after TOA acceptance is implied by the
+  redirect flow but not verified in the available source files, (c) the exact
+  relationship between gate-new-contract.js and the TOA flow is not fully traced
+  in the context of deferred creation.
+
+unresolved_questions:
+  - >
+    The golden behavior states the gate applies to accounts with "no existing reports",
+    but the code only checks TOA status (agreedToa). Is the "no existing reports"
+    condition enforced elsewhere (e.g., backend API, calculator-side), or is the
+    golden behavior wording broader than the actual implementation?
+  - >
+    After the user accepts TOA on the calculator introduction page, how does the
+    calculator create the report? Is there a matching API endpoint that receives
+    the businessId and reportName query parameters and creates the report on the
+    calculator side? This calculator-side behavior is not visible in the dashboard
+    source files provided.
+  - >
+    What happens if buildIntroductionUrl fails (e.g., missing gate path env var)?
+    The code shows an error toast, but does the user remain on the dashboard modal
+    or is there a fallback navigation? The current code returns an error object
+    but the modal state (isCreating) is only reset in the finally block.
+  - >
+    Is the TOA agreement per-calculator or global? The user profile has a single
+    agreedToa boolean, but toa-contract.js comments mention per-calculator
+    introductionPages (VE, DE, etc.). Which field is authoritative?
+
+status: partial

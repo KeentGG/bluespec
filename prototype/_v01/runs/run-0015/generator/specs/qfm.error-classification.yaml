@@ -1,0 +1,567 @@
+id: qfm.error-classification
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: qfm-failure-bucketing
+    coverage: full
+    notes: >
+      Classifies any error/failure object into one of 7 predefined buckets via
+      classifyQfmFailure(). Extracts signals from the failure object (reason codes,
+      error messages, status codes, nested Error objects) and matches them against
+      keyword lists in priority order. Auth/status-code checks run first, followed
+      by stale, storage, import, PDF, routing, and contract keyword matching.
+      Falls back to "data contract" when no signals match. Each bucket carries a
+      static failureModeId, userBehavior, and defaultReasonCode.
+  - id: qfm-response-normalization
+    coverage: full
+    notes: >
+      Normalizes wrapped API envelopes ({statusCode, data, message}) and raw
+      payloads into a consistent shape ({ok, statusCode, message, data,
+      envelopeType, raw}). Detects contract violations (missing statusCode,
+      invalid HTTP status, missing data field, undefined payload) and tags them
+      with the "data contract" bucket and FM-CONTRACT-001 failure mode ID.
+      Transport-level response detection (axios-like {status, data}) is handled
+      before envelope normalization.
+  - id: qfm-user-behavior-mapping
+    coverage: full
+    notes: >
+      Each of the 7 failure buckets maps to a predefined userBehavior string
+      that prescribes the UI recovery action. The mapping is static and defined
+      in BUCKET_DETAILS. Behaviors include redirect_to_login, block_navigation,
+      block_success_ui, block_submit, transition_pdf_state, reset_to_safe_defaults,
+      and ignore_stale_result. The classification output includes the behavior
+      string alongside failureModeId and reasonCode for downstream consumers.
+
+description: >
+  QFM (Query/Failure/Mutation) error classification system that categorizes any
+  failure into one of 7 buckets (auth/session, routing, data contract, import
+  mapping, PDF, storage corruption, stale state) based on signal extraction and
+  keyword matching. Each bucket maps to a predefined user behavior for consistent
+  UI recovery. The system also normalizes wrapped vs raw API response envelopes
+  into a consistent shape and detects contract violations when the response
+  structure is broken. The classification is purely functional with no side
+  effects — it returns a classification result that callers use to drive UI
+  behavior.
+
+state_machine: null
+
+conditions:
+  - id: signal-extraction
+    description: >
+      Extracts failure signals from a failure-like object by collecting reason
+      codes, error messages, status codes, and nested Error properties into a
+      normalized signal string. Handles plain objects, Error instances, and
+      nested {error: Error} shapes. Explicit bucket overrides (taxonomyBucket,
+      bucket, category) are canonicalized before signal extraction.
+    trigger: classifyQfmFailure() called with a failure-like object
+    guards:
+      - field: input_type
+        condition: >
+          Input is a plain object (via isPlainObject) or an Error instance.
+          Non-object inputs default to empty descriptor.
+    then:
+      - Extract explicitBucket from descriptor.taxonomyBucket, .bucket, or .category
+      - Extract statusCode from descriptor.statusCode, .status, .response.status, or error.statusCode
+      - Collect signal parts from: reason, reasonCode, message, code, operation, source, signal, error.name, error.message, error.code
+      - Normalize all signal parts to lowercase trimmed strings, filter empty
+      - Join signal parts with " | " separator
+      - Extract reasonCode from descriptor.reasonCode, .code, or error.code (normalized to snake_case)
+    else:
+      - Return empty signals with no bucket match
+
+  - id: bucket-resolution-priority
+    description: >
+      Resolves the failure bucket using a strict priority order. Explicit bucket
+      overrides always win. Status codes 401/403 always map to auth/session.
+      Keyword matching follows: auth > stale > storage > import > PDF > routing >
+      contract. Default fallback is "data contract" when no signals match.
+    trigger: Signal extraction complete
+    guards:
+      - field: explicit_bucket
+        condition: If explicitBucket is set, use it directly (skip all keyword matching)
+      - field: status_code
+        condition: If statusCode is 401 or 403, bucket is "auth/session"
+    then:
+      - Return the resolved bucket
+    else:
+      - Match signal string against keyword lists in priority order
+      - First matching keyword list determines the bucket
+      - If no keywords match, default to "data contract"
+
+  - id: envelope-detection
+    description: >
+      Detects whether an API response is a "wrapped" envelope (has statusCode
+      property) or a "raw" payload. Transport-level responses (axios-like with
+      status property) are unwrapped first. Wrapped envelopes are validated for
+      statusCode presence and validity. Raw payloads use the transport status
+      code as fallback.
+    trigger: normalizeQfmResponse() called with a response or payload
+    guards:
+      - field: transport_response
+        condition: >
+          Input has a "status" property (isTransportResponseLike) — treated as
+          transport response. Payload extracted from .data property.
+    then:
+      - Extract payload from transportResponse.data
+      - Use transportResponse.status as transportStatus
+    else:
+      - Treat input as direct payload
+      - Use options.transportStatus as fallback status
+
+  - id: contract-violation-detection
+    description: >
+      After normalization, checks the normalized response for contract violations.
+      Returns a contractFailure object with bucket "data contract" and
+      FM-CONTRACT-001 failure mode ID. Checks run in order: invalid normalized
+      status code, missing transport data, missing/wrapped envelope statusCode,
+      invalid envelope statusCode, missing envelope data, missing normalized
+      data, undefined original payload.
+    trigger: Envelope normalization complete
+    guards:
+      - field: normalized_status
+        condition: Normalized statusCode must be a valid HTTP status (100-599)
+      - field: transport_data
+        condition: If transport response exists, it must have a "data" property
+      - field: envelope_integrity
+        condition: If envelopeType is "wrapped", raw must be a plain object with statusCode
+    then:
+      - Return contractFailure with specific reasonCode and message
+      - Set taxonomyBucket to "data contract" on the output
+      - Set ok to false
+    else:
+      - Return null (no contract failure)
+
+inputs:
+  - id: failure_object
+    type: "Plain object, Error instance, or {error: Error} wrapper"
+    source: "Any failing operation (API call, navigation, storage, PDF generation)"
+    required: true
+    validation:
+      taxonomyBucket: "string (optional) — explicit bucket override"
+      statusCode: "number (optional) — HTTP status code"
+      reason: "string (optional) — human-readable reason"
+      reasonCode: "string (optional) — machine-readable reason code"
+      message: "string (optional) — error message"
+      error: "Error instance (optional) — nested error object"
+
+  - id: api_response
+    type: "Transport response (axios-like {status, data}) or raw payload"
+    source: "API client fetch/axios response"
+    required: true
+    validation:
+      status: "number (optional) — HTTP transport status code"
+      data: "unknown (optional) — response payload"
+      statusCode: "number (optional) — wrapped envelope status code"
+
+outputs:
+  - id: classification_result
+    type: "{ bucket: string, failureModeId: string, userBehavior: string, reasonCode: string }"
+    destination: "Caller of classifyQfmFailure() — drives UI behavior selection"
+    lifespan: "immediate"
+
+  - id: normalized_response
+    type: "{ ok: boolean, statusCode: number, message: string, data: unknown, envelopeType: 'wrapped'|'raw', raw: unknown, taxonomyBucket: string|null, contractFailure: object|null }"
+    destination: "Caller of normalizeQfmResponse() — drives UI rendering and error handling"
+    lifespan: "immediate"
+
+evidence_refs:
+  - path: src/shared/lib/qfm/failureTaxonomy.js
+    snippet: |
+      const QFM_BUCKETS = Object.freeze([
+        "auth/session",
+        "routing",
+        "data contract",
+        "import mapping",
+        "PDF",
+        "storage corruption",
+        "stale state",
+      ]);
+    covers:
+      - "condition:bucket-resolution-priority"
+    line_range:
+      start: 34
+      end: 42
+
+  - path: src/shared/lib/qfm/failureTaxonomy.js
+    snippet: |
+      const BUCKET_DETAILS = Object.freeze({
+        "auth/session": Object.freeze({
+          failureModeId: "FM-AUTH-001",
+          userBehavior: "redirect_to_login_preserve_runtime_state",
+          defaultReasonCode: "auth_or_session_failure",
+        }),
+        routing: Object.freeze({
+          failureModeId: "FM-ROUTE-001",
+          userBehavior: "block_navigation_surface_route_error",
+          defaultReasonCode: "route_resolution_failure",
+        }),
+        "data contract": Object.freeze({
+          failureModeId: "FM-CONTRACT-001",
+          userBehavior: "block_success_ui_surface_contract_error",
+          defaultReasonCode: "contract_violation",
+        }),
+        "import mapping": Object.freeze({
+          failureModeId: "FM-IMPORT-001",
+          userBehavior: "block_submit_surface_mapping_errors",
+          defaultReasonCode: "import_mapping_failure",
+        }),
+        PDF: Object.freeze({
+          failureModeId: "FM-PDF-001",
+          userBehavior: "transition_pdf_state_failed_enable_retry",
+          defaultReasonCode: "pdf_lifecycle_failure",
+        }),
+        "storage corruption": Object.freeze({
+          failureModeId: "FM-STORAGE-001",
+          userBehavior: "reset_to_safe_defaults_emit_recovery",
+          defaultReasonCode: "storage_recovery_applied",
+        }),
+        "stale state": Object.freeze({
+          failureModeId: "FM-STALE-001",
+          userBehavior: "ignore_stale_result_preserve_latest_state",
+          defaultReasonCode: "stale_or_out_of_order_state",
+        }),
+      });
+    covers:
+      - "output:classification_result"
+    line_range:
+      start: 64
+      end: 100
+
+  - path: src/shared/lib/qfm/failureTaxonomy.js
+    snippet: |
+      function collectFailureSignals(failureLike = {}) {
+        const descriptor = isPlainObject(failureLike) ? failureLike : {};
+        const nestedError = descriptor.error instanceof Error ? descriptor.error : null;
+        const directError = failureLike instanceof Error ? failureLike : null;
+        const error = nestedError ?? directError;
+
+        const explicitBucket =
+          canonicalizeQfmFailureBucket(
+            descriptor.taxonomyBucket ?? descriptor.bucket ?? descriptor.category,
+            { allowNull: true },
+          ) ?? null;
+
+        const statusCode = toStatusCode(
+          descriptor.statusCode ?? descriptor.status ?? descriptor.response?.status ?? error?.statusCode,
+        );
+
+        const signalParts = [
+          descriptor.reason,
+          descriptor.reasonCode,
+          descriptor.message,
+          descriptor.code,
+          descriptor.operation,
+          descriptor.source,
+          descriptor.signal,
+          error?.name,
+          error?.message,
+          error?.code,
+        ]
+          .map(normalizeSignalPart)
+          .filter(Boolean);
+
+        const reasonCode =
+          normalizeReasonCode(descriptor.reasonCode) ||
+          normalizeReasonCode(descriptor.code) ||
+          normalizeReasonCode(error?.code);
+
+        return {
+          explicitBucket,
+          statusCode,
+          signal: signalParts.join(" | "),
+          reasonCode,
+        };
+      }
+    covers:
+      - "condition:signal-extraction"
+    line_range:
+      start: 209
+      end: 251
+
+  - path: src/shared/lib/qfm/failureTaxonomy.js
+    snippet: |
+      function resolveBucket({ explicitBucket, statusCode, signal }) {
+        if (explicitBucket) {
+          return explicitBucket;
+        }
+
+        if (AUTH_FAILURE_STATUS_CODES.includes(statusCode)) {
+          return "auth/session";
+        }
+
+        if (includesKeyword(signal, AUTH_KEYWORDS)) {
+          return "auth/session";
+        }
+
+        if (includesKeyword(signal, STALE_KEYWORDS)) {
+          return "stale state";
+        }
+
+        if (includesKeyword(signal, STORAGE_KEYWORDS)) {
+          return "storage corruption";
+        }
+
+        if (includesKeyword(signal, IMPORT_KEYWORDS)) {
+          return "import mapping";
+        }
+
+        if (includesKeyword(signal, PDF_KEYWORDS)) {
+          return "PDF";
+        }
+
+        if (includesKeyword(signal, ROUTING_KEYWORDS)) {
+          return "routing";
+        }
+
+        if (includesKeyword(signal, CONTRACT_KEYWORDS)) {
+          return "data contract";
+        }
+
+        return "data contract";
+      }
+    covers:
+      - "condition:bucket-resolution-priority"
+    line_range:
+      start: 253
+      end: 291
+
+  - path: src/shared/lib/qfm/failureTaxonomy.js
+    snippet: |
+      export function classifyQfmFailure(failureLike = {}) {
+        const failureSignals = collectFailureSignals(failureLike);
+        const bucket = resolveBucket(failureSignals);
+        const details = QFM_TAXONOMY_DETAILS[bucket];
+
+        return {
+          bucket,
+          failureModeId: details.failureModeId,
+          userBehavior: details.userBehavior,
+          reasonCode: failureSignals.reasonCode || details.defaultReasonCode,
+        };
+      }
+    covers:
+      - "output:classification_result"
+    line_range:
+      start: 313
+      end: 324
+
+  - path: src/shared/lib/qfm/failureTaxonomy.js
+    snippet: |
+      const AUTH_FAILURE_STATUS_CODES = [401, 403];
+
+      const AUTH_KEYWORDS = Object.freeze([
+        "auth", "session", "token", "cookie", "unauthorized",
+        "forbidden", "login", "no-access",
+      ]);
+
+      const ROUTING_KEYWORDS = Object.freeze([
+        "route", "routing", "handoff", "gate", "calculatorid",
+        "navigation", "url", "missing_target",
+      ]);
+
+      const CONTRACT_KEYWORDS = Object.freeze([
+        "contract", "envelope", "schema", "statuscode", "missing _id",
+        "missing_id", "required field", "invalid response", "payload",
+      ]);
+
+      const IMPORT_KEYWORDS = Object.freeze([
+        "import", "mapping", "mapper", "source report",
+        "target field", "unresolved required",
+      ]);
+
+      const PDF_KEYWORDS = Object.freeze([
+        "pdf", "download", "generate-pdf", "poller",
+        "downloadingpdf", "email delivery",
+      ]);
+
+      const STORAGE_KEYWORDS = Object.freeze([
+        "storage", "localstorage", "persist", "json parse",
+        "malformed json", "corrupt",
+      ]);
+
+      const STALE_KEYWORDS = Object.freeze([
+        "stale", "out of order", "out-of-order", "race",
+        "superseded", "abort", "canceled", "cancelled", "version",
+      ]);
+    covers:
+      - "condition:bucket-resolution-priority"
+      - "condition:signal-extraction"
+    line_range:
+      start: 102
+      end: 175
+
+  - path: src/shared/lib/qfm/responseAdapter.js
+    snippet: |
+      export function normalizeQfmResponse(responseOrPayload, options = {}) {
+        const transportResponse = isTransportResponseLike(responseOrPayload) ? responseOrPayload : null;
+        const payload = transportResponse
+          ? hasOwn(transportResponse, "data")
+            ? transportResponse.data
+            : undefined
+          : responseOrPayload;
+        const transportStatus = transportResponse ? transportResponse.status : options.transportStatus;
+        const normalized = normalizeMixedEnvelope(payload, { transportStatus });
+        const contractFailure = detectContractFailure({
+          normalized,
+          transportResponse,
+          originalInput: responseOrPayload,
+        });
+
+        return {
+          ok: contractFailure ? false : normalized.ok,
+          statusCode: normalized.statusCode,
+          message: normalized.message || contractFailure?.message || "",
+          data: normalized.data,
+          envelopeType: normalized.envelopeType,
+          raw: normalized.raw,
+          taxonomyBucket: contractFailure ? CONTRACT_BUCKET : null,
+          contractFailure,
+        };
+      }
+    covers:
+      - "condition:envelope-detection"
+      - "condition:contract-violation-detection"
+      - "output:normalized_response"
+    line_range:
+      start: 108
+      end: 133
+
+  - path: src/shared/lib/qfm/responseAdapter.js
+    snippet: |
+      function detectContractFailure({ normalized, transportResponse, originalInput }) {
+        if (!isValidHttpStatusCode(normalized.statusCode)) {
+          return createContractFailure(
+            "invalid_normalized_status",
+            "Normalized response statusCode is not a valid HTTP status code.",
+          );
+        }
+
+        if (transportResponse && !hasOwn(transportResponse, "data")) {
+          return createContractFailure(
+            "missing_transport_data",
+            "Transport response is missing required data payload.",
+          );
+        }
+
+        if (normalized.envelopeType === "wrapped") {
+          const wrapped = normalized.raw;
+
+          if (!isPlainObject(wrapped) || !hasOwn(wrapped, "statusCode")) {
+            return createContractFailure(
+              "missing_envelope_status_code",
+              "Wrapped response envelope is missing statusCode.",
+            );
+          }
+
+          if (!isValidHttpStatusCode(wrapped.statusCode)) {
+            return createContractFailure(
+              "invalid_envelope_status_code",
+              "Wrapped response envelope contains an invalid statusCode.",
+            );
+          }
+
+          if (!hasOwn(wrapped, "data")) {
+            return createContractFailure(
+              "missing_envelope_data",
+              "Wrapped response envelope is missing required data field.",
+            );
+          }
+        }
+
+        if (typeof normalized.data === "undefined") {
+          return createContractFailure(
+            "missing_normalized_data",
+            "Normalized response data is undefined.",
+          );
+        }
+
+        if (typeof originalInput === "undefined") {
+          return createContractFailure("missing_payload", "Response payload is undefined.");
+        }
+
+        return null;
+      }
+    covers:
+      - "condition:contract-violation-detection"
+    line_range:
+      start: 54
+      end: 106
+
+  - path: src/shared/lib/qfm/responseAdapter.js
+    snippet: |
+      function isTransportResponseLike(candidate) {
+        return isPlainObject(candidate) && hasOwn(candidate, "status");
+      }
+
+      function isValidHttpStatusCode(rawStatusCode) {
+        const parsed = toStatusCode(rawStatusCode);
+        return parsed !== null && parsed >= HTTP_STATUS_MIN && parsed <= HTTP_STATUS_MAX;
+      }
+
+      function createContractFailure(reasonCode, message) {
+        return {
+          bucket: CONTRACT_BUCKET,
+          failureModeId: CONTRACT_FAILURE_MODE_ID,
+          reasonCode,
+          message,
+        };
+      }
+    covers:
+      - "condition:envelope-detection"
+      - "condition:contract-violation-detection"
+    line_range:
+      start: 36
+      end: 52
+
+  - path: src/shared/lib/qfm/index.js
+    snippet: |
+      // --- Error classification ---
+      export {
+        QFM_TAXONOMY_BUCKETS,
+        QFM_TAXONOMY_DETAILS,
+        canonicalizeQfmFailureBucket,
+        isQfmFailureBucket,
+        classifyQfmFailure,
+      } from "./failureTaxonomy";
+
+      // --- Response normalization ---
+      export {
+        normalizeQfmResponse,
+        QFM_CONTRACT_BUCKET,
+        QFM_CONTRACT_FAILURE_MODE_ID,
+      } from "./responseAdapter";
+    covers:
+      - "output:classification_result"
+      - "output:normalized_response"
+    line_range:
+      start: 1
+      end: 15
+
+confidence: 0.93
+confidence_rationale: >
+  All three discovered behaviors are fully evidenced across 3 primary source files
+  with direct code snippets. Failure bucketing confirmed in failureTaxonomy.js with
+  7 buckets, keyword priority ordering, signal extraction from multiple failure
+  shapes, and static bucket details. Response normalization confirmed in
+  responseAdapter.js with wrapped/raw detection, contract violation detection (6
+  distinct failure modes), and consistent output shape. User behavior mapping
+  confirmed via BUCKET_DETAILS with 7 static mappings. The normalizeMixedEnvelope
+  dependency in api-contract.ts was also inspected to confirm envelope detection
+  logic. Deducted 0.07 because: (1) the isWrappedEnvelope detection in
+  api-contract.ts uses a simple hasOwn(payload, "statusCode") check that could
+  false-positive on non-envelope objects with a statusCode property, (2) the
+  keyword matching is first-match-wins with no disambiguation for signals that
+  match multiple buckets (e.g., "routing" + "stale" keywords both present),
+  (3) the "data contract" default fallback means genuinely unrecognized errors
+  are silently classified as contract violations rather than flagged as unknown.
+
+unresolved_questions:
+  - "What happens when a signal matches keywords from multiple buckets? The resolveBucket() function uses first-match-wins priority (auth > stale > storage > import > PDF > routing > contract), but there is no logging or telemetry for ambiguous classifications."
+  - "Is the 'data contract' default fallback intentional for truly unrecognized errors, or should there be an 'unknown' bucket to surface classification gaps?"
+  - "How do callers consume the userBehavior string? The spec documents the mapping but not the downstream dispatch logic that translates userBehavior into actual UI actions."
+  - "The BUCKET_ALIAS_TO_CANONICAL map includes aliases like 'auth', 'session', 'contract' — are these used by external callers or only internally by canonicalizeQfmFailureBucket?"
+  - "The normalizeMixedEnvelope function in api-contract.ts has its own isWrappedEnvelope check (hasOwn 'statusCode') that may differ from the responseAdapter's isTransportResponseLike check (hasOwn 'status'). Are these intentionally different?"
+
+status: complete

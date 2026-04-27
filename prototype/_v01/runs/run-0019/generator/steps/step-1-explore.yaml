@@ -1,0 +1,565 @@
+file_tree:
+  - src/app/layout.tsx
+  - src/app/page.tsx
+  - src/app/error.tsx
+  - src/app/globals.css
+  - src/app/login/page.tsx
+  - src/app/signup/page.tsx
+  - src/app/reset-password/page.tsx
+  - src/app/reset-password-landing/page.tsx
+  - src/app/home/page.tsx
+  - src/app/gate/edit/page.tsx
+  - src/app/gate/new/page.tsx
+  - src/app/(dashboard)/layout.tsx
+  - src/app/(dashboard)/page.tsx
+  - src/app/(dashboard)/companies/page.tsx
+  - src/app/(dashboard)/reports/page.tsx
+  - src/features/auth/index.ts
+  - src/features/auth/api/auth-service.js
+  - src/features/auth/api/authErrorHandler.js
+  - src/features/auth/api/authGuard.js
+  - src/features/auth/api/authMemorySession.js
+  - src/features/auth/api/csrfHelper.js
+  - src/features/auth/api/sessionBootstrap.js
+  - src/features/auth/api/tokenRefresher.js
+  - src/features/auth/api/tokenService.js
+  - src/features/auth/api/tokenValidator.js
+  - src/features/auth/api/user-service.js
+  - src/features/auth/components/AuthGuard.tsx
+  - src/features/auth/components/LoginPageContent.tsx
+  - src/features/auth/components/ResetPasswordLandingPageContent.tsx
+  - src/features/auth/components/ResetPasswordPageContent.tsx
+  - src/features/auth/components/SignupPageContent.tsx
+  - src/features/auth/contracts/toa-contract.js
+  - src/features/auth/hooks/useAuthRedirect.ts
+  - src/features/auth/hooks/useUserQuery.ts
+  - src/features/auth/lib/authBroadcast.js
+  - src/features/auth/lib/crossTab.js
+  - src/features/company/index.ts
+  - src/features/company/api/company-service.js
+  - src/features/company/api/list-service.js
+  - src/features/company/api/stale-response-guard.js
+  - src/features/company/components/CompaniesPageClient.tsx
+  - src/features/company/components/CompaniesTable.tsx
+  - src/features/company/components/CompanyModals.tsx
+  - src/features/company/components/CompanyRowActionsMenu.tsx
+  - src/features/company/contracts/list-contract.js
+  - src/features/company/contracts/row-action-contract.js
+  - src/features/company/contracts/shell-contract.js
+  - src/features/company/contracts/ux-feedback-contract.js
+  - src/features/company/hooks/useCompaniesPage.ts
+  - src/features/company/hooks/useCompanyForm.ts
+  - src/features/company/hooks/useCompanyListQuery.ts
+  - src/features/company/hooks/useCompanyModals.ts
+  - src/features/company/hooks/useCompanyUrlEntry.ts
+  - src/features/reports/index.ts
+  - src/features/reports/api/list-service.js
+  - src/features/reports/api/report-service.js
+  - src/features/reports/api/stale-response-guard.js
+  - src/features/reports/components/CreateReportModal.tsx
+  - src/features/reports/components/DeleteReportModal.tsx
+  - src/features/reports/components/EmailReportModal.tsx
+  - src/features/reports/components/ReportsEmptyState.tsx
+  - src/features/reports/components/ReportsIdleState.tsx
+  - src/features/reports/components/ReportsPageContent.tsx
+  - src/features/reports/components/ReportsTable.tsx
+  - src/features/reports/components/ReportsTableSkeleton.tsx
+  - src/features/reports/components/ReportsToolbar.tsx
+  - src/features/reports/components/ReportSplitActions.tsx
+  - src/features/reports/components/index.ts
+  - src/features/reports/contracts/import-engine.ts
+  - src/features/reports/contracts/index.ts
+  - src/features/reports/contracts/lifecycle-contract.js
+  - src/features/reports/contracts/list-contract.js
+  - src/features/reports/contracts/report-record-contract.js
+  - src/features/reports/contracts/templates/de-template.ts
+  - src/features/reports/contracts/templates/index.ts
+  - src/features/reports/contracts/templates/np-template.ts
+  - src/features/reports/contracts/templates/ve-template.ts
+  - src/features/reports/contracts/templates/vga-template.ts
+  - src/features/reports/contracts/tests/list-contract.test.js
+  - src/features/reports/contracts/tests/report-record-contract.test.js
+  - src/features/reports/controllers/useReportsPageController.ts
+  - src/features/reports/hooks/useCreateReportModal.ts
+  - src/features/reports/hooks/useReportBusinessSelection.ts
+  - src/features/reports/hooks/useReportCreation.ts
+  - src/features/reports/hooks/useReportDeleteAction.ts
+  - src/features/reports/hooks/useReportDeleteDialog.ts
+  - src/features/reports/hooks/useReportDownloadAction.ts
+  - src/features/reports/hooks/useReportEmailAction.ts
+  - src/features/reports/hooks/useReportEmailModal.ts
+  - src/features/reports/hooks/useReportNavigation.ts
+  - src/features/reports/hooks/useReportRenameAction.ts
+  - src/features/reports/hooks/useReportRowController.ts
+  - src/features/reports/hooks/useReportsListQuery.ts
+  - src/features/reports/hooks/useReportsToolbarController.ts
+  - src/features/reports/store/useCreateReportStore.ts
+  - src/features/reports/store/useReportActionStore.ts
+  - src/features/reports/store/useReportsListStore.ts
+  - src/features/routing/components/GateEditRouteEntryClient.tsx
+  - src/features/routing/components/GateNewRouteEntryClient.tsx
+  - src/features/routing/components/GateStatusView.tsx
+  - src/features/routing/components/RootRedirectPageContent.tsx
+  - src/features/routing/hooks/useGateEditEntryState.ts
+  - src/features/routing/hooks/useGateNewEntryState.ts
+  - src/features/routing/hooks/useRootRedirect.ts
+  - src/features/shell/index.ts
+  - src/features/shell/components/DashboardPage.tsx
+  - src/features/shell/components/DashboardShell.tsx
+  - src/features/shell/hooks/useDashboardShell.ts
+  - src/features/pdf/index.ts
+  - src/features/pdf/api/pdf-service.ts
+  - src/features/pdf/components/PdfGenerationOverlay.tsx
+  - src/features/pdf/store/useDownloadStore.ts
+  - src/features/photo-editor/index.ts
+  - src/features/photo-editor/components/LogoPhotoEditor.tsx
+  - src/features/photo-editor/hooks/useDragPan.ts
+  - src/features/photo-editor/lib/constants.ts
+  - src/features/photo-editor/lib/photoEditor.ts
+  - src/shared/components/Alert.tsx
+  - src/shared/components/AnimatedListItem.tsx
+  - src/shared/components/AuthSyncBootstrap.tsx
+  - src/shared/components/Avatar.tsx
+  - src/shared/components/Badge.tsx
+  - src/shared/components/Breadcrumbs.tsx
+  - src/shared/components/Button.tsx
+  - src/shared/components/Dialog.tsx
+  - src/shared/components/DropdownMenuContent.tsx
+  - src/shared/components/EmptyState.tsx
+  - src/shared/components/ErrorBoundary.tsx
+  - src/shared/components/ErrorFallback.tsx
+  - src/shared/components/FormError.tsx
+  - src/shared/components/Heading.tsx
+  - src/shared/components/Label.tsx
+  - src/shared/components/Modal.tsx
+  - src/shared/components/ProgressBar.tsx
+  - src/shared/components/ProgressRing.tsx
+  - src/shared/components/SearchInput.tsx
+  - src/shared/components/SelectFilter.tsx
+  - src/shared/components/Sidebar.tsx
+  - src/shared/components/Spinner.tsx
+  - src/shared/components/StaticImage.tsx
+  - src/shared/components/TableHeader.tsx
+  - src/shared/components/TableRow.tsx
+  - src/shared/components/Text.tsx
+  - src/shared/components/TextInput.tsx
+  - src/shared/components/index.ts
+  - src/shared/lib/api/apiClient.ts
+  - src/shared/lib/api/authBehaviorTypes.js
+  - src/shared/lib/api/index.ts
+  - src/shared/lib/browser/storage.ts
+  - src/shared/lib/contracts/api-contract.ts
+  - src/shared/lib/contracts/index.js
+  - src/shared/lib/contracts/query-contract.js
+  - src/shared/lib/contracts/storage-contract.js
+  - src/shared/lib/date/formatDate.ts
+  - src/shared/lib/qfm/failureTaxonomy.js
+  - src/shared/lib/qfm/GLOSSARY.md
+  - src/shared/lib/qfm/index.js
+  - src/shared/lib/qfm/inFlightMutationGuard.js
+  - src/shared/lib/qfm/pdfLifecycle.js
+  - src/shared/lib/qfm/responseAdapter.js
+  - src/shared/lib/qfm/rollbackGate.js
+  - src/shared/lib/qfm/storageSanitizer.js
+  - src/shared/lib/react/clearClientDataCache.ts
+  - src/shared/lib/routing/basePath.js
+  - src/shared/lib/routing/entryContracts.js
+  - src/shared/lib/routing/gate-edit-contract.js
+  - src/shared/lib/routing/gate-finder.js
+  - src/shared/lib/routing/gate-new-contract.js
+  - src/shared/lib/routing/index.js
+  - src/shared/lib/routing/initGuards.js
+  - src/shared/lib/routing/queryValidators.js
+  - src/shared/lib/routing/report-route-progress-contract.js
+  - src/shared/lib/shared/request-intent-guard.js
+  - src/shared/lib/utils/index.js
+  - src/shared/lib/utils/normalization.js
+  - src/shared/lib/utils/normalization.test.js
+  - src/shared/lib/utils/object.js
+  - src/shared/constants/assetUrls.ts
+  - src/shared/constants/calculators.ts
+  - src/shared/constants/index.ts
+  - src/shared/theme/tokens.css
+  - middleware.js
+  - next.config.mjs
+  - package.json
+  - tsconfig.json
+behavior_candidates:
+  - id: auth_flow.login
+    description: >
+      Login form submission flow. User enters email/password on
+      LoginPageContent, which calls POST /auth/login via auth-service, then
+      bootstraps the session via sessionBootstrap (extracts token from response
+      envelope, stores in memory via tokenService.setToken, writes user cookie),
+      clears SWR cache, and redirects to /companies. Includes session-expired
+      debug info capture from URL search params.
+    evidence_refs:
+      - src/features/auth/components/LoginPageContent.tsx
+      - src/features/auth/api/auth-service.js
+      - src/features/auth/api/sessionBootstrap.js
+      - src/features/auth/api/tokenService.js
+      - src/shared/lib/react/clearClientDataCache.ts
+    confidence: 0.98
+  - id: auth_flow.signup
+    description: >
+      Signup form submission flow. User enters email/password on
+      SignupPageContent, calls POST /auth/register via
+      auth-service.registerUser, bootstraps session via
+      sessionBootstrap.bootstrapSignupSession, clears SWR cache, and redirects
+      to /companies. Shares session bootstrap logic with login but uses separate
+      API endpoint.
+    evidence_refs:
+      - src/features/auth/components/SignupPageContent.tsx
+      - src/features/auth/api/auth-service.js
+      - src/features/auth/api/sessionBootstrap.js
+    confidence: 0.97
+  - id: auth_flow.session_persistence
+    description: >
+      In-memory session store (authMemorySession) holds JWT access token and
+      user data in a JavaScript variable (not localStorage) for XSS protection.
+      Token is also written to a readable 'user' cookie for middleware access.
+      The refresh token is HTTP-only (set by backend). setToken() writes to
+      memory + cookie + broadcasts login; clearToken() clears memory + cookie +
+      broadcasts logout.
+    evidence_refs:
+      - src/features/auth/api/authMemorySession.js
+      - src/features/auth/api/tokenService.js
+      - src/features/auth/lib/authBroadcast.js
+    confidence: 0.98
+  - id: auth_flow.token_refresh
+    description: >
+      JWT access token refresh with cross-tab coordination. When a 401 is
+      detected, refreshAccessToken() acquires a localStorage-based lock to
+      prevent multiple tabs from refreshing simultaneously. The leader tab calls
+      POST /auth/refresh with HTTP-only refresh cookie, stores the new token,
+      and broadcasts the result to waiting tabs via
+      BroadcastChannel/localStorage. Lock auto-expires after 10s. Within a
+      single tab, a promise-based lock prevents duplicate refresh calls.
+    evidence_refs:
+      - src/features/auth/api/tokenRefresher.js
+      - src/features/auth/api/auth-service.js
+      - src/features/auth/lib/crossTab.js
+      - src/shared/lib/api/apiClient.ts
+    confidence: 0.97
+  - id: auth_flow.route_protection
+    description: >
+      Multi-layer route protection: (1) Next.js Edge middleware runs before
+      every page load — reads cookies, attempts silent refresh for protected
+      routes (/companies, /reports), runs authGuard to allow/redirect. (2)
+      Dashboard layout wraps children in AuthGuard component which calls
+      useAuthRedirect hook. (3) useAuthRedirect checks in-memory token, attempts
+      refresh if missing, redirects to /login on failure. Protected paths:
+      /companies, /reports.
+    evidence_refs:
+      - middleware.js
+      - src/features/auth/api/authGuard.js
+      - src/features/auth/components/AuthGuard.tsx
+      - src/features/auth/hooks/useAuthRedirect.ts
+      - src/app/(dashboard)/layout.tsx
+    confidence: 0.98
+  - id: auth_flow.error_handling
+    description: >
+      Global auth error handling for 401/403 responses.
+      authErrorHandler.isAuthError() detects auth failures by status code, QFM
+      taxonomy bucket, or keyword matching. handleAuthError() clears SWR cache,
+      clears in-memory session + user cookie, removes known auth localStorage
+      keys, and redirects to /login with reason query param. Prevents concurrent
+      handling via isAuthErrorHandling flag. Integrated into apiClient as a
+      response interceptor.
+    evidence_refs:
+      - src/features/auth/api/authErrorHandler.js
+      - src/shared/lib/api/apiClient.ts
+      - src/shared/lib/react/clearClientDataCache.ts
+      - src/features/auth/api/tokenService.js
+    confidence: 0.97
+  - id: auth_flow.cross_tab_sync
+    description: >
+      Cross-tab authentication synchronization using BroadcastChannel with
+      localStorage fallback (for Safari compatibility). On logout: all tabs
+      receive event, clear session, redirect to /login. On login: tabs on login
+      page redirect to /companies. Includes debounce protection (1s) to prevent
+      redirect loops. authMemorySession initializes listeners lazily via
+      AuthSyncBootstrap component mounted in every auth page.
+    evidence_refs:
+      - src/features/auth/lib/authBroadcast.js
+      - src/features/auth/lib/crossTab.js
+      - src/features/auth/api/authMemorySession.js
+      - src/shared/components/AuthSyncBootstrap.tsx
+    confidence: 0.96
+  - id: auth_flow.csrf_protection
+    description: >
+      CSRF token management. Backend sets non-HttpOnly csrfToken cookie on
+      login/refresh. csrfHelper reads the cookie and builds x-csrf-token header
+      for state-changing requests (POST, PATCH, DELETE). apiClient automatically
+      attaches CSRF headers. Proactive refresh: if no CSRF token and not already
+      retried, triggers token refresh to obtain fresh CSRF token. Retry limit of
+      1 to prevent infinite loops.
+    evidence_refs:
+      - src/features/auth/api/csrfHelper.js
+      - src/shared/lib/api/apiClient.ts
+      - src/features/auth/api/auth-service.js
+    confidence: 0.95
+  - id: auth_flow.logout
+    description: >
+      Logout flow orchestrated by useDashboardShell.executeLogout(): calls POST
+      /auth/logout via auth-service, clears SWR cache, clears in-memory session
+      + user cookie, removes auth localStorage keys, shows toast, and redirects
+      to /login after 500ms delay. Cross-tab broadcast ensures all tabs log out.
+      Fail-safe: if logout API fails, still clears session and redirects.
+    evidence_refs:
+      - src/features/shell/hooks/useDashboardShell.ts
+      - src/features/auth/api/auth-service.js
+      - src/features/auth/api/tokenService.js
+      - src/features/auth/lib/authBroadcast.js
+      - src/shared/lib/react/clearClientDataCache.ts
+    confidence: 0.97
+  - id: auth_flow.password_reset
+    description: >
+      Two-step password reset: (1) ResetPasswordPageContent calls POST
+      /auth/request-link to send email. (2) ResetPasswordLandingPageContent
+      calls POST /auth/update-password with reset token in Authorization header,
+      then bootstraps session via bootstrapResetPasswordToLogin to redirect to
+      /login.
+    evidence_refs:
+      - src/features/auth/components/ResetPasswordPageContent.tsx
+      - src/features/auth/components/ResetPasswordLandingPageContent.tsx
+      - src/features/auth/api/auth-service.js
+      - src/features/auth/api/sessionBootstrap.js
+    confidence: 0.93
+  - id: auth_flow.middleware_silent_refresh
+    description: >
+      Next.js Edge middleware performs silent token refresh for protected
+      routes. On each request to /companies or /reports, middleware reads
+      cookies, extracts refresh token, calls POST /auth/refresh via apiClient
+      with 3s timeout. On success, sets user cookie + CSRF cookie + refresh
+      cookie on the response. Two attempts: first with CSRF token, then without.
+      Falls through to authGuard for route decision.
+    evidence_refs:
+      - middleware.js
+      - src/shared/lib/api/apiClient.ts
+      - src/features/auth/api/authGuard.js
+      - src/features/auth/api/csrfHelper.js
+    confidence: 0.96
+  - id: auth_flow.toa_guard
+    description: >
+      Terms-of-Agreement (TOA) guard for calculator access. Before creating a
+      report, useReportCreation checks user's agreedToa status via user-service.
+      If not accepted, redirects to calculator's introduction page via
+      toa-contract.buildIntroductionUrl(). If accepted, proceeds with report
+      creation. toa-contract resolves gate paths from env vars per calculator
+      type.
+    evidence_refs:
+      - src/features/auth/contracts/toa-contract.js
+      - src/features/auth/api/user-service.js
+      - src/features/reports/hooks/useReportCreation.ts
+    confidence: 0.92
+  - id: stateful_ui.reports_list_filter_state
+    description: >
+      Zustand store (useReportsListStore) manages reports list filter state:
+      searchQuery, sortId (default "updatedAt:desc"), calcTypeFilter (default
+      "all"). Provides setSearchQuery, setSortId, setCalcTypeFilter,
+      resetFilters actions. Consumed by useReportsToolbarController for UI
+      controls and by useReportsPageController to drive SWR query parameters.
+    evidence_refs:
+      - src/features/reports/store/useReportsListStore.ts
+      - src/features/reports/hooks/useReportsToolbarController.ts
+      - src/features/reports/controllers/useReportsPageController.ts
+    confidence: 0.98
+  - id: stateful_ui.report_action_loading_state
+    description: >
+      Zustand store (useReportActionStore) tracks per-report action loading
+      states as Record<string, boolean> maps: downloading, renaming, deleting,
+      emailing. Provides setDownloading/setRenaming/setDeleting/setEmailing
+      actions and
+      isDownloading/isRenaming/isDeleting/isEmailing/anyActionInProgress
+      selectors. Used by useReportRowController to coordinate row-level actions.
+    evidence_refs:
+      - src/features/reports/store/useReportActionStore.ts
+      - src/features/reports/hooks/useReportRowController.ts
+    confidence: 0.97
+  - id: stateful_ui.create_report_modal_state
+    description: >
+      Zustand store (useCreateReportStore) manages create-report modal
+      open/close state with optional defaultBusinessId. Provides
+      open(defaultBusinessId?) and close() actions. Consumed by
+      ReportsPageContent to trigger modal and by CreateReportModal to read
+      isOpen state.
+    evidence_refs:
+      - src/features/reports/store/useCreateReportStore.ts
+      - src/features/reports/components/ReportsPageContent.tsx
+    confidence: 0.96
+  - id: stateful_ui.pdf_download_state
+    description: >
+      Zustand store (useDownloadStore) manages PDF generation/download lifecycle
+      with localStorage persistence. Tracks dlStatus
+      (waiting/finished/failed/completed), isGenerating, pdfKey, cid, publicUrl,
+      currentReportId. Every state change persists to localStorage for
+      cross-refresh survival. Provides startDownload() async action that calls
+      startPdfGeneration API. reset() clears both store and localStorage.
+    evidence_refs:
+      - src/features/pdf/store/useDownloadStore.ts
+      - src/features/pdf/api/pdf-service.ts
+      - src/features/pdf/components/PdfGenerationOverlay.tsx
+    confidence: 0.95
+  - id: stateful_ui.company_page_state
+    description: >
+      useCompaniesPage hook orchestrates company list page with local useState
+      for searchQuery, debouncedSearchQuery (300ms debounce), sortBy, sortOrder,
+      companyList, logoLoadFailuresByBusinessId, runtimeErrorMessage. Integrates
+      SWR via useCompanyListQuery, rollback gate checking, URL entry handling
+      via useCompanyUrlEntry, and derived list contract resolution. Exposes
+      handleSearchChange, handleSortChange, handleRowNavigation,
+      handleCompanyLogoError.
+    evidence_refs:
+      - src/features/company/hooks/useCompaniesPage.ts
+      - src/features/company/hooks/useCompanyListQuery.ts
+      - src/features/company/hooks/useCompanyUrlEntry.ts
+      - src/features/company/contracts/list-contract.js
+    confidence: 0.97
+  - id: stateful_ui.company_modals
+    description: >
+      useCompanyModals hook manages three modal states with local useState:
+      addEdit (isOpen, editBusinessId), delete (isOpen, targetId), createReport
+      (isOpen, businessId, calculatorId). Each exposes semantic open/close
+      actions. No form state or submission logic — pure UI coordination.
+    evidence_refs:
+      - src/features/company/hooks/useCompanyModals.ts
+      - src/features/company/components/CompanyModals.tsx
+      - src/features/company/components/CompaniesPageClient.tsx
+    confidence: 0.96
+  - id: stateful_ui.company_form_state
+    description: >
+      useCompanyForm hook manages add/edit company form with local useState:
+      companyName, logoFile, croppedLogoFile, existingLogoUrl, hasLogoChanges,
+      isDragging, logoError, isSubmitting. Handles file validation (type, size),
+      drag-and-drop state, and submission via createBusiness/updateBusiness API.
+      Exposes semantic actions only — no raw setters leak to consumers.
+    evidence_refs:
+      - src/features/company/hooks/useCompanyForm.ts
+      - src/features/company/api/company-service.js
+    confidence: 0.95
+  - id: stateful_ui.reports_page_controller
+    description: >
+      useReportsPageController orchestrates reports page state: manages
+      reportList, runtimeErrorMessage, userPage for pagination,
+      accumulatedReportsRef for append-mode loading. Integrates
+      useCompanyListQuery for company dropdown, useReportsListQuery for
+      paginated report data, useReportsListStore for filters,
+      useReportBusinessSelection for URL hash + localStorage business selection.
+      Derives listState (idle/loading/ready/error/empty) from combined query
+      states.
+    evidence_refs:
+      - src/features/reports/controllers/useReportsPageController.ts
+      - src/features/reports/hooks/useReportsListQuery.ts
+      - src/features/reports/hooks/useReportBusinessSelection.ts
+      - src/features/reports/contracts/list-contract.js
+    confidence: 0.97
+  - id: stateful_ui.report_row_controller
+    description: >
+      useReportRowController manages per-row interactive state: editingReportId,
+      editingName for inline rename, uses useRef for originalNameRef,
+      editStartTimeRef, hasFocusedRef. Coordinates with useReportActionStore for
+      loading states, useReportRenameAction for rename API,
+      useReportDownloadAction for download. Exposes
+      startRename/commitRename/cancelRename with debounce protection (500ms
+      minimum edit time).
+    evidence_refs:
+      - src/features/reports/hooks/useReportRowController.ts
+      - src/features/reports/hooks/useReportRenameAction.ts
+      - src/features/reports/hooks/useReportDownloadAction.ts
+      - src/features/reports/store/useReportActionStore.ts
+    confidence: 0.95
+  - id: stateful_ui.report_modals
+    description: >
+      Three focused modal hooks with local useState: useReportEmailModal
+      (reportId, emailAddress, isSending), useReportDeleteDialog (isOpen,
+      target, isDeleting), useCreateReportModal (reportName, businessId,
+      calcId). Each exposes semantic open/close/start/stop/finish actions.
+      useCreateReportModal composes useReportCreation for submission logic and
+      resets form on modal open.
+    evidence_refs:
+      - src/features/reports/hooks/useReportEmailModal.ts
+      - src/features/reports/hooks/useReportDeleteDialog.ts
+      - src/features/reports/hooks/useCreateReportModal.ts
+      - src/features/reports/hooks/useReportCreation.ts
+    confidence: 0.96
+  - id: stateful_ui.dashboard_shell_state
+    description: >
+      useDashboardShell manages dashboard chrome state: isSidebarOpen (boolean
+      toggle), userEmail (from in-memory token), executeLogout() orchestration.
+      Integrates logout API call, session clearing, SWR cache clearing,
+      localStorage cleanup, toast notification, and delayed redirect to /login.
+    evidence_refs:
+      - src/features/shell/hooks/useDashboardShell.ts
+      - src/features/shell/components/DashboardShell.tsx
+      - src/features/auth/api/auth-service.js
+    confidence: 0.96
+  - id: stateful_ui.auth_redirect_state
+    description: >
+      useAuthRedirect hook manages auth check state machine with local useState:
+      isChecking (true during verification), isAuthenticated (result), error
+      (message). On mount: checks in-memory token, attempts refresh via
+      tokenRefresher if missing, redirects to /login on failure. Supports
+      configurable redirectTo, attemptTokenRefresh, and minLoadingDelay options.
+    evidence_refs:
+      - src/features/auth/hooks/useAuthRedirect.ts
+      - src/features/auth/api/tokenService.js
+      - src/features/auth/api/tokenRefresher.js
+      - src/features/auth/components/AuthGuard.tsx
+    confidence: 0.97
+  - id: stateful_ui.user_data_query
+    description: >
+      useUserQuery SWR hook fetches user profile data. Query key is
+      ["user.profile", userId] where userId comes from in-memory token. Calls
+      fetchUserData which hits GET /users/:userId. Returns SWR result with
+      revalidate() convenience method. Used by useReportCreation to check TOA
+      status.
+    evidence_refs:
+      - src/features/auth/hooks/useUserQuery.ts
+      - src/features/auth/api/user-service.js
+      - src/features/auth/api/tokenService.js
+    confidence: 0.94
+  - id: stateful_ui.business_selection_persistence
+    description: >
+      useReportBusinessSelection manages business selection from URL hash +
+      localStorage. On mount and hashchange events: reads persisted business ID
+      from localStorage, resolves selection from hash (takes priority), persists
+      selection back to localStorage, handles rollback route checks. Uses
+      sanitizeDashboardPersistedKey for storage mutation safety (set/remove
+      actions).
+    evidence_refs:
+      - src/features/reports/hooks/useReportBusinessSelection.ts
+      - src/shared/lib/routing/index.js
+      - src/shared/lib/browser/storage.ts
+    confidence: 0.93
+  - id: stateful_ui.gate_entry_state_machines
+    description: >
+      Two gate entry hooks with phase-based state machines (pending_router →
+      initializing → ready/fallback/error): useGateEditEntryState (resume
+      existing report) and useGateNewEntryState (create new report). Both use
+      oneShotGuard to prevent double initialization, check rollback gates,
+      validate query params, and redirect to calculator gate pages. Gate edit
+      fetches report data to resolve resume route; gate new validates referrer
+      origin.
+    evidence_refs:
+      - src/features/routing/hooks/useGateEditEntryState.ts
+      - src/features/routing/hooks/useGateNewEntryState.ts
+      - src/shared/lib/routing/gate-edit-contract.js
+      - src/shared/lib/routing/gate-new-contract.js
+      - src/shared/lib/routing/initGuards.js
+    confidence: 0.94
+  - id: stateful_ui.swr_query_layer
+    description: >
+      SWR (stale-while-revalidate) is the server state management layer. Used
+      for: useUserQuery (user profile), useCompanyListQuery (company list),
+      useReportsListQuery (paginated reports). All follow pattern: derive query
+      key from auth token + params, conditionally enable based on token
+      presence, return revalidate() wrapper. clearClientDataCache() uses SWR's
+      mutate(() => true, undefined, { revalidate: false }) to clear all cached
+      data globally.
+    evidence_refs:
+      - src/features/auth/hooks/useUserQuery.ts
+      - src/features/company/hooks/useCompanyListQuery.ts
+      - src/features/reports/hooks/useReportsListQuery.ts
+      - src/shared/lib/react/clearClientDataCache.ts
+    confidence: 0.96

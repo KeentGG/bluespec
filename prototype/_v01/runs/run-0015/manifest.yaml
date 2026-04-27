@@ -1,0 +1,10 @@
+run_id: run-0015
+formula_ref: formulas/promoted/frontend-derived-v003-consolidated.yaml
+rubric_snapshot_ref: rubrics/snapshots/v002/rubric.yaml
+golden_set_ref: goldens/projects/sample-project/behaviors.yaml
+project_ref: config/projects/sample-project.yaml
+mode: official
+created_at: 2026-04-23T03:11:53.571Z
+lifecycle_policy:
+  same_run_rubric_activation: false
+  official_uses_shadow_criteria: false

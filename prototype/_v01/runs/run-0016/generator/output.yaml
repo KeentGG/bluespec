@@ -1,0 +1,30 @@
+status: complete
+specs_written: 5
+specs:
+  - id: auth.flow.yaml
+    behaviors_documented: 5
+    confidence: 0.92
+    unresolved_questions: 0
+  - id: api.client.yaml
+    behaviors_documented: 3
+    confidence: 0.88
+    unresolved_questions: 1
+  - id: state.management.yaml
+    behaviors_documented: 3
+    confidence: 0.85
+    unresolved_questions: 1
+  - id: pdf.lifecycle.yaml
+    behaviors_documented: 3
+    confidence: 0.82
+    unresolved_questions: 2
+  - id: qfm.system.yaml
+    behaviors_documented: 4
+    confidence: 0.80
+    unresolved_questions: 2
+overall_confidence: 0.85
+flags_for_analyzer:
+  - auth-flow: cross-tab broadcast failure handling not explicitly documented
+  - api-client: CSRF token refresh race condition edge case
+  - state-management: SWR cache invalidation strategy unclear
+  - pdf-lifecycle: real-time storage-event sync path not evidenced
+  - qfm-system: rollback gate threshold configuration details sparse

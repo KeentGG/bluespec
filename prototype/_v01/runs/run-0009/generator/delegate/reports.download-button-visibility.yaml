@@ -1,0 +1,26 @@
+spec_id: reports.download-button-visibility.yaml
+output_path: /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0009/generator/specs/reports.download-button-visibility.yaml
+golden_behaviors:
+  - id: download-button-visibility
+    description: download button becomes visible only after report progress reaches the download stage
+    priority: high
+    evidence_refs:
+      - src/components/ReportActions.tsx
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsTable.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportSplitActions.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportRowController.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportActions.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/pdf/store/useDownloadStore.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/report-route-progress-contract.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - The golden evidence path src/components/ReportActions.tsx does not exist in the current codebase.
+  - The current reports table always renders ReportSplitActions for each row.
+  - In ReportSplitActions.tsx the primary Download button is always rendered, but it is disabled unless progressPercentage === 100.
+  - ReportsTable.tsx passes report.reportProgressPercentage into ReportSplitActions.
+  - report-route-progress-contract.js maps each calculator's reportProgress route to a percentage and treats final/download-adjacent routes as 100% complete.
+  - useReportRowController.ts and useReportActions.ts handle the click path into PDF generation.
+  - useDownloadStore.ts persists download lifecycle state in localStorage and marks download generation as waiting/failed/etc.
+  - The spec should capture the real behavior precisely: the button may be present-but-disabled rather than hidden, depending on how the golden behavior is interpreted.

@@ -1,0 +1,24 @@
+spec_id: qfm.in-flight-mutation-guard
+output_path: runs/run-0015/generator/specs/qfm.in-flight-mutation-guard.yaml
+discovered_behaviors:
+  - id: duplicate-mutation-prevention
+    description: Prevent duplicate API mutations while previous identical request is in flight using string key tracking
+    priority: high
+    evidence_refs:
+      - src/shared/lib/qfm/inFlightMutationGuard.js
+  - id: mutation-guard-lifecycle
+    description: begin/end pattern with active count tracking and duplicate detection
+    priority: medium
+    evidence_refs:
+      - src/shared/lib/qfm/inFlightMutationGuard.js
+source_files:
+  - src/shared/lib/qfm/inFlightMutationGuard.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - In-flight mutation guard prevents duplicate API mutations
+  - Simple mutex pattern with string key tracking
+  - begin() returns started/duplicate status
+  - end() removes key from active set
+  - Tracks active count and keys for observability
+  - Schema versioned as qfm.in-flight-mutation-guard.v1

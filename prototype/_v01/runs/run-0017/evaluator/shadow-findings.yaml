@@ -1,0 +1,137 @@
+run_id: run-0017
+evaluator: evaluator
+status: complete
+provider: sample-project
+
+recall_hits:
+  - golden_behavior_id: toa-gated-first-report-creation
+    spec_id: toa-gated-first-report-creation
+    coverage: partial
+    evidence_quality: high
+    notes: >
+      The spec covers the dashboard-side TOA deferral and redirect flow with
+      direct evidence from useReportCreation.ts:48-92,
+      toa-contract.js:38-174, gate-finder.js:349-395,
+      query-contract.js:197-327, and gate-new-contract.js:25-32,248-319.
+      Coverage remains partial because the post-acceptance calculator-side
+      persisted report creation step is not directly evidenced; the live
+      useGateNewEntryState.ts:139-177 path still injects a stub createReport.
+
+recall_misses:
+  - golden_behavior_id: auth-conditional-redirect
+    severity: high
+    description: >
+      No spec covers the golden behavior's claimed edit-route agreement gate.
+      The generated auth spec is limited to generic route protection and auth
+      error redirects from authGuard.js:69-95 and authErrorHandler.js:80-160.
+      The closest live edit-flow code in gate-edit-contract.js:528-636 and
+      useGateEditEntryState.ts:117-170 validates query/progress only and does
+      not branch on agreement or TOA state.
+    evidence_ref_missing: src/routes/project-edit.tsx
+    affected_specs:
+      - auth-conditional-redirect
+
+  - golden_behavior_id: download-button-visibility
+    severity: high
+    description: >
+      The generated spec documents the real UI behavior, but that behavior does
+      not match the golden set. ReportsTable.tsx:110-126 and
+      ReportSplitActions.tsx:43-64 show the Download button is always rendered
+      and only disabled until progressPercentage === 100; it does not become
+      visible only at a later named download stage. The overlay link timing in
+      PdfGenerationOverlay.tsx:96-157 and 210-225 is a separate behavior.
+    evidence_ref_missing: src/components/ReportActions.tsx
+    affected_specs:
+      - download-button-visibility
+
+precision_findings:
+  - spec_id: auth-conditional-redirect
+    finding: >
+      The artifact is code-accurate, but it is broader than the core behavior it
+      names. In addition to authGuard.js:69-95 it pulls in refresh-cookie and
+      token-refresh support paths that do not sharpen the main conditional
+      redirect surface, which weakens coverage_core_behavior precision.
+    severity: low
+    rubric_criterion: coverage_core_behavior
+
+  - spec_id: download-button-visibility
+    finding: >
+      The spec includes a possible input state of dlStatus="completed", but the
+      rendered overlay branches shown in PdfGenerationOverlay.tsx:159-258 only
+      handle waiting, finished, failed, and the empty state. That makes the
+      inputs/outputs surface slightly broader than the directly evidenced UI.
+    severity: low
+    rubric_criterion: completeness_inputs_outputs
+
+  - spec_id: toa-gated-first-report-creation
+    finding: >
+      The dashboard-side gate is strongly evidenced, but the end-to-end claim
+      that the calculator creates the first report after TOA acceptance remains
+      partially inferred. gate-new-contract.js:339-447 defines the initialization
+      shell, while useGateNewEntryState.ts:146-150 supplies only a stub
+      createReport implementation instead of a real persistence call.
+    severity: medium
+    rubric_criterion: coverage_core_behavior
+
+consistency_findings:
+  - spec_id: toa-gated-first-report-creation
+    finding: >
+      The spec correctly calls out an unresolved handoff gap: the introduction
+      flow carries businessId/reportname via useReportCreation.ts:63-74 and
+      query-contract.js:197-327, but the observed /gate/new initialization path
+      still expects target/source/name and uses a stubbed createReport in
+      useGateNewEntryState.ts:139-177. The artifact is honest, but the live
+      flow remains incomplete.
+    severity: medium
+    cross_spec_refs: []
+
+  - spec_id: auth-conditional-redirect
+    finding: >
+      auth-conditional-redirect and toa-gated-first-report-creation are
+      directionally consistent: TOA gating appears in the report-creation files,
+      not in authGuard.js:69-95 or the gate-edit flow. The main problem is
+      golden-set mismatch/omission, not contradiction between generated specs.
+    severity: info
+    cross_spec_refs:
+      - toa-gated-first-report-creation
+
+  - spec_id: download-button-visibility
+    finding: >
+      The row-button and overlay portions of the spec agree with each other:
+      ReportSplitActions.tsx:43-64 governs row-button enablement, while
+      PdfGenerationOverlay.tsx:96-157 and 210-225 govern the later generated-file
+      download link. No cross-spec contradiction was found.
+    severity: info
+    cross_spec_refs: []
+
+rubric_gap_candidates:
+  - proposed_only: true
+    candidate: stale-golden-evidence-ref-detection
+    description: >
+      Add a rubric check that verifies each golden evidence_ref exists in the
+      current codebase or is explicitly mapped to a renamed successor file.
+    rationale: >
+      This run's golden set points to src/routes/project-edit.tsx and
+      src/components/ReportActions.tsx, but the live code surfaced adjacent
+      implementations in gate-edit-contract/useGateEditEntryState and
+      ReportSplitActions instead.
+
+  - proposed_only: true
+    candidate: golden-vs-live-code-divergence-reporting
+    description: >
+      Add a shadow-only criterion that separately records when a spec matches the
+      current code but cannot satisfy a stale or overstated golden behavior.
+    rationale: >
+      download-button-visibility is accurately documented from live code, yet it
+      still fails the golden claim that visibility itself is gated by a later
+      download stage.
+
+  - proposed_only: true
+    candidate: redirect-boundary-end-to-end-proof
+    description: >
+      Add a rubric check requiring deferred flows to be evidenced on both sides
+      of a redirect boundary before full recall credit is granted.
+    rationale: >
+      The TOA-gated report flow is well documented on the dashboard side, but the
+      calculator-side post-acceptance persistence step is still not shown in the
+      inspected live code.

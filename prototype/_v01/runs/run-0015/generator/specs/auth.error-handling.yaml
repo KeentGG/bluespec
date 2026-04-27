@@ -1,0 +1,540 @@
+id: auth.error-handling
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth-centralized-error-handling
+    coverage: full
+    notes: >
+      Centralized 401/403 handling via authErrorHandler with automatic token
+      refresh and session cleanup. isAuthError() checks status code (401/403),
+      taxonomy bucket ("auth/session"), and auth-related keywords in error
+      messages. handleAuthError() clears cache, session, cookies, and redirects
+      to /login with reason parameter. Concurrent handling prevented via
+      isAuthErrorHandling flag with 100ms cooldown.
+  - id: auth-api-client-retry
+    coverage: full
+    notes: >
+      API client automatically retries requests on 401, 500 with "jwt expired"
+      message, or CSRF failures (403 with "csrf" in message) after successful
+      token refresh. Proactive CSRF token refresh triggered when missing for
+      state-changing requests. Single retry per request enforced via
+      retriedAfterRefresh flag. Refresh failure triggers handleAuthError() to
+      redirect to /login.
+  - id: auth-session-cleanup
+    coverage: full
+    notes: >
+      On auth error, clearClientDataCache() uses SWR mutate to clear all cached
+      data, clearToken() broadcasts logout to other tabs and clears in-memory
+      session and user cookie, EOYT_AUTH_KEYS removed from localStorage, and
+      redirect to /login with reason query parameter via window.location.replace().
+
+description: >
+  Handles authentication errors across all API calls through a centralized error
+  handler and automatic retry mechanism. When an API response indicates auth
+  failure (401, 403, taxonomy bucket "auth/session", or auth-related keywords in
+  the message), the system attempts a token refresh. If refresh succeeds, the
+  original request is retried once with the new token. If refresh fails or no
+  refresh is possible, the handler clears all client-side auth state (SWR cache,
+  in-memory session, user cookie, localStorage auth keys) and redirects to the
+  login page with a reason parameter. Concurrent auth error handling is prevented
+  via a module-level flag with a 100ms cooldown. CSRF failures (403 with "csrf"
+  message) follow the same retry-then-cleanup path.
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: No auth error detected. Normal request processing.
+    - id: error_detected
+      description: API response matched isAuthError() criteria (status 401/403, taxonomy bucket, or auth keywords).
+    - id: refreshing
+      description: Token refresh in progress via HTTP-only refresh cookie.
+    - id: retrying
+      description: Refresh succeeded. Original request being retried with new token.
+    - id: cleaning_up
+      description: Refresh failed or skipped. Clearing all client-side auth state.
+    - id: redirected
+      description: User redirected to /login with reason parameter.
+  transitions:
+    - id: auth_error_detected
+      from: idle
+      to: error_detected
+      trigger: API response matches isAuthError() criteria
+      guards:
+        - field: response
+          condition: Status is 401/403, or taxonomyBucket is "auth/session", or message contains auth keywords
+        - field: skip_auth_error_handling
+          condition: skipAuthErrorHandling option is not true
+        - field: is_refresh_endpoint
+          condition: Request path is NOT /auth/refresh
+      effects:
+        - isAuthErrorHandling flag set to true
+    - id: refresh_initiated
+      from: error_detected
+      to: refreshing
+      trigger: shouldRetryAfterRefresh is true (401, 500+jwt expired, or CSRF failure)
+      guards:
+        - field: already_retried
+          condition: retriedAfterRefresh is false
+        - field: skip_refresh
+          condition: skipTokenRefresh option is not true
+      effects:
+        - refreshAccessToken() called with apiClient reference
+    - id: refresh_succeeded
+      from: refreshing
+      to: retrying
+      trigger: refreshAccessToken() returns success with new token
+      guards:
+        - field: refresh_result
+          condition: refreshResult.success is true and refreshResult.token is present
+      effects:
+        - Original request retried with new token
+        - For CSRF failures: stale CSRF headers cleared or replaced with refreshResult.csrfToken
+    - id: refresh_failed
+      from: refreshing
+      to: cleaning_up
+      trigger: refreshAccessToken() returns failure or no token
+      effects:
+        - handleAuthError() called with redirectUrl="/login", reason="session_expired"
+    - id: cleanup_complete
+      from: cleaning_up
+      to: redirected
+      trigger: handleAuthError() completes cache/session/cookie clearing
+      effects:
+        - clearClientDataCache() called (SWR mutate)
+        - clearToken() called (broadcasts logout, clears session, clears user cookie)
+        - EOYT_AUTH_KEYS removed from localStorage
+        - window.location.replace() to /login?reason=session_expired
+    - id: retry_succeeded
+      from: retrying
+      to: idle
+      trigger: Retried request returns non-auth error or success
+      effects:
+        - isAuthErrorHandling flag reset after 100ms
+    - id: retry_failed
+      from: retrying
+      to: cleaning_up
+      trigger: Retried request also returns auth error
+      effects:
+        - handleAuthError() called (retriedAfterRefresh prevents infinite loop)
+    - id: non_retryable_auth_error
+      from: error_detected
+      to: cleaning_up
+      trigger: Response is auth error but shouldRetryAfterRefresh is false (e.g., 403 without CSRF message)
+      effects:
+        - handleAuthError() called directly
+
+conditions:
+  - id: is-auth-error
+    description: >
+      Determines whether an API response indicates an authentication error by
+      checking status code, taxonomy bucket, and auth-related keywords in the
+      message. Returns true for status 401/403, taxonomyBucket "auth/session",
+      or message containing any of 9 auth keywords.
+    trigger: API response received
+    guards:
+      - field: response
+        condition: Response is a non-null object
+    then:
+      - Check if statusCode is 401 or 403
+      - Check if taxonomyBucket is "auth/session"
+      - Check if message (lowercased) contains any auth keyword
+    else:
+      - Return false (not an auth error)
+
+  - id: should-retry-after-refresh
+    description: >
+      Determines whether a failed request should be retried after token refresh.
+      Triggers on 401 status, 500 status with "jwt expired" message, or 403 with
+      CSRF-related message. Only fires once per request (retriedAfterRefresh guard).
+    trigger: API response received after initial request
+    guards:
+      - field: already_retried
+        condition: retriedAfterRefresh is false
+      - field: skip_refresh
+        condition: skipTokenRefresh option is not true
+      - field: is_refresh_endpoint
+        condition: Request path is NOT /auth/refresh
+      - field: response_status
+        condition: Status is 401, or status is 500 with message containing "jwt expired", or isCsrfFailure (403 with "csrf" in message)
+    then:
+      - Call refreshAccessToken() to obtain new token
+      - If refresh succeeds: retry request with new token
+      - If refresh fails: call handleAuthError() to redirect to /login
+    else:
+      - Do not retry; proceed with original response
+
+  - id: concurrent-handling-guard
+    description: >
+      Prevents multiple simultaneous auth error handling flows. If
+      isAuthErrorHandling is already true, the handler returns immediately with
+      { handled: false, reason: "already_handling" }. Flag is reset after 100ms
+      delay to allow redirect to initiate.
+    trigger: handleAuthError() called
+    guards:
+      - field: is_auth_error_handling
+        condition: isAuthErrorHandling is true
+    then:
+      - 'Return { handled: false, reason: "already_handling" }'
+    else:
+      - Set isAuthErrorHandling to true
+      - Proceed with cleanup and redirect
+
+  - id: csrf-proactive-refresh
+    description: >
+      For state-changing requests (POST, PATCH, DELETE), if the CSRF token is
+      absent from the cookie, trigger a proactive token refresh to obtain a
+      fresh CSRF token before sending the request.
+    trigger: State-changing API request initiated without existing x-csrf-token header
+    guards:
+      - field: request_method
+        condition: Method is POST, PATCH, or DELETE (not GET/HEAD)
+      - field: csrf_token
+        condition: No csrfToken cookie value found
+      - field: already_retried
+        condition: Not already retried after refresh (retriedAfterRefresh is false)
+      - field: is_refresh_endpoint
+        condition: Request path is NOT /auth/refresh
+    then:
+      - Call refreshAccessToken() to obtain fresh CSRF token via refresh response
+      - Re-read csrfToken cookie after successful refresh
+      - Attach x-csrf-token header if token now present
+    else:
+      - Attach existing csrfToken cookie value as x-csrf-token header
+
+inputs:
+  - id: api_response
+    type: "API response object with statusCode, message, taxonomyBucket fields"
+    source: "Fetch API response from backend"
+    required: true
+    validation:
+      statusCode: "integer (401, 403, 500, or null)"
+      message: "string (may contain auth keywords)"
+      taxonomyBucket: "string (may be 'auth/session')"
+
+  - id: request_options
+    type: "RequestOptions object"
+    source: "API client caller"
+    required: false
+    validation:
+      skipTokenRefresh: "boolean, default false"
+      skipAuthErrorHandling: "boolean, default false"
+      path: "string URL path"
+
+  - id: handler_options
+    type: "HandlerOptions object"
+    source: "apiClient or direct caller"
+    required: false
+    validation:
+      redirectUrl: "string, default '/login'"
+      reason: "string, default 'session_expired'"
+      skipRedirect: "boolean, default false"
+
+outputs:
+  - id: auth_error_result
+    type: "AuthErrorResult object { handled, redirectUrl, reason, error }"
+    destination: "Caller of handleAuthError()"
+    lifespan: "immediate"
+
+  - id: cleared_cache
+    type: "SWR cache cleared (all keys)"
+    destination: "Client-side SWR cache"
+    lifespan: "immediate (until next fetch)"
+
+  - id: cleared_session
+    type: "In-memory auth session set to null"
+    destination: "authMemorySession module"
+    lifespan: "permanent until next login"
+
+  - id: cleared_user_cookie
+    type: "User cookie removed via document.cookie"
+    destination: "Browser cookie jar"
+    lifespan: "permanent until next login"
+
+  - id: cleared_localstorage
+    type: "EOYT_AUTH_KEYS removed from localStorage"
+    destination: "Browser localStorage"
+    lifespan: "permanent until next login"
+
+  - id: login_redirect
+    type: "HTTP redirect to /login?reason={reason}"
+    destination: "Browser window.location"
+    lifespan: "immediate (replaces current history entry)"
+
+  - id: logout_broadcast
+    type: "logout event via BroadcastChannel + localStorage"
+    destination: "Other browser tabs"
+    lifespan: "100ms (auto-cleaned)"
+
+evidence_refs:
+  - path: src/features/auth/api/authErrorHandler.js
+    snippet: |
+      export function isAuthError(response) {
+        if (!response || typeof response !== "object") {
+          return false;
+        }
+        if (response.statusCode === 401 || response.statusCode === 403) {
+          return true;
+        }
+        if (response.taxonomyBucket === "auth/session") {
+          return true;
+        }
+        const message = typeof response.message === "string"
+          ? response.message.toLowerCase()
+          : "";
+        const authKeywords = [
+          "unauthorized", "unauthenticated", "invalid token", "token expired",
+          "jwt expired", "session expired", "not authenticated", "auth required", "forbidden",
+        ];
+        if (response.statusCode === 500 || !response.statusCode) {
+            return authKeywords.some(keyword => message.includes(keyword));
+        }
+        return authKeywords.some(keyword => message.includes(keyword));
+      }
+    covers:
+      - "condition:is-auth-error"
+      - "transition:auth_error_detected"
+    line_range:
+      start: 32
+      end: 69
+
+  - path: src/features/auth/api/authErrorHandler.js
+    snippet: |
+      export async function handleAuthError(options = {}) {
+        const {
+          redirectUrl = "/login",
+          reason = "session_expired",
+          skipRedirect = false
+        } = options;
+        if (isAuthErrorHandling) {
+          return { handled: false, reason: "already_handling" };
+        }
+        isAuthErrorHandling = true;
+        try {
+          await clearClientDataCache();
+          clearToken();
+          if (typeof window !== "undefined") {
+            try {
+              for (const key of EOYT_AUTH_KEYS) {
+                try {
+                  window.localStorage.removeItem(key);
+                } catch (_e) { }
+              }
+            } catch (_e) { }
+          }
+          if (!skipRedirect && typeof window !== "undefined") {
+            const separator = redirectUrl.includes("?") ? "&" : "?";
+            const fullUrl = `${withBasePath(redirectUrl)}${separator}reason=${encodeURIComponent(reason)}`;
+            window.location.replace(fullUrl);
+          }
+          return { handled: true, redirectUrl: skipRedirect ? null : redirectUrl, reason };
+        } catch (error) {
+          return { handled: false, error: error.message, reason: "handler_error" };
+        } finally {
+          setTimeout(() => { isAuthErrorHandling = false; }, 100);
+        }
+      }
+    covers:
+      - "condition:concurrent-handling-guard"
+      - "transition:cleanup_complete"
+      - "output:auth_error_result"
+      - "output:cleared_cache"
+      - "output:cleared_session"
+      - "output:cleared_user_cookie"
+      - "output:cleared_localstorage"
+      - "output:login_redirect"
+    line_range:
+      start: 80
+      end: 144
+
+  - path: src/features/auth/api/authErrorHandler.js
+    snippet: |
+      const EOYT_AUTH_KEYS = Object.freeze([
+        "eoyt_auth_token",
+        "eoyt_auth_refresh",
+        "eoyt_auth_user",
+        "eoyt_auth_session",
+        "eoyt_auth_state",
+        "auth_debug_logs",
+      ]);
+      let isAuthErrorHandling = false;
+    covers:
+      - "output:cleared_localstorage"
+      - "condition:concurrent-handling-guard"
+    line_range:
+      start: 14
+      end: 24
+
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      const shouldRetryAfterRefresh =
+        !retriedAfterRefresh &&
+        !skipRefresh &&
+        !isRefreshEndpoint &&
+        (Number(result.statusCode ?? result.status) === 401 ||
+          (Number(result.statusCode ?? result.status) === 500 &&
+            typeof result.message === "string" &&
+            result.message.includes("jwt expired")) ||
+          isCsrfFailure);
+
+      if (shouldRetryAfterRefresh) {
+        const refreshAccessToken = await getRefreshAccessToken();
+        const refreshResult = await refreshAccessToken({
+          apiClient: { request, get, post, patch, delete: remove },
+        });
+        if (refreshResult.success && refreshResult.token) {
+          const retryOptions = { ...requestOptions, token: refreshResult.token };
+          if (isCsrfFailure) {
+            const retryHeaders = { ...(retryOptions.headers || {}) };
+            if (refreshResult.csrfToken) {
+              retryHeaders["x-csrf-token"] = refreshResult.csrfToken;
+            } else {
+              delete retryHeaders["x-csrf-token"];
+              delete retryHeaders["X-CSRF-Token"];
+            }
+            retryOptions.headers = retryHeaders;
+          }
+          return executeRequest<T>(retryOptions, { retriedAfterRefresh: true });
+        }
+        if (!requestOptions.skipAuthErrorHandling) {
+          await handleAuthError({ redirectUrl: "/login", reason: "session_expired", skipRedirect: false });
+        }
+      }
+    covers:
+      - "condition:should-retry-after-refresh"
+      - "transition:refresh_initiated"
+      - "transition:refresh_succeeded"
+      - "transition:refresh_failed"
+    line_range:
+      start: 545
+      end: 597
+
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      if (!requestOptions.skipAuthErrorHandling && isAuthError(result) && !isRefreshEndpoint) {
+        await handleAuthError({
+          redirectUrl: "/login",
+          reason: "session_expired",
+          skipRedirect: false,
+        });
+      }
+    covers:
+      - "transition:non_retryable_auth_error"
+      - "condition:is-auth-error"
+    line_range:
+      start: 599
+      end: 605
+
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      const isCsrfFailure =
+        Number(result.statusCode ?? result.status) === 403 &&
+        typeof result.message === "string" &&
+        result.message.toLowerCase().includes("csrf");
+    covers:
+      - "condition:should-retry-after-refresh"
+    line_range:
+      start: 540
+      end: 543
+
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      if (withBody && !hasHeader(headers, "x-csrf-token") && !skipRefresh && !isRefreshEndpoint) {
+        let csrfToken = getCsrfToken();
+        if (!csrfToken && !retriedAfterRefresh) {
+          const refreshAccessToken = await getRefreshAccessToken();
+          const refreshResult = await refreshAccessToken({
+            apiClient: { request, get, post, patch, delete: remove },
+          });
+          if (refreshResult.success) {
+            csrfToken = getCsrfToken();
+          }
+        }
+        if (csrfToken) {
+          headers["x-csrf-token"] = csrfToken;
+        }
+      }
+    covers:
+      - "condition:csrf-proactive-refresh"
+    line_range:
+      start: 474
+      end: 493
+
+  - path: src/shared/lib/react/clearClientDataCache.ts
+    snippet: |
+      "use client";
+      import { mutate } from "swr";
+
+      export async function clearClientDataCache() {
+        if (typeof window === "undefined") {
+          return;
+        }
+        await mutate(() => true, undefined, { revalidate: false });
+      }
+    covers:
+      - "output:cleared_cache"
+      - "transition:cleanup_complete"
+    line_range:
+      start: 1
+      end: 11
+
+  - path: src/features/auth/api/tokenService.js
+    snippet: |
+      export function clearToken() {
+        log("clearToken() called");
+        broadcastAuthChange("logout");
+        clearAuthSession();
+        clearBrowserUserCookie();
+        log("clearToken() completed");
+      }
+    covers:
+      - "output:cleared_session"
+      - "output:cleared_user_cookie"
+      - "output:logout_broadcast"
+      - "transition:cleanup_complete"
+    line_range:
+      start: 229
+      end: 236
+
+  - path: src/features/auth/api/tokenService.js
+    snippet: |
+      export function clearBrowserUserCookie() {
+        if (typeof document === "undefined") {
+          return;
+        }
+        document.cookie = createRemovalCookieString(USER_COOKIE_KEY, {
+          path: "/",
+          sameSite: "Lax",
+        });
+      }
+    covers:
+      - "output:cleared_user_cookie"
+    line_range:
+      start: 218
+      end: 227
+
+confidence: 0.91
+confidence_rationale: >
+  All three discovered behaviors are fully evidenced across 4 source files with
+  direct code snippets. Centralized error handling confirmed in authErrorHandler.js
+  with isAuthError() multi-signal detection and handleAuthError() cleanup flow.
+  API client retry confirmed in apiClient.ts with shouldRetryAfterRefresh logic
+  covering 401, 500+jwt expired, and CSRF failures. Session cleanup confirmed
+  across clearClientDataCache.ts (SWR mutate), tokenService.js (clearToken +
+  clearBrowserUserCookie + broadcast), and authErrorHandler.js (localStorage key
+  removal). Deducted 0.09 because: (1) the actual refreshAccessToken() implementation
+  is in tokenRefresher.js (not in scope for this spec but referenced by apiClient.ts),
+  (2) the isAuthErrorHandling flag reset timing (100ms) is a heuristic that may
+  not be sufficient for slow redirects, (3) the EOYT_AUTH_KEYS list is a static
+  allowlist that may drift from actual auth storage usage.
+
+unresolved_questions:
+  - "What is the exact implementation of refreshAccessToken() in tokenRefresher.js? The apiClient.ts references it but the retry-then-cleanup flow depends on its success/failure behavior."
+  - "Is the 100ms isAuthErrorHandling cooldown sufficient for all redirect scenarios? If the redirect takes longer, could a second auth error be missed?"
+  - "Are there any other consumers of isAuthError() besides apiClient.ts and handleAuthErrorIfNeeded()? The function is exported but its full call graph is not visible here."
+  - "What happens if clearClientDataCache() throws? The handleAuthError() try/catch would catch it, but the session/cookie cleanup would be skipped."
+  - "Does the EOYT_AUTH_KEYS allowlist need updating? The 'auth_debug_logs' key is marked as legacy but still included in the cleanup list."
+
+status: complete

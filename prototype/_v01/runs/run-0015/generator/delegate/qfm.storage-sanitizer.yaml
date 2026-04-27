@@ -1,0 +1,30 @@
+spec_id: qfm.storage-sanitizer
+output_path: runs/run-0015/generator/specs/qfm.storage-sanitizer.yaml
+discovered_behaviors:
+  - id: storage-validation
+    description: Validate localStorage values against expected types and patterns for 7 dashboard keys
+    priority: high
+    evidence_refs:
+      - src/shared/lib/qfm/storageSanitizer.js
+  - id: storage-recovery
+    description: Recover corrupted localStorage values with safe defaults and emit recovery events
+    priority: high
+    evidence_refs:
+      - src/shared/lib/qfm/storageSanitizer.js
+  - id: storage-corruption-patterns
+    description: Handle known corruption patterns: literal null/undefined, malformed JSON, type mismatches
+    priority: medium
+    evidence_refs:
+      - src/shared/lib/qfm/storageSanitizer.js
+source_files:
+  - src/shared/lib/qfm/storageSanitizer.js
+  - src/shared/lib/contracts/storage-contract.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - Storage sanitizer validates 7 dashboard localStorage keys
+  - Known corruption patterns: literal "null", "undefined", malformed JSON
+  - Each key has specific validation rules (non-empty string, valid JSON array, etc.)
+  - Recovery emits QFM events for observability
+  - Storage contract defines key ownership and identity-bearing status
+  - Identity-bearing keys require cleanup on logout

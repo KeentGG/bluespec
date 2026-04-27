@@ -1,0 +1,21 @@
+status: complete
+specs_written: 3
+specs:
+  - id: auth.conditional-redirect.yaml
+    golden_behaviors_covered: 1
+    confidence: 0.75
+    unresolved_questions: 4
+  - id: download.button-visibility.yaml
+    golden_behaviors_covered: 1
+    confidence: 0.92
+    unresolved_questions: 3
+  - id: toa.gated-first-report-creation.yaml
+    golden_behaviors_covered: 1
+    confidence: 0.85
+    unresolved_questions: 4
+overall_confidence: 0.84
+flags_for_analyzer:
+  - "auth-conditional-redirect: agreement/TOA state check is absent from the edit flow; golden behavior claims 'only when agreement state is satisfied' but no such check exists in gate-edit-contract.js or useGateEditEntryState.ts"
+  - "download-button-visibility: golden behavior claims button is hidden until download stage, but actual code shows button is always visible and only disabled when progress < 100"
+  - "toa-gated-first-report-creation: golden behavior mentions 'no existing reports' condition, but code only checks agreedToa without checking report count"
+  - "toa-gated-first-report-creation: calculator-side report creation post-TOA is not visible in this codebase"

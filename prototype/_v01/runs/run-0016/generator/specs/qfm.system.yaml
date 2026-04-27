@@ -1,0 +1,952 @@
+id: qfm.system
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: qfm-failure-taxonomy
+    coverage: full
+    notes: >
+      QFM classifies failure-like inputs into the canonical buckets auth/session,
+      routing, data contract, import mapping, PDF, storage corruption, and stale
+      state. Classification prefers explicit bucket overrides, then auth status
+      codes, then ordered keyword matching, and always returns failureModeId,
+      userBehavior, and a resolved reasonCode.
+  - id: qfm-response-normalization
+    coverage: full
+    notes: >
+      QFM normalizes transport responses and direct payloads into a single
+      envelope shape and converts broken envelopes into contract failures in the
+      data contract bucket.
+  - id: qfm-rollback-gate
+    coverage: full
+    notes: >
+      QFM monitors mutation, handoff, PDF terminal, and storage channels across
+      monitoring windows. Sustained breach keys trigger persisted rollback, and
+      route resolution redirects users to the legacy dashboard when parity is
+      disabled, manual rollback is enabled, or automatic rollback is active.
+  - id: qfm-storage-sanitizer
+    coverage: full
+    notes: >
+      QFM validates persisted dashboard storage values against per-key contracts,
+      replaces corrupted values with safe defaults, and emits recovery metadata
+      in the storage corruption taxonomy.
+
+description: >
+  QFM is the frontend failure-management layer that turns inconsistent runtime
+  failures into stable recovery decisions. It classifies failures into canonical
+  buckets, normalizes mixed API envelopes, rejects duplicate mutations while a
+  matching action is still in flight, sanitizes persisted dashboard storage,
+  drives PDF failure handling, and escalates repeated health breaches into a
+  persisted rollback gate that redirects users from dashboard parity flows back
+  to the legacy dashboard.
+
+state_machine:
+  initial: monitoring
+  states:
+    - id: monitoring
+      description: >
+        Normal QFM operation. Failures can be classified, responses normalized,
+        storage values sanitized, duplicate mutations guarded, and rollback
+        observations recorded while parity remains eligible.
+    - id: rollback_pending
+      description: >
+        A monitoring window produced sustained breach keys, so the next gate
+        evaluation is eligible to activate rollback.
+    - id: rollback_active
+      description: >
+        Rollback state is active through manual override or a persisted rollback
+        payload, and route resolution redirects to the legacy dashboard.
+  transitions:
+    - id: record_observation
+      from: monitoring
+      to: monitoring
+      trigger: recordObservation() records a mutation, handoff, PDF, or storage sample
+      guards:
+        - field: observation.channel
+          condition: observation channel is mutation, handoff, pdf_terminal, or storage
+      effects:
+        - Increment channel attempt counters
+        - Increment mapped failure counters when failed or recovered is true
+    - id: finalize_without_sustained_breach
+      from: monitoring
+      to: monitoring
+      trigger: finalizeWindow() completes without overlapping prior breach keys
+      guards:
+        - field: sustainedBreachKeys
+          condition: sustainedBreachKeys.length equals 0
+      effects:
+        - Store checkpoint history and reset counters
+        - Keep rollback inactive
+    - id: finalize_with_sustained_breach
+      from: monitoring
+      to: rollback_pending
+      trigger: finalizeWindow() finds breach keys that also existed in the previous window
+      guards:
+        - field: sustainedBreachKeys
+          condition: sustainedBreachKeys.length is greater than 0
+      effects:
+        - Set checkpoint.shouldRollback to true
+        - Carry sustained breach keys into gate evaluation
+    - id: activate_automatic_rollback
+      from: rollback_pending
+      to: rollback_active
+      trigger: evaluateMonitoringWindow() activates rollback for a sustained breach
+      effects:
+        - Persist qfm.rollback.active payload to storage
+        - Mark rollbackActive true and expose rollbackReason
+    - id: activate_manual_rollback
+      from: monitoring
+      to: rollback_active
+      trigger: Gate controller initializes with manual rollback flag enabled
+      guards:
+        - field: NEXT_PUBLIC_DASHBOARD_PARITY_ROLLBACK
+          condition: env flag parses to a truthy rollback override
+      effects:
+        - Mark rollbackActive true immediately
+        - Set rollbackReason to rollback_manual_override
+    - id: restore_persisted_rollback
+      from: monitoring
+      to: rollback_active
+      trigger: Gate controller reads an existing qfm.rollback.active payload on startup
+      guards:
+        - field: stored rollback payload
+          condition: local storage contains valid rollback JSON
+      effects:
+        - Restore rollbackReason from persisted payload
+        - Continue redirecting parity routes to legacy dashboard
+
+conditions:
+  - id: failure_bucket_resolution
+    description: >
+      QFM resolves each failure-like input into a canonical taxonomy bucket.
+      Explicit bucket overrides win first, HTTP 401/403 always map to
+      auth/session, then ordered keyword checks map auth, stale, storage,
+      import, PDF, routing, and contract signals. Unmatched failures fall back
+      to data contract.
+    trigger: classifyQfmFailure() is called with a failure-like value
+    guards:
+      - field: explicitBucket
+        condition: taxonomyBucket, bucket, or category resolves to a known canonical bucket
+      - field: statusCode
+        condition: statusCode 401 or 403 forces auth/session
+      - field: signal
+        condition: normalized signal string is matched against ordered keyword lists
+    then:
+      - Return bucket, failureModeId, userBehavior, and reasonCode from bucket details
+    else:
+      - Default bucket to data contract
+  - id: response_envelope_normalization
+    description: >
+      QFM converts transport responses and direct payloads into a single
+      normalized envelope with ok, statusCode, message, data, envelopeType, and raw.
+    trigger: normalizeQfmResponse() is called with a response object or payload
+    guards:
+      - field: transport response
+        condition: plain object has a status field and is treated as a transport response
+    then:
+      - Read payload from response.data
+      - Use response.status as transportStatus during normalization
+    else:
+      - Treat the input itself as the payload
+      - Use options.transportStatus as the fallback status
+  - id: contract_violation_detection
+    description: >
+      After normalization, QFM upgrades malformed envelopes into contract
+      failures in the data contract bucket and forces ok=false.
+    trigger: detectContractFailure() inspects a normalized response
+    guards:
+      - field: normalized.statusCode
+        condition: statusCode is a valid HTTP status in the 100-599 range
+      - field: transportResponse.data
+        condition: transport responses must expose a data property
+      - field: wrapped envelope
+        condition: wrapped responses must contain valid statusCode and data fields
+      - field: normalized.data
+        condition: normalized.data is not undefined
+      - field: originalInput
+        condition: original response input is not undefined
+    then:
+      - Return null contractFailure and preserve normalized success state
+    else:
+      - Return a contractFailure with bucket data contract and failureModeId FM-CONTRACT-001
+      - Set output taxonomyBucket to data contract
+      - Force output ok to false
+  - id: sustained_breach_detection
+    description: >
+      Rollback only becomes eligible when a breach key repeats in consecutive
+      monitoring windows, preventing one-window spikes from activating rollback.
+    trigger: finalizeWindow() computes breach keys for the current window
+    guards:
+      - field: breachKeys
+        condition: current window contains one or more breach keys
+      - field: previousBreachKeys
+        condition: at least one current breach key also exists in the previous window set
+    then:
+      - Set sustainedBreachKeys to the overlapping keys
+      - Set checkpoint.shouldRollback to true
+    else:
+      - Leave sustainedBreachKeys empty
+      - Keep checkpoint.shouldRollback false
+  - id: rollback_route_gate
+    description: >
+      Route resolution first applies the parity feature kill switch and then the
+      rollback state. Any active rollback or disabled parity forces redirect to
+      the legacy dashboard.
+    trigger: resolveRoute() or resolveRollbackRouteContract() is called for a path
+    guards:
+      - field: parityFeatureEnabled
+        condition: NEXT_PUBLIC_DASHBOARD_PARITY_ENABLED parses to true
+      - field: rollbackActive
+        condition: manualRollbackEnabled is true or persisted/controller rollbackActive is true
+    then:
+      - If rollback is active, return shouldRedirect true with rollbackReason and legacy destination
+      - If rollback is inactive and parity is enabled, return shouldRedirect false and destination null
+    else:
+      - Return shouldRedirect true with reason parity_feature_disabled and legacy destination
+  - id: storage_value_validation
+    description: >
+      Dashboard storage keys are validated against per-key rules before use.
+      Unsupported keys and invalid values recover to safe fallbacks instead of
+      being trusted as-is.
+    trigger: sanitizeDashboardPersistedKey() is called for a persisted value
+    guards:
+      - field: key
+        condition: key is one of targetId, db_businessid, downloadPdfKey, downloadingpdf, questionnaireSteps, currentStepper, LastformValues
+      - field: raw value
+        condition: per-key validator reports valid=true for the supplied raw value
+    then:
+      - Return sanitized value unchanged
+      - Emit a storage mutation action of none
+    else:
+      - Replace the value with the key fallback
+      - Emit a storage mutation action of set or remove
+  - id: storage_recovery_telemetry
+    description: >
+      Recovered storage values are tagged as storage corruption so downstream
+      consumers can attribute the fix to QFM recovery behavior.
+    trigger: sanitizeDashboardPersistedKey() returns a recovered result
+    guards:
+      - field: recovered
+        condition: validation.valid is not true
+    then:
+      - Emit qfm.storage.recovered
+      - Set taxonomyBucket to storage corruption, failureModeId to FM-STORAGE-001, and reasonCode to storage_recovery_applied
+    else:
+      - Emit qfm.storage.valid with null taxonomy fields
+  - id: duplicate_mutation_prevention
+    description: >
+      The in-flight mutation guard prevents a second begin() call for the same
+      normalized action key while the first request is still active.
+    trigger: createInFlightMutationGuard().begin() is called
+    guards:
+      - field: action key
+        condition: normalized action key is not already present in activeActionKeys
+    then:
+      - Add the normalized key to the active set
+      - Return started=true and duplicate=false
+    else:
+      - Leave the active set unchanged
+      - Return started=false and duplicate=true with reason duplicate_in_flight
+  - id: pdf_terminalization
+    description: >
+      The PDF workflow remains waiting while polling sees non-terminal responses,
+      finishes when a finished status or publicUrl appears, and fails on failed
+      status, Unknown messaging, or poll timeout.
+    trigger: PdfGenerationOverlay polling effect evaluates or a PDF download starts
+    guards:
+      - field: isGenerating
+        condition: store indicates an active workflow
+      - field: pdfKey
+        condition: pdfKey is non-empty
+      - field: dlStatus
+        condition: current status is not already finished or failed before polling begins
+    then:
+      - Start or continue polling every 3000 ms
+      - Transition to finished when publicUrl or finished status arrives
+      - Transition to failed when failed/Unknown/timeout conditions occur
+    else:
+      - Skip polling and leave the workflow idle or terminal
+
+inputs:
+  - id: failure_like
+    type: "plain object, Error instance, or nested error wrapper"
+    source: "failing API, navigation, PDF, storage, or mutation workflow"
+    required: true
+    validation:
+      bucket_override: taxonomyBucket, bucket, or category may provide an explicit bucket
+      status_code: statusCode, status, or response.status may provide transport status
+  - id: response_or_payload
+    type: "transport response with { status, data } or direct payload"
+    source: "frontend API client"
+    required: true
+    validation:
+      transport_shape: plain object with status is treated as transport response
+      direct_payload: non-transport values are normalized directly
+  - id: transport_status_override
+    type: number
+    source: "normalizeQfmResponse(options.transportStatus)"
+    required: false
+    validation:
+      range: expected HTTP status in the 100-599 range when provided
+  - id: rollback_observation
+    type: "{ channel, count, failed, recovered, failureModeId }"
+    source: "application code calling recordObservation()"
+    required: true
+    validation:
+      channel: mutation, handoff, pdf_terminal, or storage
+      count: positive integer, default 1
+  - id: parity_feature_flag
+    type: string
+    source: NEXT_PUBLIC_DASHBOARD_PARITY_ENABLED
+    required: false
+    validation:
+      truthy_values: '["1", "true", "yes", "y", "on", "enabled"]'
+      default: "true"
+  - id: manual_rollback_flag
+    type: string
+    source: NEXT_PUBLIC_DASHBOARD_PARITY_ROLLBACK
+    required: false
+    validation:
+      truthy_values: '["1", "true", "yes", "y", "on", "enabled"]'
+      default: "false"
+  - id: storage_key
+    type: string
+    source: "caller of sanitizeDashboardPersistedKey()"
+    required: true
+    validation:
+      allowed_values: targetId, db_businessid, downloadPdfKey, downloadingpdf, questionnaireSteps, currentStepper, LastformValues
+  - id: storage_raw_value
+    type: "string | null"
+    source: "persisted browser storage read"
+    required: false
+    validation:
+      null_semantics: null means key is absent from storage
+  - id: mutation_action_key
+    type: string
+    source: "caller of in-flight mutation guard begin()/end()"
+    required: true
+    validation:
+      normalization: trimmed string or fallback scope:default key
+  - id: pdf_start_request
+    type: "{ userId, reportId, cid, email? }"
+    source: "useDownloadStore.startDownload()"
+    required: true
+    validation:
+      userId: required non-empty string
+      reportId: required non-empty string
+      cid: required to maintain persisted download context
+  - id: pdf_status_response
+    type: object
+    source: "getPdfStatus({ userId: pdfKey }) response"
+    required: true
+    validation:
+      terminal_success: statusData.status equals finished or publicUrl is present
+      terminal_failure: statusData.status equals/includes failed or raw.message includes Unknown
+
+outputs:
+  - id: classification_result
+    type: "{ bucket, failureModeId, userBehavior, reasonCode }"
+    destination: "QFM callers choosing recovery behavior"
+    lifespan: immediate
+  - id: normalized_response
+    type: "{ ok, statusCode, message, data, envelopeType, raw, taxonomyBucket, contractFailure }"
+    destination: "frontend API consumer after response normalization"
+    lifespan: immediate
+  - id: checkpoint
+    type: "{ schema, windowId, timestamp, thresholds, counters, metrics, breaches, breachKeys, sustainedBreachKeys, shouldRollback }"
+    destination: "rollback monitor history and callers evaluating monitoring windows"
+    lifespan: session in memory
+  - id: route_decision
+    type: "{ schema, shouldRedirect, reason, destination, parityFeatureEnabled, rollbackActive, rollbackReason, shouldPreserveState, destructiveStorageResetAllowed, preserveStorageKeys, storageMutations }"
+    destination: "parity routing caller"
+    lifespan: immediate per route resolution
+  - id: rollback_payload
+    type: "JSON rollback payload persisted under qfm.rollback.active"
+    destination: browser storage
+    lifespan: persists until removed
+  - id: sanitization_result
+    type: "{ schema, key, value, recovered, storageMutation, recovery }"
+    destination: "storage initialization and recovery handlers"
+    lifespan: immediate
+  - id: guard_result
+    type: "{ schema, started, duplicate, key, reason, activeCount, metadata }"
+    destination: "mutation caller using begin()/end()"
+    lifespan: immediate
+  - id: persisted_download_state
+    type: "localStorage-backed download fields for isGenerating, pdfKey, cid, dlStatus, publicUrl, and currentReportId"
+    destination: "browser storage and components using useDownloadStore"
+    lifespan: persists until reset()
+  - id: pdf_download_url
+    type: "browser href using NEXT_PUBLIC_APP_API_URL and stored publicUrl"
+    destination: "finished PDF overlay download action"
+    lifespan: until user closes or resets the overlay
+
+evidence_refs:
+  - path: src/shared/lib/qfm/failureTaxonomy.js
+    snippet: |
+      function collectFailureSignals(failureLike = {}) {
+        const descriptor = isPlainObject(failureLike) ? failureLike : {};
+        const nestedError = descriptor.error instanceof Error ? descriptor.error : null;
+        const directError = failureLike instanceof Error ? failureLike : null;
+        const error = nestedError ?? directError;
+
+        const explicitBucket =
+          canonicalizeQfmFailureBucket(
+            descriptor.taxonomyBucket ?? descriptor.bucket ?? descriptor.category,
+            { allowNull: true },
+          ) ?? null;
+
+        const statusCode = toStatusCode(
+          descriptor.statusCode ?? descriptor.status ?? descriptor.response?.status ?? error?.statusCode,
+        );
+
+        const signalParts = [
+          descriptor.reason,
+          descriptor.reasonCode,
+          descriptor.message,
+          descriptor.code,
+          descriptor.operation,
+          descriptor.source,
+          descriptor.signal,
+          error?.name,
+          error?.message,
+          error?.code,
+        ]
+          .map(normalizeSignalPart)
+          .filter(Boolean);
+    covers:
+      - condition:failure_bucket_resolution
+      - input:failure_like
+    line_range:
+      start: 209
+      end: 239
+
+  - path: src/shared/lib/qfm/failureTaxonomy.js
+    snippet: |
+      function resolveBucket({ explicitBucket, statusCode, signal }) {
+        if (explicitBucket) {
+          return explicitBucket;
+        }
+
+        if (AUTH_FAILURE_STATUS_CODES.includes(statusCode)) {
+          return "auth/session";
+        }
+
+        if (includesKeyword(signal, AUTH_KEYWORDS)) {
+          return "auth/session";
+        }
+
+        if (includesKeyword(signal, STALE_KEYWORDS)) {
+          return "stale state";
+        }
+
+        if (includesKeyword(signal, STORAGE_KEYWORDS)) {
+          return "storage corruption";
+        }
+
+        if (includesKeyword(signal, IMPORT_KEYWORDS)) {
+          return "import mapping";
+        }
+
+        if (includesKeyword(signal, PDF_KEYWORDS)) {
+          return "PDF";
+        }
+
+        if (includesKeyword(signal, ROUTING_KEYWORDS)) {
+          return "routing";
+        }
+
+        if (includesKeyword(signal, CONTRACT_KEYWORDS)) {
+          return "data contract";
+        }
+
+        return "data contract";
+      }
+
+      export function classifyQfmFailure(failureLike = {}) {
+        const failureSignals = collectFailureSignals(failureLike);
+        const bucket = resolveBucket(failureSignals);
+        const details = QFM_TAXONOMY_DETAILS[bucket];
+
+        return {
+          bucket,
+          failureModeId: details.failureModeId,
+          userBehavior: details.userBehavior,
+          reasonCode: failureSignals.reasonCode || details.defaultReasonCode,
+        };
+      }
+    covers:
+      - condition:failure_bucket_resolution
+      - output:classification_result
+    line_range:
+      start: 253
+      end: 324
+
+  - path: src/shared/lib/qfm/responseAdapter.js
+    snippet: |
+      function detectContractFailure({ normalized, transportResponse, originalInput }) {
+        if (!isValidHttpStatusCode(normalized.statusCode)) {
+          return createContractFailure(
+            "invalid_normalized_status",
+            "Normalized response statusCode is not a valid HTTP status code.",
+          );
+        }
+
+        if (transportResponse && !hasOwn(transportResponse, "data")) {
+          return createContractFailure(
+            "missing_transport_data",
+            "Transport response is missing required data payload.",
+          );
+        }
+
+        if (normalized.envelopeType === "wrapped") {
+          const wrapped = normalized.raw;
+
+          if (!isPlainObject(wrapped) || !hasOwn(wrapped, "statusCode")) {
+            return createContractFailure(
+              "missing_envelope_status_code",
+              "Wrapped response envelope is missing statusCode.",
+            );
+          }
+    covers:
+      - condition:contract_violation_detection
+      - input:response_or_payload
+    line_range:
+      start: 54
+      end: 76
+
+  - path: src/shared/lib/qfm/responseAdapter.js
+    snippet: |
+      export function normalizeQfmResponse(responseOrPayload, options = {}) {
+        const transportResponse = isTransportResponseLike(responseOrPayload) ? responseOrPayload : null;
+        const payload = transportResponse
+          ? hasOwn(transportResponse, "data")
+            ? transportResponse.data
+            : undefined
+          : responseOrPayload;
+        const transportStatus = transportResponse ? transportResponse.status : options.transportStatus;
+        const normalized = normalizeMixedEnvelope(payload, { transportStatus });
+        const contractFailure = detectContractFailure({
+          normalized,
+          transportResponse,
+          originalInput: responseOrPayload,
+        });
+
+        return {
+          ok: contractFailure ? false : normalized.ok,
+          statusCode: normalized.statusCode,
+          message: normalized.message || contractFailure?.message || "",
+          data: normalized.data,
+          envelopeType: normalized.envelopeType,
+          raw: normalized.raw,
+          taxonomyBucket: contractFailure ? CONTRACT_BUCKET : null,
+          contractFailure,
+        };
+      }
+    covers:
+      - condition:response_envelope_normalization
+      - condition:contract_violation_detection
+      - input:transport_status_override
+      - output:normalized_response
+    line_range:
+      start: 108
+      end: 133
+
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      export function createRollbackThresholdMonitor(options = {}) {
+        const thresholds = normalizeThresholds(options.thresholds);
+        const now = resolveNowFactory(options.now);
+        const history = [];
+        let counters = createWindowCounters();
+        let previousCheckpoint = null;
+        let previousBreachKeys = new Set();
+
+        function recordObservation(observation = {}) {
+          const channel = normalizeString(observation.channel);
+          const count = normalizePositiveInteger(observation.count, 1);
+          const failed = observation.failed === true;
+          const recovered = observation.recovered === true;
+
+          if (channel === QFM_ROLLBACK_CHANNELS.MUTATION) {
+            counters.mutationAttempts += count;
+          } else if (channel === QFM_ROLLBACK_CHANNELS.HANDOFF) {
+            counters.handoffAttempts += count;
+          } else if (channel === QFM_ROLLBACK_CHANNELS.PDF_TERMINAL) {
+            counters.pdfTerminalAttempts += count;
+          } else if (channel === QFM_ROLLBACK_CHANNELS.STORAGE) {
+            counters.storageSamples += count;
+          }
+    covers:
+      - state:monitoring
+      - transition:record_observation
+      - input:rollback_observation
+    line_range:
+      start: 344
+      end: 368
+
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      function finalizeWindow(options = {}) {
+        const windowId = normalizeString(options.windowId) ?? `window-${history.length + 1}`;
+        const timestamp = String(resolveNowFactory(options.now ?? now)());
+        const snapshot = copyCounters(counters);
+        const metrics = {
+          contractRatePct: calculateRate(snapshot.contractFailures, snapshot.mutationAttempts),
+          routeRatePct: calculateRate(snapshot.routeFailures, snapshot.handoffAttempts),
+          pdfTerminalFailureRatePct: calculateRate(snapshot.pdfFailures, snapshot.pdfTerminalAttempts),
+          storageRecoveryRatePct: calculateRate(snapshot.storageRecoveries, snapshot.storageSamples),
+        };
+
+        const breaches = {
+          contractRate:
+            snapshot.mutationAttempts > 0 && metrics.contractRatePct > thresholds.contractRatePctMax,
+          routeRate: snapshot.handoffAttempts > 0 && metrics.routeRatePct > thresholds.routeRatePctMax,
+          pdfTerminalFailureRate:
+            snapshot.pdfTerminalAttempts > 0 &&
+            metrics.pdfTerminalFailureRatePct >
+              thresholds.pdfFailureBaselineRatePct + thresholds.pdfFailureRatePctDeltaMax,
+          storageRecoveryIncrease:
+            snapshot.storageSamples > 0 &&
+            previousCheckpoint !== null &&
+            metrics.storageRecoveryRatePct > previousCheckpoint.metrics.storageRecoveryRatePct,
+        };
+
+        const breachKeys = [];
+        if (breaches.contractRate) breachKeys.push(CHECKPOINT_BREACH_KEYS.CONTRACT);
+        if (breaches.routeRate) breachKeys.push(CHECKPOINT_BREACH_KEYS.ROUTE);
+        if (breaches.pdfTerminalFailureRate) breachKeys.push(CHECKPOINT_BREACH_KEYS.PDF);
+        if (breaches.storageRecoveryIncrease) breachKeys.push(CHECKPOINT_BREACH_KEYS.STORAGE);
+
+        const sustainedBreachKeys = breachKeys.filter((key) => previousBreachKeys.has(key));
+        const checkpoint = {
+          schema: QFM_ROLLBACK_GATE_SCHEMA,
+          windowId,
+          timestamp,
+          thresholds,
+          counters: snapshot,
+          metrics,
+          breaches,
+          breachKeys,
+          sustainedBreachKeys,
+          shouldRollback: sustainedBreachKeys.length > 0,
+        };
+    covers:
+      - transition:finalize_without_sustained_breach
+      - transition:finalize_with_sustained_breach
+      - condition:sustained_breach_detection
+      - output:checkpoint
+    line_range:
+      start: 387
+      end: 430
+
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      export function createRollbackGateController(options = {}) {
+        const now = resolveNowFactory(options.now);
+        const parityFeatureEnabled = parseBooleanFlag(options.parityFeatureEnabled, true);
+        const manualRollbackEnabled = parseBooleanFlag(options.manualRollbackEnabled, false);
+        const monitor = isPlainObject(options.monitor) ? options.monitor : null;
+        const storage = options.storage ?? null;
+        const legacyDashboardUrl = normalizeLegacyDashboardUrl(options.legacyDashboardUrl);
+
+        let rollbackPayload = parseRollbackPayload(readStorageValue(storage, QFM_ROLLBACK_STORAGE_KEY));
+        let rollbackActive = manualRollbackEnabled || rollbackPayload !== null;
+        let rollbackReason =
+          normalizeString(rollbackPayload?.reason) ??
+          (manualRollbackEnabled ? "rollback_manual_override" : null);
+    covers:
+      - transition:activate_manual_rollback
+      - transition:restore_persisted_rollback
+      - input:parity_feature_flag
+      - input:manual_rollback_flag
+    line_range:
+      start: 471
+      end: 483
+
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      function evaluateMonitoringWindow(options = {}) {
+        const checkpoint =
+          isPlainObject(options.checkpoint) && options.checkpoint.schema
+            ? options.checkpoint
+            : monitor && typeof monitor.finalizeWindow === "function"
+              ? monitor.finalizeWindow(options)
+              : null;
+
+        if (!checkpoint) {
+          return {
+            schema: QFM_ROLLBACK_GATE_SCHEMA,
+            evaluated: false,
+            rollbackActivated: false,
+            checkpoint: null,
+          };
+        }
+
+        if (checkpoint.shouldRollback !== true) {
+          return {
+            schema: QFM_ROLLBACK_GATE_SCHEMA,
+            evaluated: true,
+            rollbackActivated: false,
+            checkpoint,
+          };
+        }
+
+        const activated = activateRollback({
+          reason: `rollback_${checkpoint.sustainedBreachKeys?.[0] ?? "threshold_breach"}`,
+          source: "qfm.threshold.monitor",
+          checkpoint,
+        });
+    covers:
+      - state:rollback_pending
+      - transition:activate_automatic_rollback
+      - output:rollback_payload
+    line_range:
+      start: 518
+      end: 550
+
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      function resolveRoute(options = {}) {
+        const path = options.path;
+        const destination = resolveLegacyDestination(legacyDashboardUrl, path);
+
+        if (parityFeatureEnabled !== true) {
+          return createRouteDecision({
+            shouldRedirect: true,
+            reason: "parity_feature_disabled",
+            destination,
+            parityFeatureEnabled,
+            rollbackActive,
+            rollbackReason,
+          });
+        }
+
+        if (manualRollbackEnabled || rollbackActive) {
+          return createRouteDecision({
+            shouldRedirect: true,
+            reason: rollbackReason ?? "rollback_active",
+            destination,
+            parityFeatureEnabled,
+            rollbackActive: true,
+            rollbackReason,
+          });
+        }
+
+        return createRouteDecision({
+          shouldRedirect: false,
+          reason: "parity_feature_enabled",
+          destination: null,
+          parityFeatureEnabled,
+          rollbackActive,
+          rollbackReason,
+        });
+      }
+    covers:
+      - state:rollback_active
+      - condition:rollback_route_gate
+      - output:route_decision
+    line_range:
+      start: 559
+      end: 593
+
+  - path: src/shared/lib/qfm/storageSanitizer.js
+    snippet: |
+      function validateStorageValueByKey(key, rawValue) {
+        if (key === "targetId" || key === "downloadPdfKey") {
+          return validateNonEmptyIdentity(rawValue);
+        }
+
+        if (key === "db_businessid") {
+          return validatePersistedBusinessId(rawValue);
+        }
+
+        if (key === "downloadingpdf") {
+          return validateBooleanStorageValue(rawValue);
+        }
+
+        if (key === "questionnaireSteps") {
+          return validateJsonArray(rawValue);
+        }
+
+        if (key === "currentStepper" || key === "LastformValues") {
+          return validateJsonObject(rawValue);
+        }
+
+        return {
+          valid: true,
+          reason: "unknown_key_passthrough",
+          value: rawValue,
+        };
+      }
+    covers:
+      - condition:storage_value_validation
+      - input:storage_key
+      - input:storage_raw_value
+    line_range:
+      start: 265
+      end: 291
+
+  - path: src/shared/lib/qfm/storageSanitizer.js
+    snippet: |
+      export function sanitizeDashboardPersistedKey(options = {}) {
+        const key = normalizeStorageKey(options.key);
+        const rawValue = Object.prototype.hasOwnProperty.call(options, "rawValue")
+          ? options.rawValue
+          : null;
+        const flowId = normalizeString(options.flowId) ?? "dashboard.storage.sanitizer";
+
+        if (!key) {
+          const fallbackValue = resolveFallbackValue("unknown", options.fallbackValue);
+
+          return {
+            schema: QFM_STORAGE_SANITIZER_SCHEMA,
+            key: normalizeString(options.key),
+            value: fallbackValue,
+            recovered: true,
+            storageMutation: createStorageMutation(true, normalizeString(options.key), fallbackValue),
+            recovery: {
+              schema: QFM_STORAGE_SANITIZER_SCHEMA,
+              eventName: "qfm.storage.recovered",
+              flowId,
+              key: normalizeString(options.key),
+              recovered: true,
+              taxonomyBucket: QFM_STORAGE_RECOVERY_BUCKET,
+              failureModeId: QFM_STORAGE_RECOVERY_FAILURE_MODE_ID,
+              reasonCode: QFM_STORAGE_RECOVERY_REASON_CODE,
+    covers:
+      - condition:storage_value_validation
+      - condition:storage_recovery_telemetry
+      - output:sanitization_result
+    line_range:
+      start: 338
+      end: 363
+
+  - path: src/shared/lib/qfm/inFlightMutationGuard.js
+    snippet: |
+      function normalizeActionKey(actionKey, fallbackPrefix = "mutation") {
+        const normalizedActionKey = normalizeString(actionKey);
+        if (normalizedActionKey) {
+          return normalizedActionKey;
+        }
+
+        const normalizedFallbackPrefix = normalizeString(fallbackPrefix) ?? "mutation";
+        return `${normalizedFallbackPrefix}:default`;
+      }
+
+      function begin(actionKey, metadata = {}) {
+        const normalizedActionKey = normalizeActionKey(actionKey, guardScope);
+
+        if (activeActionKeys.has(normalizedActionKey)) {
+          return createGuardResult({
+            started: false,
+            duplicate: true,
+            key: normalizedActionKey,
+            reason: "duplicate_in_flight",
+            activeCount: activeActionKeys.size,
+            metadata,
+          });
+        }
+
+        activeActionKeys.add(normalizedActionKey);
+    covers:
+      - condition:duplicate_mutation_prevention
+      - input:mutation_action_key
+      - output:guard_result
+    line_range:
+      start: 27
+      end: 71
+
+  - path: src/features/pdf/store/useDownloadStore.ts
+    snippet: |
+      startDownload: async ({ userId, reportId, cid, email }) => {
+        try {
+          // Set generating state first
+          get().setIsGenerating(true);
+          get().setDlStatus("waiting");
+          get().setPdfKey(userId);
+          get().setCid(cid);
+          get().setCurrentReportId(reportId);
+          get().setPublicUrl("");
+
+          // Call API to start generation
+          const response = await startPdfGeneration({ userId, reportId, email });
+
+          // Fix: response.data contains userId directly, not nested under .data
+          if (response.ok && response.data?.userId) {
+            // Generation started successfully
+            return true;
+          } else {
+            // API returned error
+            get().setDlStatus("failed");
+            return false;
+          }
+        } catch (error) {
+          console.error("Failed to start PDF generation:", error);
+          get().setDlStatus("failed");
+          return false;
+        }
+      },
+    covers:
+      - condition:pdf_terminalization
+      - input:pdf_start_request
+      - output:persisted_download_state
+    line_range:
+      start: 107
+      end: 134
+
+  - path: src/features/pdf/components/PdfGenerationOverlay.tsx
+    snippet: |
+      useEffect(() => {
+        if (!isGenerating || !pdfKey) return;
+        if (dlStatus === "finished" || dlStatus === "failed") return;
+
+        let attempts = 0;
+
+        const poll = async () => {
+          try {
+            const status = await getPdfStatus({ userId: pdfKey });
+            const statusData = status?.raw?.data;
+
+            if (statusData?.status === "finished" || statusData?.publicUrl) {
+              setDlStatus("finished");
+              setPublicUrl(statusData.publicUrl || "#");
+              return true;
+            }
+
+            if (statusData?.status === "failed" || statusData?.status?.includes("failed")) {
+              setDlStatus("failed");
+              return true;
+            }
+
+            if (status?.raw?.message?.includes("Unknown")) {
+              setDlStatus("failed");
+              return true;
+            }
+    covers:
+      - condition:pdf_terminalization
+      - input:pdf_status_response
+      - output:pdf_download_url
+    line_range:
+      start: 108
+      end: 133
+
+confidence: 0.84
+confidence_rationale: >
+  The four manifest behaviors are fully specified from preserved, line-ranged code
+  excerpts already embedded in prior run specs and the current run's pdf.lifecycle
+  spec. Those excerpts directly evidence classification, response normalization,
+  rollback monitoring, route gating, storage recovery, duplicate mutation
+  prevention, and PDF terminal handling. Confidence is reduced because the manifest
+  source files themselves are not present in the current checkout, so this spec is
+  reconstructed from earlier captured source snippets rather than a fresh direct
+  read of the implementation files.
+
+unresolved_questions:
+  - "The manifest lists src/shared/lib/qfm/pdfLifecycle.js, but the active PDF lifecycle evidence in this checkout comes from useDownloadStore.ts and PdfGenerationOverlay.tsx. Is pdfLifecycle.js a canonical helper, dead code, or an alternate integration path?"
+  - "What production cadence calls finalizeWindow()? The threshold monitor behavior is clear, but the real monitoring interval is caller-defined and not present in the current workspace."
+  - "How is qfm.rollback.active eventually cleared to recover from rollback? Activation and restoration are evidenced, but deactivation is not."
+  - "Because the original qfm source files are absent from this checkout, should future runs materialize the referenced implementation files alongside delegate manifests to avoid evidence indirection?"
+
+status: complete

@@ -1,0 +1,20 @@
+run_id: run-0017
+phase: generator
+status: complete
+specs:
+  - id: auth-conditional-redirect
+    path: runs/run-0017/generator/specs/auth-conditional-redirect.yaml
+    coverage: partial
+    confidence: 0.74
+  - id: download-button-visibility
+    path: runs/run-0017/generator/specs/download-button-visibility.yaml
+    coverage: partial
+    confidence: 0.83
+  - id: toa-gated-first-report-creation
+    path: runs/run-0017/generator/specs/toa-gated-first-report-creation.yaml
+    coverage: partial
+    confidence: 0.78
+summary: >
+  Generated 3 behavioral specs for the dashboard-v2 frontend application.
+  All specs have partial coverage due to missing calculator-side implementations
+  and unclear runtime configurations. Average confidence: 0.78.

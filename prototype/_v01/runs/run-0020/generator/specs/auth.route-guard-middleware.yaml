@@ -1,0 +1,199 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.route-guard-middleware
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth_route_guard_middleware
+    coverage: full
+    notes: >
+      Server-side middleware uses authGuard function to redirect anonymous users
+      from protected routes to /login. Middleware attempts silent refresh via
+      HTTP-only refreshToken cookie before enforcing redirects on guarded routes.
+
+description: >
+  Protects routes at the server middleware level by evaluating authentication
+  state against route requirements. The middleware attempts silent token refresh
+  using the HTTP-only refreshToken cookie before enforcing redirects to maximize
+  session continuity. Routes are matched using prefix matching for nested routes.
+
+state_machine:
+  initial: evaluating
+  states:
+    - id: evaluating
+      description: Middleware is evaluating route protection requirements.
+    - id: refresh_attempting
+      description: Middleware is attempting silent token refresh.
+    - id: allowed
+      description: Route access is permitted based on auth state.
+    - id: redirecting
+      description: Browser is navigating to redirect destination.
+  transitions:
+    - id: protected_route_anonymous
+      from: evaluating
+      to: redirecting
+      trigger: Middleware evaluates a protected route without valid session.
+      guards:
+        - field: session
+          condition: No valid session available.
+        - field: route_protection
+          condition: Route is in protectedPaths list.
+      effects:
+        - Attempt silent refresh if refreshToken cookie exists.
+        - If refresh fails, redirect to /login.
+    - id: silent_refresh_attempt
+      from: evaluating
+      to: refresh_attempting
+      trigger: Middleware detects refreshToken cookie on protected route.
+      guards:
+        - field: has_refresh_token
+          condition: cookieHeader includes refreshToken=.
+        - field: is_protected_route
+          condition: shouldResolveSession(pathname) is true.
+      effects:
+        - Call /auth/refresh with cookie header.
+        - If refresh succeeds, set session and continue.
+        - If refresh fails, enforce redirect to /login.
+
+conditions:
+  - id: protected_route_match
+    description: >
+      Route protection uses prefix matching so nested routes under a protected
+      path inherit the same guard behavior.
+    trigger: Middleware evaluates pathname against protectedPaths.
+    guards:
+      - field: pathname
+        condition: pathname equals a protected path or starts with protectedPath + '/'.
+    then:
+      - Treat the route as protected for redirect decisions.
+    else:
+      - Treat the route as public.
+
+  - id: middleware_silent_refresh
+    description: >
+      Middleware attempts silent token refresh before enforcing route redirects.
+      This maximizes session continuity by trying to recover expired sessions.
+    trigger: Middleware handles a request to a protected route.
+    guards:
+      - field: refresh_cookie
+        condition: cookieHeader includes refreshToken=.
+      - field: is_protected_route
+        condition: shouldResolveSession(pathname) is true.
+    then:
+      - Call /auth/refresh with cookie header.
+      - If refresh succeeds, set session and continue.
+      - If refresh fails, enforce redirect to /login.
+    else:
+      - Enforce redirect to /login without refresh attempt.
+
+inputs:
+  - id: pathname
+    type: string URL path
+    source: Next.js middleware request
+    required: true
+    validation:
+      normalization: empty or missing path normalizes to /
+
+  - id: session
+    type: "session object with _id, accessToken"
+    source: In-memory authSession or refresh result
+    required: false
+    validation:
+      presence: null for anonymous, object for authenticated
+
+  - id: protected_paths
+    type: "array of route prefixes"
+    source: Route configuration
+    required: true
+    validation:
+      default: "/companies, /reports"
+
+  - id: refresh_cookie
+    type: HTTP-only refreshToken cookie
+    source: Browser cookie header
+    required: false
+    validation:
+      presence: required for silent refresh attempt
+
+outputs:
+  - id: guard_decision
+    type: "object with action, destination, reason"
+    destination: Middleware response
+    lifespan: per request
+
+  - id: redirect_to_login
+    type: HTTP redirect response
+    destination: NextResponse.redirect
+    lifespan: immediate
+
+  - id: next_response
+    type: NextResponse.next()
+    destination: Next.js middleware chain
+    lifespan: per request
+
+evidence_refs:
+  - path: middleware.js
+    snippet: |
+      const decision = await authGuard({
+        pathname,
+        routes: ROUTES,
+        protectedPaths: PROTECTED_PATHS,
+        session,
+      });
+      if (decision.action === "redirect" && typeof decision.destination === "string") {
+        return NextResponse.redirect(new URL(withBasePath(decision.destination), baseRequestUrl));
+      }
+      return NextResponse.next();
+    covers:
+      - "transition:protected_route_anonymous"
+      - "output:guard_decision"
+      - "output:redirect_to_login"
+      - "output:next_response"
+
+  - path: middleware.js
+    snippet: |
+      async function attemptSilentRefresh(options = {}) {
+        const { cookieHeader, requestOrigin, fetchImpl } = options;
+        const hasRefreshToken = cookieHeader.includes("refreshToken=");
+        if (!hasRefreshToken) {
+          return null;
+        }
+        // ... call refresh endpoint with cookie
+      }
+    covers:
+      - "transition:silent_refresh_attempt"
+      - "condition:middleware_silent_refresh"
+
+  - path: src/features/auth/api/authGuard.js
+    snippet: |
+      export async function authGuard(options = {}) {
+        const { pathname = "/", session = null, routes = DEFAULT_ROUTES, protectedPaths = DEFAULT_PROTECTED_PATHS } = options;
+        const resolvedPath = normalizePathname(pathname);
+        const resolvedSession = normalizeSession(session);
+        const protectedRoute = isProtectedRoute(resolvedPath, protectedPaths);
+        if (!resolvedSession) {
+          if (protectedRoute) {
+            return redirect(routes.login, "anonymous_redirect_login", false);
+          }
+          return allow("anonymous_allow_public", false);
+        }
+        if (resolvedPath === routes.login) {
+          return redirect(routes.companies, "authenticated_redirect_companies", false);
+        }
+        return allow("authenticated_allow_route", false);
+      }
+    covers:
+      - "condition:protected_route_match"
+      - "input:pathname"
+      - "input:session"
+
+confidence: 0.96
+confidence_rationale: >
+  Route protection logic, authGuard function, and middleware silent refresh
+  are directly evidenced in authGuard.js and middleware.js. The prefix
+  matching behavior and redirect decisions are confirmed by the code.
+unresolved_questions:
+  - Exact list of protected paths beyond /companies and /reports.
+  - Whether middleware refresh has retry logic beyond single attempt.
+status: complete

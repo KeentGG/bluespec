@@ -1,0 +1,27 @@
+spec_id: auth.conditional-redirect.yaml
+output_path: /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0011/generator/specs/auth.conditional-redirect.yaml
+golden_behaviors:
+  - id: auth-conditional-redirect
+    description: editing project routes through a gated edit flow only when agreement state is satisfied
+    priority: high
+    evidence_refs:
+      - src/routes/project-edit.tsx
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportRowController.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportNavigation.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-finder.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/app/gate/edit/page.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/routing/components/GateEditRouteEntryClient.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/routing/hooks/useGateEditEntryState.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-edit-contract.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - The golden evidence ref src/routes/project-edit.tsx is stale in the current Next.js app-router codebase.
+  - The live edit flow starts in useReportRowController.handleEdit(), which calls navigateToReportGate() with the report id and calculator id.
+  - useReportNavigation resolves a handoff route with intent="edit" and routes into the dashboard gate/edit entry flow or external calculator gate URL.
+  - /app/gate/edit/page.tsx renders GateEditRouteEntryClient, which uses useGateEditEntryState() to run the gate-edit state machine.
+  - executeGateEditInitialization() validates query params, fetches the existing report, resolves the saved reportProgress into a resume route, and redirects to that route.
+  - resolveGateEditProgressRoute() requires a supported calculatorId and a valid reportProgress route.
+  - No agreement/TOA gating was found in the dashboard-side edit/resume flow; agreement-related logic appears in TOA/new-report creation paths instead.
+  - The spec should capture the current gated edit/resume behavior faithfully and call out any mismatch against the golden wording as partial coverage rather than guessing hidden agreement checks.

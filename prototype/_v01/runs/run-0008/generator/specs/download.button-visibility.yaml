@@ -1,0 +1,223 @@
+id: download-button-visibility
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: download-button-visibility
+    coverage: partial
+    notes: |
+      The live UI keeps the Download control mounted and only gates its enabled
+      state. That means the golden wording about literal visibility is only
+      partially covered: the button is never conditionally removed from the DOM.
+description: |
+  Each report row always shows a Download button, but the control stays disabled
+  and visually muted until the normalized report progress reaches 100% and the
+  row is not already in a downloading state. The implementation gates
+  enabledness, not DOM presence.
+state_machine:
+  initial: locked
+  states:
+    - id: locked
+      description: The Download button is mounted but disabled because the row is incomplete or already downloading.
+    - id: ready
+      description: The Download button is mounted and enabled because the row is complete and not downloading.
+  transitions:
+    - id: unlock_download
+      from: locked
+      to: ready
+      trigger: The normalized report progress reaches 100 while no download is in flight.
+      guards:
+        - field: progressPercentage
+          condition: equals 100
+        - field: isDownloading
+          condition: is false
+      effects:
+        - enable the Download button
+        - apply the active brand-primary styling
+conditions:
+  - id: download_button_gate
+    description: Keep the Download button disabled until the row is complete and not already downloading.
+    trigger: ReportsTable renders a row or the row download flag changes.
+    guards:
+      - field: progressPercentage
+        condition: equals 100
+      - field: isDownloading
+        condition: is false
+    then:
+      - render the Download button as enabled
+      - apply the active brand-primary / hover styling
+    else:
+      - render the Download button as disabled
+      - apply gray, not-allowed styling and the "Report must be 100% complete to download" title
+inputs:
+  - id: report_progress_percentage
+    type: normalized completion percentage
+    source: report list payload normalized by list-service.js
+    required: true
+    validation:
+      range: must resolve to 0-100
+  - id: is_downloading
+    type: transient row download flag
+    source: useReportRowController / action store
+    required: true
+    validation:
+      state: must be false for the button to enable
+outputs:
+  - id: download_button_state
+    type: visible row action button with enabled/disabled affordance
+    destination: reports table actions cell
+    lifespan: immediate
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/api/list-service.js
+    line_range:
+      start: 107
+      end: 137
+    snippet: |
+      function enrichReportRecordWithProgress(normalizedRecord) {
+        const progress = resolveCalculatorAwareProgressPercentage({
+          calculatorId: normalizedRecord.calculatorId,
+          reportProgress: normalizedRecord.reportProgress,
+        });
+
+        const calculatorId = normalizedRecord.calculatorId || "";
+
+        return {
+          ...normalizedRecord,
+          reportProgressPercentage: progress.progressPercentage ?? 0,
+          reportProgressReason: progress.reason ?? null,
+          reportProgressResolved: progress.ok === true,
+          calculatorLabel: CALCULATOR_LABELS[calculatorId] || "Unknown",
+          calculatorColor: CALCULATOR_COLORS[calculatorId] || "bg-gray-100 text-gray-800",
+        };
+      }
+
+      export function normalizeReportsListPayload(payload) {
+        const reports = resolveReportCollection(payload);
+        if (!Array.isArray(reports)) {
+          return [];
+        }
+
+        return reports
+          .map((record) => {
+            const normalized = normalizeReportRecord(record);
+            return normalized ? enrichReportRecordWithProgress(normalized) : null;
+          })
+          .filter((record) => record !== null);
+      }
+    covers:
+      - input: report_progress_percentage
+      - condition: download_button_gate
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/report-route-progress-contract.js
+    line_range:
+      start: 274
+      end: 296
+    snippet: |
+      if (route === "/summary") {
+        return 90;
+      }
+
+      if (route === "/chart") {
+        return 94;
+      }
+
+      if (route === "/working-capital") {
+        return 96;
+      }
+
+      if (route === "/ordinary-vs-cap-gains") {
+        return 97;
+      }
+
+      if (route === "/purchase-price-allocation") {
+        return 98;
+      }
+
+      if (route === "/net-proceeds-overview" || route === "/thankyou" || route === "/value-estimate") {
+        return 100;
+      }
+
+      return null;
+    covers:
+      - input: report_progress_percentage
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportRowController.ts
+    line_range:
+      start: 109
+      end: 117
+    snippet: |
+      const handleDownload = useCallback(
+        async (report: any) => {
+          actionStore.setDownloading(report._id, true);
+          await reportActions.download({
+            reportId: report._id,
+            calculatorId: report.calculatorId || "1",
+          });
+          actionStore.setDownloading(report._id, false);
+        },
+        [reportActions, actionStore],
+      );
+    covers:
+      - input: is_downloading
+      - condition: download_button_gate
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsTable.tsx
+    line_range:
+      start: 165
+      end: 181
+    snippet: |
+      <div className="flex justify-center relative">
+        <ReportSplitActions
+          reportName={report.name}
+          progressPercentage={report.reportProgressPercentage}
+          isDownloading={rowController.isDownloading(report.reportId)}
+          isRenaming={rowController.isRenaming(report.reportId)}
+          isDeleting={rowController.isDeleting(report.reportId)}
+          isEmailing={rowController.isEmailing(report.reportId)}
+          onDownload={(e) => {
+            e.stopPropagation();
+            rowController.handleDownload(report._raw);
+          }}
+          onEditReport={() => rowController.handleEdit(report._raw)}
+          onRename={() => rowController.startRename(report.reportId, report.name)}
+          onEmailPdf={() => rowController.handleEmail(report.reportId)}
+          onDelete={() => rowController.handleDelete(report._raw)}
+        />
+      </div>
+    covers:
+      - input: report_progress_percentage
+      - input: is_downloading
+      - output: download_button_state
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportSplitActions.tsx
+    line_range:
+      start: 33
+      end: 47
+    snippet: |
+      const anyActionInProgress = isDownloading || isRenaming || isDeleting || isEmailing;
+      const canDownload = progressPercentage === 100;
+
+      return (
+        <div className="inline-flex items-stretch rounded-md overflow-visible shadow-sm">
+          <button
+            type="button"
+            onClick={onDownload}
+            disabled={isDownloading || !canDownload}
+            title={canDownload ? "Download report" : "Report must be 100% complete to download"}
+            className={`h-8 px-3 text-white text-[12px] font-medium transition-colors rounded-l-md cursor-pointer flex items-center gap-1 ${
+              isDownloading || !canDownload
+                ? "bg-gray-400 cursor-not-allowed"
+                : "bg-brand-primary hover:bg-brand-primary-hover"
+            }`}
+          >
+    covers:
+      - condition: download_button_gate
+      - output: download_button_state
+confidence: 0.89
+confidence_rationale: |
+  The gate is directly confirmed in the live reports UI: progress is normalized in
+  list-service.js, passed into ReportsTable.tsx, and converted into canDownload in
+  ReportSplitActions.tsx. The row controller also proves the transient isDownloading
+  flag is part of the same gate. The only gap is the golden wording itself: the
+  button is never conditionally hidden, so the literal visibility requirement is
+  only partially represented by the current code.
+unresolved_questions:
+  - Should the golden behavior be interpreted as literal DOM visibility, or is a disabled/enabled affordance acceptable?
+  - Is there another report action surface outside dashboard-v2 that hides the Download control entirely?
+status: partial

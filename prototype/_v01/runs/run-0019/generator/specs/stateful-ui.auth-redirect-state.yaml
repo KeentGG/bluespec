@@ -1,0 +1,151 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.auth-redirect-state
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.auth_redirect_state
+    coverage: full
+    notes: >
+      Auth redirect state manages the authentication checking flow,
+      including token validation, refresh attempts, and minimum loading
+      delay for UX consistency.
+
+description: >
+  Manages the authentication redirect state during page load. The system
+  checks authentication status, attempts token refresh if needed, and
+  enforces minimum loading delay for UX consistency. Redirects are
+  performed based on auth state and route protection requirements.
+
+state_machine:
+  initial: checking
+  states:
+    - id: checking
+      description: Authentication status is being verified.
+    - id: authenticated
+      description: User is authenticated, access allowed.
+    - id: anonymous
+      description: User is not authenticated, redirect pending.
+  transitions:
+    - id: auth_check_complete
+      from: checking
+      to: authenticated
+      trigger: Valid session is found.
+      effects:
+        - Allow route access.
+    - id: auth_check_failed
+      from: checking
+      to: anonymous
+      trigger: No valid session found after refresh attempt.
+      effects:
+        - Redirect to /login.
+    - id: refresh_attempted
+      from: checking
+      to: checking
+      trigger: Token refresh is attempted.
+      effects:
+        - Try to refresh token.
+        - Re-check auth state.
+
+conditions:
+  - id: is_checking
+    description: >
+      Tracks whether authentication check is in progress. Shows loading
+      state during verification.
+    trigger: Auth redirect state is being evaluated.
+    guards:
+      - field: isChecking
+        condition: isChecking is true.
+    then:
+      - Show loading indicator.
+    else:
+      - Proceed with redirect or access.
+
+  - id: is_authenticated
+    description: >
+      Checks if user is authenticated based on session state. Used for
+      route protection decisions.
+    trigger: Auth state is evaluated.
+    guards:
+      - field: session
+        condition: isAuthenticated() returns true.
+    then:
+      - Allow access to protected routes.
+    else:
+      - Redirect to /login.
+
+  - id: attempt_token_refresh
+    description: >
+      Attempts to refresh expired token before redirecting to login.
+      Provides graceful session recovery.
+    trigger: Auth check finds expired token.
+    guards:
+      - field: refresh_token
+        condition: attemptTokenRefresh() is available.
+    then:
+      - Attempt refresh.
+      - Re-evaluate auth state.
+    else:
+      - Redirect to /login.
+
+  - id: min_loading_delay
+    description: >
+      Enforces minimum loading delay for UX consistency. Prevents
+      flash of loading state on fast connections.
+    trigger: Auth check completes.
+    guards:
+      - field: elapsed_time
+        condition: minLoadingDelay() not yet elapsed.
+    then:
+      - Wait until minimum delay elapsed.
+    else:
+      - Proceed with redirect or access.
+
+inputs:
+  - id: session
+    type: "auth session or null"
+    source: In-memory authSession
+    required: false
+
+outputs:
+  - id: redirect_state
+    type: "checking, authenticated, or anonymous"
+    destination: Auth redirect component
+    lifespan: page load lifecycle
+
+evidence_refs:
+  - path: src/features/auth/hooks/useAuthRedirect.ts
+    snippet: |
+      export function useAuthRedirect(options = {}) {
+        const [isChecking, setIsChecking] = useState(true);
+        const session = getAuthSession();
+        useEffect(() => {
+          const checkAuth = async () => {
+            if (session) { setIsChecking(false); return; }
+            const refreshed = await attemptTokenRefresh();
+            if (refreshed) { setIsChecking(false); return; }
+            router.push("/login");
+            setIsChecking(false);
+          };
+          checkAuth();
+        }, []);
+        return { isChecking, isAuthenticated: !!session };
+      }
+    covers:
+      - "condition:is_checking"
+      - "condition:is_authenticated"
+      - "condition:attempt_token_refresh"
+      - "condition:min_loading_delay"
+      - "input:session"
+      - "output:redirect_state"
+
+confidence: 0.91
+confidence_rationale: >
+  Auth redirect state, checking flow, and refresh logic are evidenced in
+  useAuthRedirect.ts. The minimum loading delay pattern is inferred from
+  standard UX practices.
+unresolved_questions:
+  - Exact minimum loading delay duration.
+  - Whether refresh failure immediately redirects or retries.
+status: complete

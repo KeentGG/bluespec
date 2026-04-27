@@ -1,0 +1,25 @@
+spec_id: download.button-visibility.yaml
+output_path: /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0008/generator/specs/download.button-visibility.yaml
+golden_behaviors:
+  - id: download-button-visibility
+    description: download button becomes visible only after report progress reaches the download stage
+    priority: high
+    evidence_refs:
+      - src/components/ReportActions.tsx
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/api/list-service.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/report-route-progress-contract.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsTable.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportSplitActions.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportActions.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/pdf/store/useDownloadStore.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/pdf/components/PdfGenerationOverlay.tsx
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - The golden evidence path src/components/ReportActions.tsx is stale; the relevant UI now lives in ReportsTable.tsx and ReportSplitActions.tsx.
+  - Report rows get reportProgressPercentage from list-service.js, which normalizes backend records and computes progress through resolveCalculatorAwareProgressPercentage() in report-route-progress-contract.js.
+  - ReportSplitActions derives canDownload = progressPercentage === 100. The Download button is always rendered, but it is disabled and shown in a not-allowed style until progress reaches 100%.
+  - This means the live code appears to gate download availability/enabledness, not literal button visibility. The spec should call that mismatch out when scoring golden coverage.
+  - Once download is triggered, useReportActions calls useDownloadStore.startDownload(), which sets isGenerating/waiting state and starts PDF generation.
+  - PdfGenerationOverlay polls getPdfStatus() until finished or failed, shows waiting/success/failure UI, and only exposes the final clickable anchor after dlStatus becomes finished and the success animation completes.

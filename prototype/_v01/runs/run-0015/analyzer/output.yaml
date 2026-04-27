@@ -1,0 +1,109 @@
+run_id: run-0015
+analyzer: analyzer
+status: complete
+provider: sample-project
+
+primary_failure_type: recognition_failure
+failure_tier: high
+
+diagnosis: >
+  Two high-severity recall misses with distinct failure types across the 3
+  golden behaviors (1 full hit, 2 misses). Miss 1 (auth-conditional-redirect):
+  recognition_failure — the generator documented gate-edit-flow in
+  routing.gate-navigation (validates query params, fetches report, redirects
+  to calculator) but failed to recognize agreement state checking as a gate
+  condition in the project editing context. The formula's analyze step
+  explicitly mentions "agreement-state gating" in its prompt, yet the
+  generator only applied it to report creation (toa-gated-report-creation
+  achieved full recall), not project editing. This is a context-collapse
+  failure: the same predicate pattern (agreement state) in a different module
+  (project-edit.tsx vs toa-contract.js) was not recognized as the same
+  behavioral class. Miss 2 (download-button-visibility): search_failure —
+  the explore step never discovered src/components/ReportActions.tsx. The
+  progress-tracking spec covers route-to-percentage calculation from other
+  files, and pdf.lifecycle covers pdfLifecycle.js, but neither references
+  ReportActions.tsx in their evidence_refs. The download button visibility
+  gating behavior was never discovered because the file was never analyzed.
+  Overall: 12 of 15 specs have 0.0 recall, but most are infrastructure specs
+  (qfm.*, shared.*) with no corresponding golden behaviors. The generator
+  produces high-precision infrastructure documentation (avg 0.91) but
+  systematically misses golden-set-prioritized behaviors in UI component
+  files and cross-module conditional flows.
+
+suggested_mutation: >
+  Two mutations recommended. (1) prompt_tweak to the analyze step: add an
+  explicit directive — "For each conditional flow discovered, check whether
+  agreement state, auth state, or progress state is a gate condition
+  regardless of the flow's primary purpose. Do not limit agreement-state
+  checks to report creation flows." This addresses the context-collapse in
+  miss 1. (2) step_management to add a UI component discovery sub-step in
+  the explore phase: "After initial structure mapping, explicitly scan for
+  *.tsx component files containing conditional rendering patterns (ternary
+  operators, && guards, early returns based on state/progress). Prioritize
+  files in routes/ and components/ directories." This addresses the file
+  discovery gap in miss 2.
+
+expected_effect: >
+  The prompt_tweak should increase recognition of agreement-state patterns in
+  non-report-creation contexts, improving recall for auth-conditional-redirect
+  from 0.0 to 0.8+. The step_management change should discover
+  ReportActions.tsx and similar UI component files, enabling coverage of
+  download-button-visibility (recall from 0.0 to 0.8+). Combined expected
+  recall improvement: 0.42 → 0.65+ (covering 2 of 3 golden behaviors instead
+  of 1). The precision impact should be minimal (+/- 0.02) since the new
+  behaviors are well-defined in the golden set.
+
+rubric_gap_proposed:
+  - golden-behavior-coverage-threshold
+  - evidence-ref-completeness
+  - cross-spec-contradiction-detection
+
+rubric_gap_proposal: >
+  Three rubric gap candidates identified in shadow findings, none applicable
+  as root cause of current misses (lower-tier explanations exist for both).
+  Proposed for future rubric evolution: (1) golden-behavior-coverage-threshold:
+  Add minimum recall floor (0.5) to golden_set_recall criterion. Currently
+  golden_set_recall has weight 1.2 but no threshold — a run with 0.33 recall
+  (1/3 behaviors) still passes. A 0.5 floor would flag runs where fewer than
+  2 of 3 golden behaviors are covered. (2) evidence-ref-completeness: New
+  criterion checking whether golden set evidence_refs appear in spec
+  evidence_refs. Currently 2 of 3 golden evidence_refs (project-edit.tsx,
+  ReportActions.tsx) are absent from all specs. This measures evidence
+  alignment independent of behavioral coverage. (3)
+  cross-spec-contradiction-detection: New criterion detecting contradictions
+  between specs (e.g., qfm.storage-sanitizer defaults to [] for
+  questionnaireSteps while storage-contract.js defaults to
+  ['step-1','step-2','step-3','step-4']). Prevents integration failures
+  from divergent assumptions.
+
+evidence_refs:
+  - runs/run-0015/evaluator/output.yaml
+  - runs/run-0015/evaluator/shadow-findings.yaml
+  - runs/run-0015/generator/output.yaml
+  - runs/run-0015/inputs/formula.yaml
+  - runs/run-0015/inputs/rubric.yaml
+  - prompts/shared/failure-types.md
+
+confidence: 0.78
+confidence_rationale: >
+  Moderate-high confidence in recognition_failure for miss 1: the formula
+  explicitly mentions "agreement-state gating" in the analyze step prompt,
+  yet the generator only applied it in the report-creation context
+  (toa-gated-report-creation achieved 1.0 recall) and missed it in the
+  project-editing context. This is a clear context-collapse signal. Moderate
+  confidence in search_failure for miss 2: ReportActions.tsx is absent from
+  all spec evidence_refs, strongly suggesting the explore step never found
+  it. However, we lack the explore step's raw file list to confirm
+  definitively — there is a small chance the file was found but completely
+  ignored (which would reclassify as recognition_failure). Deducted 0.22
+  from maximum confidence because: (1) the explore step's file list is not
+  available to confirm search_failure definitively, (2) the two misses have
+  different failure types which complicates a single primary classification,
+  (3) the pdf.lifecycle precision finding (pdfLifecycle.js not imported by
+  PdfGenerationOverlay.tsx) suggests possible architectural drift that could
+  affect diagnosis accuracy, (4) the precision finding on
+  auth.toa-gated-report-creation (calculator-side documented from
+  prior_context, not source files) indicates the one successful recall hit
+  may be partially inflated.
+
+analyzer_timestamp: "2026-04-23T00:00:00Z"

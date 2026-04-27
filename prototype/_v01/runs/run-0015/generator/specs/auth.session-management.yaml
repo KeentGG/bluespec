@@ -1,0 +1,890 @@
+id: auth.session-management
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth-session-lifecycle
+    coverage: full
+    notes: >
+      JWT access tokens stored in JS memory variable, refresh token in HTTP-only
+      cookie (backend-set, unreadable by JS), user profile in regular cookie for
+      middleware SSR access. Session normalized on set with required _id and
+      accessToken fields. Token applied as Bearer header on all requests.
+  - id: auth-cross-tab-coordination
+    coverage: full
+    notes: >
+      Cross-tab login/logout sync via BroadcastChannel with localStorage fallback
+      for Safari/Edge Runtime compatibility. Logout redirects protected routes;
+      login redirects from /login page. Debounce protection prevents redirect loops.
+  - id: auth-token-refresh-coordination
+    coverage: full
+    notes: >
+      Cross-tab token refresh uses localStorage-based mutex (10s timeout) to prevent
+      simultaneous refresh calls. Promise-based lock prevents in-tab duplicates.
+      Refresh result broadcast to waiting tabs. 10s API timeout prevents hangs.
+  - id: auth-csrf-protection
+    coverage: full
+    notes: >
+      CSRF token read from regular cookie, injected as x-csrf-token header for all
+      state-changing requests. Proactive refresh triggered when CSRF token missing.
+      Max 1 retry on CSRF failure. 403 with CSRF message triggers token refresh + retry.
+
+description: >
+  Manages the complete authentication session lifecycle for a frontend SPA.
+  JWT access tokens are stored in a JavaScript memory variable (not localStorage)
+  to prevent XSS access. The refresh token lives in an HTTP-only cookie set by
+  the backend and is inaccessible to JavaScript. A user profile cookie enables
+  SSR middleware access. Cross-tab coordination uses BroadcastChannel with a
+  localStorage fallback for Safari compatibility, synchronizing login/logout events
+  and token refresh operations across browser tabs. A localStorage-based mutex
+  prevents multiple tabs from refreshing tokens simultaneously. CSRF protection
+  is enforced by reading a csrfToken cookie and injecting it as an x-csrf-token
+  header on all state-changing requests, with proactive refresh when the token
+  is missing.
+
+state_machine:
+  initial: anonymous
+  states:
+    - id: anonymous
+      description: No session exists. User is not authenticated.
+    - id: authenticating
+      description: Login request in progress, awaiting backend response with token payload.
+    - id: authenticated
+      description: Valid session in memory with accessToken and user data. Token applied to requests.
+    - id: refreshing
+      description: Access token expired or 401 received. Refresh in progress via HTTP-only cookie.
+    - id: logging_out
+      description: Logout in progress. Session cleared, cookies removed, cross-tab broadcast sent.
+  transitions:
+    - id: login_success
+      from: anonymous
+      to: authenticated
+      trigger: Backend returns valid token payload on login
+      guards:
+        - field: token_payload
+          condition: Contains non-empty _id and accessToken strings
+      effects:
+        - Store normalized session in memory variable
+        - Write user profile cookie (7-day TTL, SameSite=Lax)
+        - Broadcast login event to other tabs
+    - id: token_expired
+      from: authenticated
+      to: refreshing
+      trigger: API request returns 401 or 500 with "jwt expired" message
+      guards:
+        - field: response_status
+          condition: Status is 401, or status is 500 with message containing "jwt expired"
+    - id: refresh_success
+      from: refreshing
+      to: authenticated
+      trigger: /auth/refresh endpoint returns new token payload
+      guards:
+        - field: refresh_response
+          condition: Response contains userData with valid _id and accessToken
+      effects:
+        - Store new token in memory and user cookie
+        - Broadcast TOKEN_REFRESHED to waiting tabs
+        - Release cross-tab refresh lock
+    - id: refresh_failure
+      from: refreshing
+      to: anonymous
+      trigger: /auth/refresh fails, times out (10s), or returns error
+      effects:
+        - Clear in-memory session
+        - Clear user cookie
+        - Redirect to /login
+        - Release cross-tab refresh lock
+    - id: logout_initiated
+      from: authenticated
+      to: logging_out
+      trigger: User clicks logout or clearToken() called
+      effects:
+        - Broadcast logout event to other tabs
+        - Clear in-memory session
+        - Clear user profile cookie
+    - id: logout_broadcast_received
+      from: authenticated
+      to: anonymous
+      trigger: Another tab broadcasts logout event
+      guards:
+        - field: current_route
+          condition: On protected route (/companies or /reports)
+      effects:
+        - Clear in-memory session
+        - Clear user profile cookie
+        - Redirect to /login with base path preserved
+    - id: logout_broadcast_received_unprotected
+      from: authenticated
+      to: anonymous
+      trigger: Another tab broadcasts logout event
+      guards:
+        - field: current_route
+          condition: NOT on protected route
+      effects:
+        - Clear in-memory session
+        - Clear user profile cookie
+        - No redirect (page stays)
+
+conditions:
+  - id: csrf-token-missing
+    description: >
+      For state-changing requests (POST, PATCH, DELETE), if the CSRF token is
+      absent from the cookie, trigger a proactive token refresh to obtain a
+      fresh CSRF token before sending the request.
+    trigger: State-changing API request initiated without existing x-csrf-token header
+    guards:
+      - field: request_method
+        condition: Method is POST, PATCH, or DELETE (not GET/HEAD)
+      - field: csrf_token
+        condition: No csrfToken cookie value found
+      - field: already_retried
+        condition: Not already retried after refresh (retriedAfterRefresh is false)
+      - field: is_refresh_endpoint
+        condition: Request path is NOT /auth/refresh
+    then:
+      - Call refreshAccessToken() to obtain fresh CSRF token via refresh response
+      - Re-read csrfToken cookie after successful refresh
+      - Attach x-csrf-token header if token now present
+    else:
+      - Attach existing csrfToken cookie value as x-csrf-token header
+
+  - id: csrf-failure-retry
+    description: >
+      When a request fails with 403 and a CSRF-related error message, retry the
+      request after refreshing the token. Use the CSRF token from the refresh
+      response if available, otherwise clear stale headers to force re-read.
+    trigger: API response returns 403 with message containing "csrf"
+    guards:
+      - field: response_status
+        condition: Status is 403
+      - field: response_message
+        condition: Message contains "csrf" (case-insensitive)
+      - field: already_retried
+        condition: Not already retried after refresh
+    then:
+      - Call refreshAccessToken() to get new token + CSRF token
+      - If refresh succeeds: retry request with new token and CSRF token from refresh response
+      - If CSRF token not in refresh response: clear stale x-csrf-token headers to force re-read
+    else:
+      - Do not retry; return error result
+
+  - id: cross-tab-refresh-lock
+    description: >
+      When a tab needs to refresh, it acquires a localStorage-based lock.
+      If another tab holds the lock (< 10s old), this tab waits for the
+      result via BroadcastChannel/localStorage polling (8s timeout).
+      Lock auto-expires after 10s to prevent deadlocks.
+    trigger: refreshAccessToken() called while another tab may be refreshing
+    guards:
+      - field: lock_holder
+        condition: localStorage lock key exists and is less than 10 seconds old
+    then:
+      - Wait for TOKEN_REFRESHED result via crossTab.waitForResult() with 8s timeout
+      - If result received with success=true: apply token from other tab
+      - If timeout or failure: attempt to acquire lock again and proceed with own refresh
+    else:
+      - Acquire lock and perform refresh directly
+
+  - id: login-broadcast-redirect
+    description: >
+      When a login broadcast is received from another tab, redirect to /companies
+      only if the current page is the login page. Otherwise, just refresh auth state.
+    trigger: Login broadcast received from another tab
+    guards:
+      - field: current_path
+        condition: Path includes "/login"
+    then:
+      - Redirect to /companies (with base path preserved)
+      - Call login callback to refresh auth state
+    else:
+      - Do not redirect
+      - Call login callback to refresh auth state
+
+inputs:
+  - id: login_credentials
+    type: "object with email and password fields"
+    source: "user login form submission"
+    required: true
+    validation:
+      email: "non-empty string"
+      password: "non-empty string"
+
+  - id: refresh_cookie
+    type: "HTTP-only refreshToken cookie"
+    source: "browser cookie jar (set by backend on login/refresh)"
+    required: true
+    validation:
+      format: "JWT (validated by backend)"
+
+  - id: csrf_cookie
+    type: "csrfToken cookie value"
+    source: "browser cookie jar (set by backend on login/refresh)"
+    required: false
+    validation:
+      min_length: "10 characters for valid token"
+
+  - id: user_cookie
+    type: "JSON-encoded user profile cookie"
+    source: "browser cookie jar (set by frontend on login)"
+    required: false
+    validation:
+      format: "JSON with _id, email, accessToken fields"
+
+  - id: cross_tab_event
+    type: "BroadcastChannel message or localStorage storage event"
+    source: "other browser tab"
+    required: false
+    validation:
+      event_types: ["logout", "login", "TOKEN_REFRESHED"]
+
+outputs:
+  - id: session_token
+    type: "JWT access token string"
+    destination: "in-memory JavaScript variable (authSession)"
+    lifespan: "session (cleared on logout or tab close)"
+
+  - id: user_cookie_output
+    type: "JSON-encoded user profile"
+    destination: "browser cookie named 'user'"
+    lifespan: "7 days"
+
+  - id: auth_header
+    type: "Authorization: Bearer {accessToken} header"
+    destination: "HTTP request headers on all API calls"
+    lifespan: "per-request"
+
+  - id: user_id_header
+    type: "userId header"
+    destination: "HTTP request headers on all API calls"
+    lifespan: "per-request"
+
+  - id: csrf_header
+    type: "x-csrf-token header"
+    destination: "HTTP request headers on state-changing requests"
+    lifespan: "per-request"
+
+  - id: refresh_result_broadcast
+    type: "TOKEN_REFRESHED event with token payload"
+    destination: "BroadcastChannel + localStorage (eoyt-refresh-result key)"
+    lifespan: "500ms (auto-cleaned)"
+
+  - id: logout_broadcast_output
+    type: "logout event with timestamp"
+    destination: "BroadcastChannel + localStorage (eoyt-logout-{timestamp} key)"
+    lifespan: "100ms (auto-cleaned)"
+
+  - id: login_broadcast_output
+    type: "login event with timestamp"
+    destination: "BroadcastChannel + localStorage (eoyt-login-{timestamp} key)"
+    lifespan: "100ms (auto-cleaned)"
+
+evidence_refs:
+  - path: src/features/auth/api/authMemorySession.js
+    snippet: |
+      let authSession = null;
+      let logoutListenerInitialized = false;
+      let loginListenerInitialized = false;
+
+      function normalizeSessionPayload(candidate) {
+        if (!isPlainObject(candidate)) {
+          return null;
+        }
+        const userId = normalizeOptionalString(candidate._id).trim();
+        const accessToken = normalizeOptionalString(candidate.accessToken).trim();
+        if (!userId || !accessToken) {
+          return null;
+        }
+        const email = normalizeOptionalString(candidate.email);
+        return {
+          _id: userId,
+          email,
+          accessToken,
+          user: { ...candidate, _id: userId, email, accessToken },
+        };
+      }
+
+      export function setAuthSession(candidate) {
+        const normalized = normalizeSessionPayload(candidate);
+        authSession = normalized;
+        return authSession;
+      }
+
+      export function getAuthSession() {
+        return authSession;
+      }
+
+      export function clearAuthSession() {
+        authSession = null;
+      }
+    covers:
+      - "state:authenticated"
+      - "state:anonymous"
+      - "transition:login_success"
+      - "transition:refresh_success"
+      - "transition:logout_initiated"
+      - "output:session_token"
+    line_range:
+      start: 42
+      end: 105
+
+  - path: src/features/auth/api/authMemorySession.js
+    snippet: |
+      function initLogoutListenerLazy(callbacks = {}) {
+        if (typeof window === "undefined") return;
+        if (logoutListenerInitialized) return;
+        logoutListenerInitialized = true;
+        import("../lib/authBroadcast")
+          .then(({ initLogoutListener }) => {
+            initLogoutListener(() => {
+              clearAuthSession();
+              if (typeof callbacks.onLogout === "function") {
+                callbacks.onLogout();
+              }
+            });
+          })
+          .catch((error) => {
+            logoutListenerInitialized = false;
+          });
+      }
+
+      export function initAuthSessionListeners(callbacks = {}) {
+        if (typeof window === "undefined") return;
+        initLogoutListenerLazy(callbacks);
+        initLoginListenerLazy(callbacks);
+      }
+    covers:
+      - "condition:cross-tab-refresh-lock"
+      - "transition:logout_broadcast_received"
+    line_range:
+      start: 107
+      end: 187
+
+  - path: src/features/auth/api/tokenService.js
+    snippet: |
+      export function setToken(tokenPayload) {
+        const normalized = setAuthSession(tokenPayload);
+        if (!normalized) return;
+        setBrowserUserCookie(normalized);
+        broadcastAuthChange("login");
+      }
+
+      export function clearToken() {
+        broadcastAuthChange("logout");
+        clearAuthSession();
+        clearBrowserUserCookie();
+      }
+
+      export function applyAuthHeaders(baseHeaders = {}, tokenPayload) {
+        const headers = { ...baseHeaders };
+        if (!tokenPayload || typeof tokenPayload.accessToken !== "string"
+            || tokenPayload.accessToken.length === 0) {
+          return headers;
+        }
+        headers.Authorization = `Bearer ${tokenPayload.accessToken}`;
+        if (typeof tokenPayload._id === "string" && tokenPayload._id.length > 0) {
+          headers.userId = tokenPayload._id;
+        }
+        return headers;
+      }
+    covers:
+      - "transition:login_success"
+      - "transition:logout_initiated"
+      - "output:auth_header"
+      - "output:user_id_header"
+      - "output:user_cookie_output"
+    line_range:
+      start: 200
+      end: 261
+
+  - path: src/features/auth/api/tokenService.js
+    snippet: |
+      // Cookie Contract
+      // | Cookie      | Value                | HttpOnly | SameSite | TTL   |
+      // |-------------|----------------------|----------|----------|-------|
+      // | user        | JSON-encoded profile | No       | Lax      | 7 days|
+      // | csrfToken   | Random token         | No       | Lax      | 7 days|
+      // | refreshToken| JWT refresh token    | Yes      | Lax      | backend|
+
+      export const USER_COOKIE_KEY = "user";
+      export const USER_COOKIE_TTL_DAYS = 7;
+
+      function setBrowserUserCookie(tokenPayload) {
+        if (typeof document === "undefined") return;
+        if (!tokenPayload || typeof tokenPayload._id !== "string" || !tokenPayload.accessToken) return;
+        const cookieValue = JSON.stringify({
+          _id: tokenPayload._id,
+          email: tokenPayload.email || "",
+          accessToken: tokenPayload.accessToken,
+        });
+        document.cookie = createCookieString(USER_COOKIE_KEY, cookieValue, USER_COOKIE_TTL_DAYS, {
+          path: "/", sameSite: "Lax",
+        });
+      }
+    covers:
+      - "output:user_cookie_output"
+      - "input:user_cookie"
+    line_range:
+      start: 1
+      end: 198
+
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      const REFRESH_LOCK_KEY = "eoyt-refresh-lock";
+      const REFRESH_RESULT_KEY = "eoyt-refresh-result";
+      const LOCK_TIMEOUT_MS = 10000;
+
+      function acquireRefreshLock() {
+        if (typeof window === "undefined") return true;
+        try {
+          const now = Date.now();
+          const existing = localStorage.getItem(REFRESH_LOCK_KEY);
+          if (existing) {
+            const { timestamp } = JSON.parse(existing);
+            if (now - timestamp < LOCK_TIMEOUT_MS) {
+              return false; // Another tab holds lock
+            }
+          }
+          localStorage.setItem(REFRESH_LOCK_KEY, JSON.stringify({ timestamp: now, tabId: getTabId() }));
+          return true;
+        } catch (error) {
+          return true; // Proceed if localStorage fails
+        }
+      }
+
+      function releaseRefreshLock() {
+        if (typeof window === "undefined") return;
+        try {
+          localStorage.removeItem(REFRESH_LOCK_KEY);
+        } catch (error) { /* ignore */ }
+      }
+    covers:
+      - "condition:cross-tab-refresh-lock"
+      - "transition:refresh_success"
+      - "transition:refresh_failure"
+    line_range:
+      start: 48
+      end: 113
+
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      export async function refreshAccessToken(options = {}) {
+        if (isRefreshing || refreshPromise) {
+          return refreshPromise || Promise.resolve({ success: false, error: "Refresh in progress", token: null });
+        }
+        const { apiClient } = options;
+        isRefreshing = true;
+        refreshPromise = performCoordinatedRefresh(apiClient).finally(() => {
+          isRefreshing = false;
+          refreshPromise = null;
+        });
+        return refreshPromise;
+      }
+
+      async function performCoordinatedRefresh(apiClient) {
+        const hasLock = acquireRefreshLock();
+        if (!hasLock) {
+          const { waitForResult } = await getCrossTab();
+          const result = await waitForResult({
+            storageKey: REFRESH_RESULT_KEY,
+            eventType: "TOKEN_REFRESHED",
+            timeoutMs: 8000,
+          });
+          if (result && result.success) {
+            setToken(result.token);
+            return result;
+          }
+          // Fallback: try to acquire lock again
+          if (!acquireRefreshLock()) { /* proceed with caution */ }
+        }
+        try {
+          const result = await performRefresh(apiClient);
+          if (result.success) {
+            const { broadcastMessage } = await getCrossTab();
+            broadcastMessage({
+              eventType: "TOKEN_REFRESHED",
+              data: result,
+              storageKey: REFRESH_RESULT_KEY,
+              cleanupMs: 500,
+            });
+          }
+          return result;
+        } finally {
+          releaseRefreshLock();
+        }
+      }
+    covers:
+      - "state:refreshing"
+      - "condition:cross-tab-refresh-lock"
+      - "transition:refresh_success"
+      - "transition:refresh_failure"
+      - "output:refresh_result_broadcast"
+    line_range:
+      start: 139
+      end: 222
+
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      const REFRESH_TIMEOUT_MS = 10000;
+
+      async function performRefresh(apiClient) {
+        try {
+          const timeoutPromise = new Promise((resolve) => {
+            setTimeout(() => resolve({ __timeout: true }), REFRESH_TIMEOUT_MS);
+          });
+          const result = await Promise.race([
+            refreshToken({}, apiClient ? { client: apiClient } : {}),
+            timeoutPromise,
+          ]);
+          if (result && result.__timeout) {
+            return { success: false, error: `Token refresh timed out after ${REFRESH_TIMEOUT_MS}ms`, token: null };
+          }
+          // ... validate response, extract newTokenPayload, csrfToken
+          setToken(newTokenPayload);
+          return { success: true, token: newTokenPayload, csrfToken, message: raw?.message || "Token refreshed successfully" };
+        } catch (error) {
+          return { success: false, error: error?.message || "Token refresh error", token: null };
+        }
+      }
+    covers:
+      - "transition:refresh_success"
+      - "transition:refresh_failure"
+    line_range:
+      start: 224
+      end: 296
+
+  - path: src/features/auth/api/csrfHelper.js
+    snippet: |
+      const CSRF_COOKIE_NAME = "csrfToken";
+      export const MAX_CSRF_RETRIES = 1;
+
+      export function hasCsrfToken(cookieString) {
+        const token = getCsrfToken(cookieString);
+        return token !== null && token.length > 0;
+      }
+
+      export function isCsrfTokenValid(token) {
+        if (typeof token !== "string") return false;
+        return token.length >= 10;
+      }
+
+      export function getCsrfToken(cookieString) {
+        const raw = typeof cookieString === "string"
+          ? cookieString
+          : typeof document !== "undefined" ? document.cookie : "";
+        if (!raw) return null;
+        const match = raw.match(new RegExp(`(?:^|;\\s*)${CSRF_COOKIE_NAME}=([^;]*)`));
+        if (!match) return null;
+        try { return decodeURIComponent(match[1]); }
+        catch (_error) { return match[1] || null; }
+      }
+
+      export function applyCsrfHeaders(baseHeaders = {}, cookieString) {
+        const token = getCsrfToken(cookieString);
+        if (!token) return baseHeaders;
+        return { ...baseHeaders, "x-csrf-token": token };
+      }
+    covers:
+      - "condition:csrf-token-missing"
+      - "condition:csrf-failure-retry"
+      - "input:csrf_cookie"
+      - "output:csrf_header"
+    line_range:
+      start: 1
+      end: 126
+
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      // Global CSRF Interceptor: Attach x-csrf-token to all state-changing requests
+      if (withBody && !hasHeader(headers, "x-csrf-token") && !skipRefresh && !isRefreshEndpoint) {
+        let csrfToken = getCsrfToken();
+        // Proactive refresh: if no CSRF token and not already retried, trigger refresh
+        if (!csrfToken && !retriedAfterRefresh) {
+          const refreshAccessToken = await getRefreshAccessToken();
+          const refreshResult = await refreshAccessToken({
+            apiClient: { request, get, post, patch, delete: remove },
+          });
+          if (refreshResult.success) {
+            csrfToken = getCsrfToken();
+          }
+        }
+        if (csrfToken) {
+          headers["x-csrf-token"] = csrfToken;
+        }
+      }
+    covers:
+      - "condition:csrf-token-missing"
+      - "output:csrf_header"
+    line_range:
+      start: 473
+      end: 493
+
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      const shouldRetryAfterRefresh =
+        !retriedAfterRefresh &&
+        !skipRefresh &&
+        !isRefreshEndpoint &&
+        (Number(result.statusCode ?? result.status) === 401 ||
+          (Number(result.statusCode ?? result.status) === 500 &&
+            typeof result.message === "string" &&
+            result.message.includes("jwt expired")) ||
+          isCsrfFailure);
+
+      if (shouldRetryAfterRefresh) {
+        const refreshAccessToken = await getRefreshAccessToken();
+        const refreshResult = await refreshAccessToken({
+          apiClient: { request, get, post, patch, delete: remove },
+        });
+        if (refreshResult.success && refreshResult.token) {
+          const retryOptions = { ...requestOptions, token: refreshResult.token };
+          if (isCsrfFailure) {
+            const retryHeaders = { ...(retryOptions.headers || {}) };
+            if (refreshResult.csrfToken) {
+              retryHeaders["x-csrf-token"] = refreshResult.csrfToken;
+            } else {
+              delete retryHeaders["x-csrf-token"];
+              delete retryHeaders["X-CSRF-Token"];
+            }
+            retryOptions.headers = retryHeaders;
+          }
+          return executeRequest<T>(retryOptions, { retriedAfterRefresh: true });
+        }
+        if (!requestOptions.skipAuthErrorHandling) {
+          await handleAuthError({ redirectUrl: "/login", reason: "session_expired", skipRedirect: false });
+        }
+      }
+    covers:
+      - "state:refreshing"
+      - "transition:refresh_failure"
+      - "condition:csrf-failure-retry"
+    line_range:
+      start: 545
+      end: 597
+
+  - path: src/features/auth/lib/crossTab.js
+    snippet: |
+      export const CHANNEL_NAME = "eoyt-auth-sync";
+
+      export function isBroadcastSupported() {
+        const isEdgeRuntime = typeof EdgeRuntime !== "undefined";
+        return (
+          !isEdgeRuntime &&
+          typeof window !== "undefined" &&
+          typeof globalThis.BroadcastChannel !== "undefined"
+        );
+      }
+
+      export function broadcastMessage({
+        channelName = CHANNEL_NAME, eventType, data, storageKey, cleanupMs = 500,
+      }) {
+        if (typeof window === "undefined") return;
+        // BroadcastChannel path (preferred)
+        if (isBroadcastSupported()) {
+          try {
+            const BC = getBroadcastChannelConstructor();
+            if (BC) {
+              const channel = new BC(channelName);
+              channel.postMessage({ type: eventType, data });
+              channel.close();
+            }
+          } catch (_error) { /* fallback handles it */ }
+        }
+        // localStorage fallback (universal support)
+        if (typeof localStorage !== "undefined") {
+          try {
+            const payload = typeof data === "string" ? data : JSON.stringify(data);
+            localStorage.setItem(storageKey, payload);
+            setTimeout(() => { localStorage.removeItem(storageKey); }, cleanupMs);
+          } catch (_error) { /* best-effort */ }
+        }
+      }
+    covers:
+      - "condition:cross-tab-refresh-lock"
+      - "output:refresh_result_broadcast"
+      - "output:logout_broadcast_output"
+      - "output:login_broadcast_output"
+    line_range:
+      start: 7
+      end: 85
+
+  - path: src/features/auth/lib/crossTab.js
+    snippet: |
+      export function waitForResult({
+        storageKey, channelName = CHANNEL_NAME, eventType, timeoutMs = 8000, pollIntervalMs = 100,
+      }) {
+        return new Promise((resolve) => {
+          if (typeof window === "undefined") { resolve(null); return; }
+          const startTime = Date.now();
+          const checkStorage = () => {
+            try {
+              const raw = localStorage.getItem(storageKey);
+              if (raw) { try { return JSON.parse(raw); } catch (_e) { return raw; } }
+            } catch (_error) { /* localStorage unavailable */ }
+            return null;
+          };
+          const immediate = checkStorage();
+          if (immediate !== null) { resolve(immediate); return; }
+          // Listen for BroadcastChannel message
+          let channel = null;
+          if (eventType && isBroadcastSupported()) {
+            try {
+              const BC = getBroadcastChannelConstructor();
+              if (BC) {
+                channel = new BC(channelName);
+                channel.addEventListener("message", (event) => {
+                  if (event.data?.type === eventType) {
+                    cleanup();
+                    try { resolve(JSON.parse(event.data.data)); }
+                    catch (_e) { resolve(event.data.data); }
+                  }
+                });
+              }
+            } catch (_error) { channel = null; }
+          }
+          // Poll localStorage as fallback
+          const interval = setInterval(() => {
+            const result = checkStorage();
+            if (result !== null) { cleanup(); resolve(result); return; }
+            if (Date.now() - startTime > timeoutMs) { cleanup(); resolve(null); }
+          }, pollIntervalMs);
+          function cleanup() {
+            clearInterval(interval);
+            if (channel) { try { channel.close(); } catch (_e) { /* ignore */ } }
+          }
+        });
+      }
+    covers:
+      - "condition:cross-tab-refresh-lock"
+    line_range:
+      start: 169
+      end: 256
+
+  - path: src/features/auth/lib/authBroadcast.js
+    snippet: |
+      const LOGOUT_EVENT = "logout";
+      const LOGIN_EVENT = "login";
+      const LOGOUT_KEY_PREFIX = "eoyt-logout-";
+      const LOGIN_KEY_PREFIX = "eoyt-login-";
+      let lastRedirectTime = 0;
+      let lastLoginTime = 0;
+      const REDIRECT_DEBOUNCE_MS = 1000;
+      const LOGIN_DEBOUNCE_MS = 1000;
+
+      export function broadcastLogout() {
+        if (typeof window === "undefined") return;
+        broadcastMessage({
+          channelName: CHANNEL_NAME,
+          eventType: LOGOUT_EVENT,
+          data: { timestamp: Date.now() },
+          storageKey: `${LOGOUT_KEY_PREFIX}${Date.now()}`,
+          cleanupMs: 100,
+        });
+      }
+
+      export function broadcastLogin() {
+        if (typeof window === "undefined") return;
+        broadcastMessage({
+          channelName: CHANNEL_NAME,
+          eventType: LOGIN_EVENT,
+          data: { timestamp: Date.now() },
+          storageKey: `${LOGIN_KEY_PREFIX}${Date.now()}`,
+          cleanupMs: 100,
+        });
+      }
+    covers:
+      - "output:logout_broadcast_output"
+      - "output:login_broadcast_output"
+      - "transition:logout_initiated"
+    line_range:
+      start: 8
+      end: 81
+
+  - path: src/features/auth/lib/authBroadcast.js
+    snippet: |
+      function handleLogoutEvent(callback) {
+        const now = Date.now();
+        // Redirect loop protection - ignore events within debounce window
+        if (now - lastRedirectTime < REDIRECT_DEBOUNCE_MS) return;
+        lastRedirectTime = now;
+        // Only redirect if on protected routes
+        const currentPath = window.location.pathname;
+        const isProtected = currentPath.includes("/companies") || currentPath.includes("/reports");
+        if (isProtected) {
+          const basePath = window.location.pathname.split("/companies")[0].split("/reports")[0] || "";
+          const loginPath = basePath ? `${basePath}/login` : "/login";
+          window.location.href = loginPath;
+        }
+        if (typeof callback === "function") {
+          try { callback(); } catch (error) { /* log error */ }
+        }
+      }
+
+      function handleLoginEvent(callback) {
+        const now = Date.now();
+        if (now - lastLoginTime < LOGIN_DEBOUNCE_MS) return;
+        lastLoginTime = now;
+        const currentPath = window.location.pathname;
+        const isLoginPage = currentPath.includes("/login");
+        if (isLoginPage) {
+          const basePath = currentPath.split("/login")[0] || "";
+          const companiesPath = basePath ? `${basePath}/companies` : "/companies";
+          window.location.href = companiesPath;
+        }
+        if (typeof callback === "function") {
+          try { callback(); } catch (error) { /* log error */ }
+        }
+      }
+    covers:
+      - "transition:logout_broadcast_received"
+      - "transition:logout_broadcast_received_unprotected"
+      - "condition:login-broadcast-redirect"
+    line_range:
+      start: 217
+      end: 305
+
+  - path: src/shared/components/AuthSyncBootstrap.tsx
+    snippet: |
+      "use client";
+      import { useEffect } from "react";
+      import { initAuthSessionListeners } from "@/features/auth/api/authMemorySession";
+      import { clearBrowserUserCookie } from "@/features/auth/api/tokenService";
+
+      export function AuthSyncBootstrap() {
+        useEffect(() => {
+          initAuthSessionListeners({
+            onLogout: () => clearBrowserUserCookie(),
+          });
+        }, []);
+        return null;
+      }
+    covers:
+      - "condition:cross-tab-refresh-lock"
+      - "transition:logout_broadcast_received"
+    line_range:
+      start: 1
+      end: 15
+
+confidence: 0.92
+confidence_rationale: >
+  All four discovered behaviors are fully evidenced across 8 source files with
+  direct code snippets. Session lifecycle (memory storage, cookie contract, token
+  injection) confirmed in authMemorySession.js and tokenService.js. Cross-tab
+  coordination (BroadcastChannel + localStorage fallback, debounce protection)
+  confirmed in crossTab.js and authBroadcast.js. Token refresh coordination
+  (localStorage mutex, 10s timeout, promise-based in-tab lock) confirmed in
+  tokenRefresher.js. CSRF protection (cookie reading, proactive refresh, retry
+  logic) confirmed in csrfHelper.js and apiClient.ts. AuthSyncBootstrap.tsx
+  confirms listener initialization. Deducted 0.08 because: (1) the actual
+  login API call and its response shape are in auth-service.js (not in scope),
+  (2) the backend refresh endpoint contract is not visible from frontend code,
+  (3) the exact middleware behavior reading the user cookie is not in these files.
+
+unresolved_questions:
+  - "What is the exact shape of the login API response in auth-service.js? The setToken() call suggests { _id, email, accessToken } but the login flow entry point is not in scope."
+  - "How does the Next.js middleware read the user cookie for SSR? The cookie contract documents it as readable by middleware but the middleware implementation is not in these files."
+  - "What happens if the user cookie is malformed (parseJsonCookie returns malformed: true)? The parseUserCookieValue function returns shouldClear: true but the caller is not visible here."
+  - "Is the CSRF token rotated on every refresh, or does it remain the same? The refresh response may include csrfToken but the backend behavior is not visible."
+  - "What is the base path pattern for multi-tenant routing? handleLogoutEvent splits on /companies and /reports but the base path resolution logic suggests a configurable prefix."
+
+status: complete

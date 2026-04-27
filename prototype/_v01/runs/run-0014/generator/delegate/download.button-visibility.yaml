@@ -1,0 +1,24 @@
+spec_id: download.button-visibility.yaml
+output_path: /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0014/generator/specs/download.button-visibility.yaml
+golden_behaviors:
+  - id: download-button-visibility
+    description: download button becomes visible only after report progress reaches the download stage
+    priority: high
+    category: state_dependent_visibility
+    evidence_refs:
+      - src/components/ReportActions.tsx
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportSplitActions.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportRowController.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsTable.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/contracts/list-contract.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - The evidence_ref `src/components/ReportActions.tsx` does NOT exist in the codebase (stale ref).
+  - The actual download button behavior is in `ReportSplitActions.tsx`.
+  - Line 41: `const canDownload = progressPercentage === 100;`
+  - The download button is ALWAYS VISIBLE but DISABLED when progress < 100.
+  - The button has a title: "Report must be 100% complete to download" when disabled.
+  - Progress percentage comes from `reportProgressPercentage` in the report row data, computed by `list-contract.js` and `report-route-progress-contract.js`.
+  - The golden wording says "becomes visible only after report progress reaches the download stage" — this is a PARTIAL match because the actual behavior is "disabled unless 100% complete" (visible-disabled), not hidden→visible.

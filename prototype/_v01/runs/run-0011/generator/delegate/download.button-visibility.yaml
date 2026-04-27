@@ -1,0 +1,25 @@
+spec_id: download.button-visibility.yaml
+output_path: /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0011/generator/specs/download.button-visibility.yaml
+golden_behaviors:
+  - id: download-button-visibility
+    description: download button becomes visible only after report progress reaches the download stage
+    priority: high
+    evidence_refs:
+      - src/components/ReportActions.tsx
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsTable.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportSplitActions.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/api/list-service.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/contracts/report-record-contract.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/report-route-progress-contract.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportRowController.ts
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - The golden evidence ref src/components/ReportActions.tsx is stale in the current codebase.
+  - ReportsTable always renders ReportSplitActions for each report row; the action cluster is visible regardless of progress state.
+  - ReportSplitActions derives canDownload from progressPercentage === 100.
+  - The primary Download button remains rendered but disabled while progressPercentage is not 100, with title text "Report must be 100% complete to download".
+  - reportProgressPercentage is computed upstream from each report's reportProgress route using resolveCalculatorAwareProgressPercentage() in report-route-progress-contract.js.
+  - Current behavior appears to be visible-disabled until completion, not hidden-until-stage.
+  - The spec should describe the actual visible/disabled/enabled states explicitly and mark the golden behavior as partial if the wording requires hidden visibility before the download stage.

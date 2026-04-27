@@ -1,0 +1,68 @@
+run_id: "run-0010"
+mutator: "run_mutator"
+status: "complete"
+provider: "task-agent"
+proposed_change:
+  type: "rubric_mutation"
+  target_step: "evaluate"
+  current: >
+    The rubric only tracks broad golden_set_recall and
+    conditional_flow_documentation, so evidence-faithful conditional-flow specs
+    can still be penalized when the golden wording is stale.
+  proposed: >
+    Add a probationary rubric candidate for claim_to_evidence_alignment: each
+    conditional-flow claim must trace to cited evidence, and stale-golden route
+    or visibility wording must be scored as drift rather than generator
+    omission when the live behavior is otherwise supported.
+  expected_improvement: >
+    Separates evidence-backed partial specs from genuine recall misses,
+    reducing false penalties when the golden behavior is stale or the wording
+    lags behind observed route and visibility predicates.
+  risk: "medium"
+  rationale: >
+    The evaluator and analyzer agree that the run is evidence-backed but
+    mis-scored against stale golden wording. The current rubric lacks an
+    explicit traceability axis, so a rubric mutation is the right tier instead
+    of another prompt tweak.
+insanity_check:
+  method_already_failed: false
+  failed_runs:
+    - run_id: "lessons/failed.jsonl#1"
+      teaching_method: "prompt_reword_only"
+      scenario: "agent missed conditional routing after prompt wording change"
+      result: "FAILED"
+  learned_runs:
+    - run_id: "lessons/learned.jsonl#1"
+      teaching_method: "verification_crosscheck"
+      scenario: "conditional UI visibility"
+      result: "PASSED"
+rubric_candidate:
+  id: "claim_to_evidence_alignment"
+  description: >
+    Score conditional-flow specs by whether each claim is explicitly traceable
+    to evidence, and treat stale-golden wording drift as a separate signal from
+    generator omission.
+  source: "rubric_gap_failure"
+  failure_type: "rubric_gap_failure"
+  evidence_refs:
+    - "runs/run-0010/analyzer/output.yaml"
+    - "runs/run-0010/evaluator/output.yaml"
+    - "runs/run-0010/generator/output.yaml"
+    - "runs/run-0010/generator/specs/auth.conditional-redirect.yaml"
+    - "runs/run-0010/generator/specs/reports.download-button-visibility.yaml"
+    - "runs/run-0010/inputs/formula.yaml"
+    - "runs/run-0010/inputs/rubric.yaml"
+  rationale: >
+    The run produced evidence-backed partial specs, but the current rubric only
+    scores broad recall and conditional-flow documentation. Without an
+    explicit traceability check, stale-golden wording can be mistaken for a
+    generator omission.
+  severity: "high"
+  recommended_state: "probation"
+confidence: 0.84
+confidence_rationale: >
+  The evaluator and analyzer converge on a rubric gap rather than a formula or
+  search failure, and the learned lesson supports verification-style
+  crosschecking for visibility-related behavior. The remaining risk is that a
+  traceability criterion can be over-broad, so probation is the safer target.
+mutator_timestamp: "2026-04-22T08:18:50Z"

@@ -1,0 +1,11 @@
+run_id: run-0013
+frozen_at: 2026-04-22T15:29:34.319Z
+sources:
+  formula_ref: formulas/promoted/frontend-derived-v003-consolidated.yaml
+  formula_extends_chain:
+    - formulas/seed/universal.yaml
+    - formulas/seed/frontend.yaml
+    - formulas/promoted/frontend-derived-v003-consolidated.yaml
+  rubric_snapshot_ref: rubrics/snapshots/v002/rubric.yaml
+  golden_set_ref: goldens/projects/sample-project/behaviors.yaml
+  project_ref: config/projects/sample-project.yaml

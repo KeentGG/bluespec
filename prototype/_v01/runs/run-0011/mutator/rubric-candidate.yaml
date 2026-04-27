@@ -1,0 +1,54 @@
+id: stale_golden_vs_observed_implementation
+status: candidate
+description: >
+  Score specs by whether they accurately document observed code behavior that
+  contradicts stale golden-set wording. Reward specs that flag mismatches
+  between golden claims and actual code; penalize specs that blindly copy
+  golden wording without code evidence.
+source: rubric_gap_failure
+discovered_in_run: run-0011
+rationale: >
+  The generator followed formula prompts precisely, producing evidence-backed
+  partial specs that faithfully document observed code. The evaluator penalized
+  these accurate specs because the rubric only measures fidelity to golden
+  wording (golden_set_recall) and has no axis for code-faithful observation.
+  All four recall misses in run-0011 share this single root cause.
+confidence: 0.85
+recommended_state: probation
+evidence_refs:
+  - runs/run-0011/analyzer/output.yaml
+  - runs/run-0011/evaluator/output.yaml
+  - runs/run-0011/generator/output.yaml
+  - runs/run-0011/generator/specs/auth.conditional-redirect.yaml
+  - runs/run-0011/generator/specs/download.button-visibility.yaml
+  - runs/run-0011/generator/specs/toa.gated-first-report-creation.yaml
+  - runs/run-0011/inputs/formula.yaml
+  - runs/run-0011/inputs/rubric.yaml
+failure_type: rubric_gap_failure
+analyzer_confidence: 0.9
+recall_misses_triggered:
+  - criterion: golden_set_recall
+    spec: auth.conditional-redirect.yaml
+    gap: agreement/TOA state check absent from edit flow
+    severity: high
+  - criterion: golden_set_recall
+    spec: download.button-visibility.yaml
+    gap: button is visible-disabled, not hidden-until-complete
+    severity: high
+  - criterion: golden_set_recall
+    spec: toa.gated-first-report-creation.yaml
+    gap: no existing reports check in code
+    severity: medium
+scored_specs_examined:
+  - auth.conditional-redirect.yaml
+  - download.button-visibility.yaml
+  - toa.gated-first-report-creation.yaml
+evidence_count: 1
+first_observed_run: run-0011
+last_observed_run: run-0011
+precision_concern: >
+  Medium-low precision risk. The criterion could reward over-reporting of
+  discrepancies. However, the formula already instructs generators to flag
+  partial coverage honestly, so this criterion aligns with existing prompts.
+weight_recommendation: 1.0
+probation_runs_remaining: 2

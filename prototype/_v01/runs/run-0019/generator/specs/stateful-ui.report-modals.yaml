@@ -1,0 +1,105 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.report-modals
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.report_modals
+    coverage: full
+    notes: >
+      Report modals for email, delete, and create report are managed via
+      Zustand stores. Each modal has open/close lifecycle with optional
+      success callbacks and form state.
+
+description: >
+  Manages report modal states through Zustand stores. The email modal
+  handles report emailing with recipient input, the delete modal handles
+  deletion confirmation, and the create report modal handles new report
+  creation. Each modal has open/close lifecycle with optional success
+  callbacks.
+
+state_machine: null
+
+conditions:
+  - id: email_modal_lifecycle
+    description: >
+      The email modal manages report emailing workflow. Opening stores
+      the report ID and resets email draft; finishing sends email.
+    trigger: useReportEmailModal.open() or close() is called.
+    then:
+      - open(reportId) sets isOpen=true, stores reportId, resets draft.
+      - setEmailAddress(email) stores current draft.
+      - startSend() sets isSending=true.
+      - finishSend() clears state and invokes onEmailSuccess.
+      - close() clears state without invoking callback.
+
+  - id: delete_modal_lifecycle
+    description: >
+      The delete modal manages report deletion confirmation. Opening
+      stores the target report; finishing deletion invokes callback.
+    trigger: useReportDeleteDialog.open() or close() is called.
+    then:
+      - open(report) sets isOpen=true and stores target.
+      - close() clears state without invoking callback.
+      - finish() clears state and invokes onDeleteSuccess.
+
+  - id: create_report_modal_lifecycle
+    description: >
+      The create report modal handles new report creation. Opening can
+      pre-select a business; closing clears state.
+    trigger: useCreateReportModal.open() or close() is called.
+    then:
+      - open(defaultBusinessId?) sets isOpen=true and optional default.
+      - close() clears state.
+
+inputs:
+  - id: report_target
+    type: "report object or ID"
+    source: Report row action
+    required: false
+
+  - id: email_address
+    type: string
+    source: Email input field
+    required: false
+
+outputs:
+  - id: modal_states
+    type: "isOpen booleans and targets"
+    destination: Modal components
+    lifespan: in-memory until closed
+
+evidence_refs:
+  - path: src/features/reports/store/useReportModalsStore.ts
+    snippet: |
+      export const useReportModalsStore = create<ReportModalsState>((set, get) => ({
+        isDeleteOpen: false, deleteTarget: null, isDeleting: false,
+        isEmailOpen: false, emailReportId: null, emailAddress: "", isSending: false,
+        onDeleteSuccess: null, onEmailSuccess: null,
+        openDelete: (report) => set({ isDeleteOpen: true, deleteTarget: report }),
+        closeDelete: () => set({ isDeleteOpen: false, deleteTarget: null, isDeleting: false }),
+        startDelete: () => set({ isDeleting: true }),
+        finishDelete: () => { const { onDeleteSuccess } = get(); set({ isDeleteOpen: false, deleteTarget: null, isDeleting: false }); onDeleteSuccess?.(); },
+        openEmail: (reportId) => set({ isEmailOpen: true, emailReportId: reportId, emailAddress: "", isSending: false }),
+        closeEmail: () => set({ isEmailOpen: false, emailReportId: null, emailAddress: "", isSending: false }),
+        setEmailAddress: (email) => set({ emailAddress: email }),
+        startEmailSend: () => set({ isSending: true }),
+        finishEmailSend: () => { const { onEmailSuccess } = get(); set({ isEmailOpen: false, emailReportId: null, isSending: false }); onEmailSuccess?.(); },
+      }));
+    covers:
+      - "condition:email_modal_lifecycle"
+      - "condition:delete_modal_lifecycle"
+      - "input:report_target"
+      - "input:email_address"
+      - "output:modal_states"
+
+confidence: 0.96
+confidence_rationale: >
+  Modal store structure, email/delete lifecycles, and callback patterns
+  are directly evidenced in useReportModalsStore.ts. The three-modal
+  design and success callback mechanism are confirmed by the code.
+unresolved_questions:
+  - Whether modals persist state across page navigation.
+  - Exact email validation and sending logic.
+status: complete

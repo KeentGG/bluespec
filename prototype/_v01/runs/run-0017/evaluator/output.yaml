@@ -1,0 +1,67 @@
+run_id: run-0017
+evaluator: evaluator
+status: complete
+provider: sample-project
+
+scored_specs:
+  - id: auth-conditional-redirect
+    recall: 0.00
+    precision: 0.93
+    consistency: 0.91
+    notes: >
+      No golden behavior coverage. The spec is accurate about the generic auth
+      guard and forced-login fallback in authGuard.js:69-95 and
+      authErrorHandler.js:80-160, but the golden behavior requires an edit-route
+      gate conditioned on agreement state from src/routes/project-edit.tsx.
+      The closest live edit-flow code in gate-edit-contract.js:528-636 and
+      useGateEditEntryState.ts:117-170 redirects based on query validation and
+      report progress only; it contains no agreement or TOA branch.
+
+  - id: download-button-visibility
+    recall: 0.20
+    precision: 0.94
+    consistency: 0.94
+    notes: >
+      Weak partial overlap only. The spec accurately documents that
+      ReportsTable.tsx:110-126 always renders ReportSplitActions and that
+      ReportSplitActions.tsx:43-64 always renders a Download button which is
+      disabled until progressPercentage === 100. It also correctly captures the
+      overlay download-link timing in PdfGenerationOverlay.tsx:96-157 and
+      210-225. That is code-accurate, but it does not satisfy the golden set's
+      stricter claim that button visibility itself waits for a separate
+      download-stage gate at src/components/ReportActions.tsx.
+
+  - id: toa-gated-first-report-creation
+    recall: 0.72
+    precision: 0.89
+    consistency: 0.88
+    notes: >
+      Strong partial coverage. The spec directly covers the dashboard-side TOA
+      gate in useReportCreation.ts:48-92, TOA resolution in
+      toa-contract.js:38-174, introduction URL construction in
+      gate-finder.js:349-395, introduction/commitment query rules in
+      query-contract.js:197-327, and /gate/new referrer allowlisting in
+      gate-new-contract.js:25-32 and 248-319. However, the golden behavior also
+      requires calculator-side report creation after TOA acceptance, and the
+      live return-path hook useGateNewEntryState.ts:139-177 still injects a stub
+      createReport object rather than evidencing a real persisted post-acceptance
+      creation call.
+
+overall_score: 0.69
+overall_score_breakdown:
+  recall: 0.31
+  precision: 0.92
+  consistency: 0.91
+
+confidence: 0.86
+confidence_rationale: >
+  Confidence is high because the evaluation is grounded in direct reads of the
+  frozen golden set, all three generated specs, the active rubric snapshot, and
+  the referenced dashboard-v2 source files. Confidence is not higher because two
+  golden evidence refs appear stale or renamed in the live codebase
+  (src/routes/project-edit.tsx and src/components/ReportActions.tsx), forcing
+  comparison against adjacent live implementations, and because the current code
+  still does not show an end-to-end persisted calculator-side report creation
+  after TOA acceptance.
+
+scoring_timestamp: "2026-04-24T00:00:00Z"

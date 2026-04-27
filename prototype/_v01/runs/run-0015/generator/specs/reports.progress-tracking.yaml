@@ -1,0 +1,611 @@
+id: reports.progress-tracking
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: calculator-progress-mapping
+    coverage: full
+    notes: >
+      Fully documented. Each calculator type (VE, DE, VGA, NP) has a dedicated
+      progress resolution function that maps normalized route strings to percentage
+      values. VE uses step-based formula for questionnaire routes (5 + (step-1)*5)
+      plus fixed milestones. DE uses step-based for company-information (5 + (step-1)*8)
+      plus fixed milestones. VGA uses step-based (5 + (step-1)*7) plus fixed milestones.
+      NP uses step-based (5 + (step-1)*7) plus fixed milestones. All calculators
+      recognize optional-questions as 100% complete. Route normalization handles
+      double slashes, trailing slashes, and leading slash enforcement.
+  - id: progress-percentage-calculation
+    coverage: full
+    notes: >
+      Fully documented. resolveCalculatorAwareProgressPercentage() is the public
+      entry point. It validates and normalizes inputs (calculatorId, reportProgress
+      route), dispatches to the appropriate calculator-specific resolver, and returns
+      a structured success/failure result. Four failure modes exist: invalid_payload,
+      invalid_calculator_id, missing_report_progress, unknown_progress. Success
+      returns progressPercentage as an integer 0-100.
+
+description: >
+  Maps calculator-specific routes to progress percentages for display in the
+  dashboard reports table. Each calculator type (VE, DE, VGA, NP) has its own
+  progress resolution logic with unique route-to-percentage mappings. The module
+  exports resolveCalculatorAwareProgressPercentage() which accepts a calculatorId
+  and reportProgress route, normalizes both inputs, dispatches to the correct
+  calculator resolver, and returns a structured result with the progress percentage.
+  Progress percentages are approximate integers (0-100) designed for UI display only.
+  Step-based routes (questionnaire, company-information) use linear formulas; all
+  other routes map to fixed percentage milestones.
+
+state_machine: null
+
+conditions:
+  - id: valid-payload-check
+    description: >
+      The input options must be a non-null, non-array object. Non-object inputs
+      (null, undefined, arrays, primitives) cause immediate failure with
+      invalid_payload reason.
+    trigger: resolveCalculatorAwareProgressPercentage() is called
+    guards:
+      - field: options
+        condition: >
+          typeof options === "object" AND options !== null AND NOT Array.isArray(options)
+    then:
+      - Extract calculatorId and reportProgress from options or nested report object
+    else:
+      - Return failure with action "progress_percentage", reason "invalid_payload"
+
+  - id: valid-calculator-id
+    description: >
+      The calculatorId must be one of the four known calculator IDs (VE, DE, VGA, NP).
+      Numeric values are truncated and stringified before validation. Unknown IDs
+      cause failure with invalid_calculator_id reason.
+    trigger: calculatorId is extracted from input
+    guards:
+      - field: calculatorId
+        condition: >
+          After normalization (number truncation + string conversion + trim),
+          value must exist in VALID_CALCULATOR_ID_SET (VE, DE, VGA, NP)
+    then:
+      - Proceed to route normalization
+    else:
+      - Return failure with action "progress_percentage", reason "invalid_calculator_id"
+
+  - id: valid-report-progress-route
+    description: >
+      The reportProgress route must be a non-empty string starting with "/".
+      Double slashes are collapsed, trailing slashes stripped. Empty or missing
+      routes cause failure with missing_report_progress reason.
+    trigger: reportProgress is extracted from input
+    guards:
+      - field: reportProgress
+        condition: >
+          After normalization: non-empty string, starts with "/", double slashes
+          collapsed, trailing slashes stripped (except root "/")
+    then:
+      - Dispatch to calculator-specific progress resolver
+    else:
+      - Return failure with action "progress_percentage", reason "missing_report_progress"
+
+  - id: recognized-route-for-calculator
+    description: >
+      The normalized route must be recognized by the calculator-specific resolver.
+      Each calculator has a fixed set of known routes and step-based patterns.
+      Unrecognized routes cause failure with unknown_progress reason.
+    trigger: Calculator-specific resolver is invoked with normalized route
+    guards:
+      - field: route
+        condition: >
+          Route matches a known fixed path OR matches a step-based regex pattern
+          for the given calculator type
+    then:
+      - Return success with resolved progressPercentage
+    else:
+      - Return failure with action "progress_percentage", reason "unknown_progress"
+
+  - id: ve-step-calculation
+    description: >
+      VE calculator uses linear step formula for questionnaire routes:
+      progress = 5 + (step - 1) * 5, clamped to 0-100. Step 1 = 5%, step 5 = 25%,
+      step 10 = 50%.
+    trigger: VE resolver receives a route matching /questionnaire/N
+    guards:
+      - field: route
+        condition: Matches regex /^\/questionnaire\/(\d+)(?:\/|$)/
+    then:
+      - Calculate percentage as 5 + (stepNumber - 1) * 5, clamped to 0-100
+    else:
+      - Check fixed VE milestones
+
+  - id: de-step-calculation
+    description: >
+      DE calculator uses linear step formula for company-information routes:
+      progress = 5 + (step - 1) * 8, clamped to 0-100. Step 1 = 5%, step 7 = 53%.
+    trigger: DE resolver receives a route matching /company-information/N
+    guards:
+      - field: route
+        condition: Matches regex /^\/company-information\/(\d+)(?:\/|$)/
+    then:
+      - Calculate percentage as 5 + (stepNumber - 1) * 8, clamped to 0-100
+    else:
+      - Check fixed DE milestones
+
+  - id: vga-step-calculation
+    description: >
+      VGA calculator uses linear step formula for company-information routes:
+      progress = 5 + (step - 1) * 7, clamped to 0-100. Step 1 = 5%, step 14 = 91%.
+    trigger: VGA resolver receives a route matching /company-information/N
+    guards:
+      - field: route
+        condition: Matches regex /^\/company-information\/(\d+)(?:\/|$)/
+    then:
+      - Calculate percentage as 5 + (stepNumber - 1) * 7, clamped to 0-100
+    else:
+      - Check fixed VGA milestones
+
+  - id: np-step-calculation
+    description: >
+      NP calculator uses linear step formula for company-information routes:
+      progress = 5 + (step - 1) * 7, clamped to 0-100. Step 1 = 5%, step 14 = 91%.
+    trigger: NP resolver receives a route matching /company-information/N
+    guards:
+      - field: route
+        condition: Matches regex /^\/company-information\/(\d+)(?:\/|$)/
+    then:
+      - Calculate percentage as 5 + (stepNumber - 1) * 7, clamped to 0-100
+    else:
+      - Check fixed NP milestones
+
+  - id: optional-questions-completion
+    description: >
+      All four calculators treat any route containing "optional-questions" as
+      100% complete. This is checked via route.includes("optional-questions")
+      before most fixed milestone checks.
+    trigger: Any calculator resolver receives a route
+    guards:
+      - field: route
+        condition: route.includes("optional-questions")
+    then:
+      - Return 100%
+    else:
+      - Continue to other milestone checks
+
+inputs:
+  - id: calculatorId
+    type: "string or number"
+    source: "caller argument to resolveCalculatorAwareProgressPercentage()"
+    required: true
+    validation:
+      type_coercion: >
+        Numbers are truncated via Math.trunc() and stringified. Non-finite
+        numbers (NaN, Infinity) are rejected.
+      normalization: >
+        Passed through normalizeOptionalString utility. Must be one of:
+        VE, DE, VGA, NP (from CALCULATOR_IDS constant).
+      fallback: >
+        Can also be extracted from options.report.calculatorId if not
+        directly provided.
+
+  - id: reportProgress
+    type: "string route path"
+    source: "caller argument to resolveCalculatorAwareProgressPercentage()"
+    required: true
+    validation:
+      format: "Must start with /"
+      normalization: >
+        Passed through normalizeOptionalString utility. Double slashes
+        collapsed to single. Trailing slashes stripped (except root "/").
+      fallback: >
+        Can also be extracted from options.report.reportProgress if not
+        directly provided.
+
+outputs:
+  - id: progress_result_success
+    type: "object { ok: true, action, reason, progressPercentage, calculatorId, reportProgress }"
+    destination: "returned by resolveCalculatorAwareProgressPercentage()"
+    lifespan: "immediate (no side effects, pure function)"
+  - id: progress_result_failure
+    type: "object { ok: false, action, reason, progressPercentage: 0, calculatorId, reportProgress }"
+    destination: "returned by resolveCalculatorAwareProgressPercentage()"
+    lifespan: "immediate (no side effects, pure function)"
+
+evidence_refs:
+  - path: src/shared/lib/routing/report-route-progress-contract.js
+    snippet: |
+      export function resolveCalculatorAwareProgressPercentage(options = {}) {
+        const input = resolveReportProgressInput(options);
+        if (!input) {
+          return createFailure("progress_percentage", "invalid_payload", {
+            progressPercentage: 0,
+            calculatorId: null,
+            reportProgress: null,
+          });
+        }
+
+        const calculatorId = normalizeCalculatorId(input.calculatorId);
+        if (!calculatorId) {
+          return createFailure("progress_percentage", "invalid_calculator_id", {
+            progressPercentage: 0,
+            calculatorId: null,
+            reportProgress: null,
+          });
+        }
+
+        const reportProgress = normalizeProgressRoute(input.reportProgress);
+        if (!reportProgress) {
+          return createFailure("progress_percentage", "missing_report_progress", {
+            progressPercentage: 0,
+            calculatorId,
+            reportProgress: null,
+          });
+        }
+
+        const progressPercentage = resolveProgressPercentageByCalculatorId(calculatorId, reportProgress);
+        if (progressPercentage === null) {
+          return createFailure("progress_percentage", "unknown_progress", {
+            progressPercentage: 0,
+            calculatorId,
+            reportProgress,
+          });
+        }
+
+        return createSuccess("progress_percentage", "progress_percentage_resolved", {
+          progressPercentage,
+          calculatorId,
+          reportProgress,
+        });
+      }
+    covers:
+      - "condition:valid-payload-check"
+      - "condition:valid-calculator-id"
+      - "condition:valid-report-progress-route"
+      - "condition:recognized-route-for-calculator"
+      - "output:progress_result_success"
+      - "output:progress_result_failure"
+    line_range:
+      start: 325
+      end: 367
+
+  - path: src/shared/lib/routing/report-route-progress-contract.js
+    snippet: |
+      function resolveReportProgressInput(options = {}) {
+        if (!options || typeof options !== "object" || Array.isArray(options)) {
+          return null;
+        }
+
+        const report =
+          options.report && typeof options.report === "object" && !Array.isArray(options.report)
+            ? options.report
+            : null;
+
+        return {
+          calculatorId: options.calculatorId ?? report?.calculatorId ?? null,
+          reportProgress: options.reportProgress ?? report?.reportProgress ?? null,
+        };
+      }
+    covers:
+      - "condition:valid-payload-check"
+      - "input:calculatorId"
+      - "input:reportProgress"
+    line_range:
+      start: 97
+      end: 111
+
+  - path: src/shared/lib/routing/report-route-progress-contract.js
+    snippet: |
+      function normalizeCalculatorId(value) {
+        if (typeof value === "number" && Number.isFinite(value)) {
+          value = String(Math.trunc(value));
+        }
+
+        const normalized = normalizeString(value);
+        if (!normalized) {
+          return null;
+        }
+
+        return VALID_CALCULATOR_ID_SET.has(normalized) ? normalized : null;
+      }
+    covers:
+      - "condition:valid-calculator-id"
+      - "input:calculatorId"
+    line_range:
+      start: 38
+      end: 49
+
+  - path: src/shared/lib/routing/report-route-progress-contract.js
+    snippet: |
+      function normalizeProgressRoute(value) {
+        const normalized = normalizeString(value);
+        if (!normalized || !normalized.startsWith("/")) {
+          return null;
+        }
+
+        let route = normalized.replace(/\/{2,}/g, "/");
+        if (route.length > 1 && route.endsWith("/")) {
+          route = route.slice(0, -1);
+        }
+
+        return route;
+      }
+    covers:
+      - "condition:valid-report-progress-route"
+      - "input:reportProgress"
+    line_range:
+      start: 51
+      end: 63
+
+  - path: src/shared/lib/routing/report-route-progress-contract.js
+    snippet: |
+      function resolveVeProgressPercentage(route) {
+        const questionnaireStep = toStepNumber(route, /^\/questionnaire\/(\d+)(?:\/|$)/);
+        if (questionnaireStep !== null) {
+          return clampPercent(5 + (questionnaireStep - 1) * 5);
+        }
+
+        if (route.startsWith("/add-period")) {
+          return 50;
+        }
+
+        if (route === "/income-statement") {
+          return 60;
+        }
+
+        if (route === "/customize-report-1") {
+          return 70;
+        }
+
+        if (route === "/industry-data") {
+          return 76;
+        }
+
+        if (route === "/customize-report-2") {
+          return 82;
+        }
+
+        if (route === "/choose-multiplier") {
+          return 88;
+        }
+
+        if (route === "/your-information") {
+          return 94;
+        }
+
+        if (
+          route === "/value-estimate" ||
+          route === "/thankyou" ||
+          route.includes("optional-questions")
+        ) {
+          return 100;
+        }
+
+        return null;
+      }
+    covers:
+      - "condition:ve-step-calculation"
+      - "condition:optional-questions-completion"
+      - "condition:recognized-route-for-calculator"
+    line_range:
+      start: 113
+      end: 156
+
+  - path: src/shared/lib/routing/report-route-progress-contract.js
+    snippet: |
+      function resolveDeProgressPercentage(route) {
+        const companyInformationStep = toStepNumber(route, /^\/company-information\/(\d+)(?:\/|$)/);
+        if (companyInformationStep !== null) {
+          return clampPercent(5 + (companyInformationStep - 1) * 8);
+        }
+
+        // Optional questions appear after download page - treat as 100% complete
+        if (route.includes("optional-questions")) {
+          return 100;
+        }
+
+        if (route.startsWith("/add-period")) {
+          return 60;
+        }
+
+        if (route.includes("adjustment-categories")) {
+          return 60;
+        }
+
+        if (
+          route === "/income-statement" ||
+          route === "/income-statement/summary" ||
+          route === "/inc-statement/summary"
+        ) {
+          return 70;
+        }
+
+        if (route === "/customize-report-3") {
+          return 78;
+        }
+
+        if (route === "/company-logo") {
+          return 84;
+        }
+
+        if (route === "/average") {
+          return 90;
+        }
+
+        if (route === "/summary" || route === "/thankyou") {
+          return 100;
+        }
+
+        return null;
+      }
+    covers:
+      - "condition:de-step-calculation"
+      - "condition:optional-questions-completion"
+      - "condition:recognized-route-for-calculator"
+    line_range:
+      start: 158
+      end: 202
+
+  - path: src/shared/lib/routing/report-route-progress-contract.js
+    snippet: |
+      function resolveVgaProgressPercentage(route) {
+        const companyInformationStep = toStepNumber(route, /^\/company-information\/(\d+)(?:\/|$)/);
+        if (companyInformationStep !== null) {
+          return clampPercent(5 + (companyInformationStep - 1) * 7);
+        }
+
+        // Optional questions appear after download page - treat as 100% complete
+        if (route.includes("optional-questions")) {
+          return 100;
+        }
+
+        if (route.startsWith("/adjustment-categories")) {
+          return 56;
+        }
+
+        if (route === "/input-review") {
+          return 45;
+        }
+
+        if (route === "/customize-report-1") {
+          return 78;
+        }
+
+        if (route === "/company-logo") {
+          return 84;
+        }
+
+        if (route === "/average") {
+          return 90;
+        }
+
+        if (
+          route === "/summary" ||
+          route === "/thankyou" ||
+          route === "/value-estimate" ||
+          route === "/net-worth-allocation"
+        ) {
+          return 100;
+        }
+
+        return null;
+      }
+    covers:
+      - "condition:vga-step-calculation"
+      - "condition:optional-questions-completion"
+      - "condition:recognized-route-for-calculator"
+    line_range:
+      start: 204
+      end: 245
+
+  - path: src/shared/lib/routing/report-route-progress-contract.js
+    snippet: |
+      function resolveNpProgressPercentage(route) {
+        const companyInformationStep = toStepNumber(route, /^\/company-information\/(\d+)(?:\/|$)/);
+        if (companyInformationStep !== null) {
+          return clampPercent(5 + (companyInformationStep - 1) * 7);
+        }
+
+        // Optional questions appear after download page - treat as 100% complete
+        if (route.includes("optional-questions")) {
+          return 100;
+        }
+
+        if (route.startsWith("/adjustment-categories")) {
+          return 55;
+        }
+
+        if (route === "/assumption-summary") {
+          return 45;
+        }
+
+        if (route === "/customize-report-1") {
+          return 72;
+        }
+
+        if (route === "/company-logo") {
+          return 78;
+        }
+
+        if (route === "/average") {
+          return 84;
+        }
+
+        if (route === "/summary") {
+          return 90;
+        }
+
+        if (route === "/chart") {
+          return 94;
+        }
+
+        if (route === "/working-capital") {
+          return 96;
+        }
+
+        if (route === "/ordinary-vs-cap-gains") {
+          return 97;
+        }
+
+        if (route === "/purchase-price-allocation") {
+          return 98;
+        }
+
+        if (route === "/net-proceeds-overview" || route === "/thankyou" || route === "/value-estimate") {
+          return 100;
+        }
+
+        return null;
+      }
+    covers:
+      - "condition:np-step-calculation"
+      - "condition:optional-questions-completion"
+      - "condition:recognized-route-for-calculator"
+    line_range:
+      start: 247
+      end: 303
+
+  - path: src/shared/lib/routing/report-route-progress-contract.js
+    snippet: |
+      function clampPercent(value) {
+        return Math.max(0, Math.min(100, Math.round(value)));
+      }
+
+      function toStepNumber(route, expression) {
+        const matched = route.match(expression);
+        if (!matched) {
+          return null;
+        }
+
+        const raw = Number.parseInt(matched[1], 10);
+        return Number.isFinite(raw) && raw > 0 ? raw : null;
+      }
+    covers:
+      - "condition:ve-step-calculation"
+      - "condition:de-step-calculation"
+      - "condition:vga-step-calculation"
+      - "condition:np-step-calculation"
+    line_range:
+      start: 65
+      end: 77
+
+confidence: 0.92
+confidence_rationale: >
+  All behavior is fully contained in a single 367-line pure-function module with
+  no external dependencies beyond CALCULATOR_IDS constant and normalizeString utility.
+  Every code path is visible: four calculator-specific resolvers with explicit
+  route-to-percentage mappings, input normalization with type coercion, structured
+  success/failure return format, and step-based linear formulas for multi-page
+  routes. The only uncertainties (0.08 deducted) are: (1) the CALCULATOR_IDS
+  constant values are imported from another module and not visible here — assumed
+  to be string IDs "VE", "DE", "VGA", "NP" based on usage patterns, (2) the
+  normalizeString utility behavior is not visible — assumed to trim and lowercase,
+  (3) callers of this module are not visible — unknown which components consume
+  the progress percentage, (4) whether CALCULATOR_IDS values are exactly the
+  strings used in comparisons or could be numeric — the normalizeCalculatorId
+  function handles both cases suggesting they might be numeric in some contexts.
+
+unresolved_questions:
+  - "What are the exact values of CALCULATOR_IDS imported from @/shared/constants/calculators? Are they strings ('VE') or numbers?"
+  - "What does normalizeOptionalString (aliased as normalizeString) do exactly? Does it trim, lowercase, or handle other transformations?"
+  - "Which components or pages call resolveCalculatorAwareProgressPercentage()? Is it used in the reports table component or elsewhere?"
+  - "Are there any routes not covered by the current mapping that could be passed in, and how should they be handled (return null vs default percentage)?"
+  - "Is the progress percentage used for anything beyond display (e.g., gating completion, analytics tracking)?"
+
+status: complete

@@ -1,0 +1,42 @@
+spec_files:
+  - auth.login.yaml
+  - auth.signup.yaml
+  - auth.session-persistence.yaml
+  - auth.token-refresh.yaml
+  - auth.route-protection.yaml
+  - auth.error-handling.yaml
+  - auth.cross-tab-sync.yaml
+  - auth.csrf-protection.yaml
+  - auth.logout.yaml
+  - auth.password-reset.yaml
+  - auth.middleware-silent-refresh.yaml
+  - auth.toa-guard.yaml
+  - stateful-ui.reports-list-filter-state.yaml
+  - stateful-ui.report-action-loading-state.yaml
+  - stateful-ui.create-report-modal-state.yaml
+  - stateful-ui.pdf-download-state.yaml
+  - stateful-ui.company-page-state.yaml
+  - stateful-ui.company-modals.yaml
+  - stateful-ui.company-form-state.yaml
+  - stateful-ui.reports-page-controller.yaml
+  - stateful-ui.report-row-controller.yaml
+  - stateful-ui.report-modals.yaml
+  - stateful-ui.dashboard-shell-state.yaml
+  - stateful-ui.auth-redirect-state.yaml
+  - stateful-ui.user-data-query.yaml
+  - stateful-ui.business-selection-persistence.yaml
+  - stateful-ui.gate-entry-state-machines.yaml
+  - stateful-ui.swr-query-layer.yaml
+summary: >
+  Drafted 28 behavioral specifications for auth_flow (12) and stateful_ui (16)
+  behaviors. Auth specs cover login, signup, session persistence, token refresh,
+  route protection, error handling, cross-tab sync, CSRF protection, logout,
+  password reset, middleware silent refresh, and TOA guard. Stateful UI specs
+  cover reports list filter state, report action loading, create report modal,
+  PDF download state machine, company page state, company modals, company form,
+  reports page controller, report row controller, report modals, dashboard
+  shell, auth redirect, user data query, business selection persistence, gate
+  entry state machines, and SWR query layer. Each spec includes state machines
+  where applicable, conditions, inputs/outputs, evidence references from the
+  dashboard-v2 codebase, and confidence scores. Specs follow the schema at
+  schemas/spec.schema.yaml and are written to runs/run-0019/generator/specs/.

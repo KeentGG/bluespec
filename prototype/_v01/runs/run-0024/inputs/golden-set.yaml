@@ -1,0 +1,43 @@
+project_id: sample-project
+ecosystem: frontend
+behaviors:
+  - id: auth-conditional-redirect
+    description: editing project routes through a gated edit flow only when
+      agreement state is satisfied
+    priority: high
+    category: conditional_flow
+    evidence_refs:
+      - src/routes/project-edit.tsx
+  - id: download-button-visibility
+    description: download button becomes visible only after report progress reaches
+      the download stage
+    priority: high
+    category: state_dependent_visibility
+    evidence_refs:
+      - src/components/ReportActions.tsx
+  - id: toa-gated-first-report-creation
+    description: >
+      For newly registered accounts with no TOA (Terms of Agreement) check and
+      no existing reports, any first report creation is deferred -- the
+      dashboard does NOT persist the report until TOA is accepted. Instead, the
+      calculator handles report creation on the specified company and report
+      name after the user completes the TOA introduction/commitment flow. The
+      dashboard redirects to the calculator introduction page with businessId
+      and reportName as query params, and the calculator creates the report
+      post-TOA-acceptance.
+    priority: high
+    category: conditional_flow
+    evidence_refs:
+      - src/features/auth/contracts/toa-contract.js
+      - src/features/reports/hooks/useReportCreation.ts
+      - src/shared/lib/routing/gate-new-contract.js
+  - id: auth.login
+    description: Handles user authentication via email and password submission. The
+      login form validates input fields, prevents duplicate submissions during
+      loading, and processes the authentication response. On succe
+    priority: high
+    category: ai_discovered
+    evidence_refs: []
+    source: ai_discovered
+    discovered_in_run: run-0019
+    approved_at: 2026-04-26T09:42:10.274Z

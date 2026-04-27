@@ -1,0 +1,25 @@
+spec_id: reports.progress-tracking
+output_path: runs/run-0015/generator/specs/reports.progress-tracking.yaml
+discovered_behaviors:
+  - id: calculator-progress-mapping
+    description: Map calculator-specific routes to progress percentages for reports table display
+    priority: high
+    evidence_refs:
+      - src/shared/lib/routing/report-route-progress-contract.js
+  - id: progress-percentage-calculation
+    description: Calculate progress percentage based on calculator type and current route
+    priority: medium
+    evidence_refs:
+      - src/shared/lib/routing/report-route-progress-contract.js
+source_files:
+  - src/shared/lib/routing/report-route-progress-contract.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - Each calculator has unique progress milestones
+  - VE: questionnaire steps 5-25%, income-statement 60%, report 100%
+  - DE: company-information steps 5-53%, summary 100%
+  - VGA: company-information steps 5-91%, summary 100%
+  - NP: company-information steps 5-91%, chart 94%, report 100%
+  - Progress percentages are approximate for UI display only
+  - Used in reports table to show completion status

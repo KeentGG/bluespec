@@ -1,0 +1,68 @@
+run_id: "run-0010"
+analyzer: "run_analyzer"
+status: "complete"
+provider: "task-agent"
+primary_failure_type: "rubric_gap_failure"
+diagnosis: >
+  The generator found the relevant auth and reports files and the formula already
+  asked for predicate-level conditional-flow distinctions. It still produced
+  code-faithful partial specs, but the evaluator missed recall because the current
+  rubric only has broad `golden_set_recall` / `conditional_flow_documentation` coverage and
+  no explicit criterion for stale-golden route-boundary drift (edit vs create-report)
+  or predicate-level visibility distinctions (hidden vs visible-disabled vs
+  visible-enabled). That leaves both misses outside the active rubric, so this is a
+  rubric gap rather than a search, recognition, format, or prompt failure.
+failure_tier: "rubric_mutation"
+suggested_mutation: >
+  Add explicit rubric criteria for (1) stale-golden route-boundary mismatches in
+  conditional flows and (2) predicate-level control visibility differences, with
+  partial-credit language for specs that accurately document live behavior but do not
+  mirror stale golden wording.
+expected_effect: >
+  Future evaluations would separate code-faithful partial specs from genuine recall
+  misses and stop penalizing route-boundary or visibility-predicate drift with only
+  broad golden recall scoring.
+rubric_gap_proposed: true
+rubric_gap_proposal:
+  source: "evaluator"
+  source_run: "run-0010"
+  evaluator_score: 0.76
+  recall_misses_triggered:
+    - spec_id: "auth.conditional-redirect.yaml"
+      golden_behavior_id: "auth-conditional-redirect"
+      gap_id: "stale_golden_vs_observed_route_flow"
+      explanation: >
+        The generated spec captures TOA gating on create-report and ordinary edit
+        handoff separately, but the rubric does not have a specific axis for when the
+        golden names the wrong flow boundary.
+    - spec_id: "reports.download-button-visibility.yaml"
+      golden_behavior_id: "download-button-visibility"
+      gap_id: "predicate_level_visibility_distinction"
+      explanation: >
+        The generated spec captures visible-disabled vs visible-enabled download
+        states, but the rubric does not have a specific axis for hidden-vs-disabled
+        visibility semantics.
+  proposed_criteria:
+    - id: "stale_golden_vs_observed_route_flow"
+      description: "Score when the golden points at the wrong flow boundary even though the spec correctly documents the observed route logic."
+      rationale: "Prevents penalizing specs that are faithful to live code but diverge from stale golden wording."
+    - id: "predicate_level_visibility_distinction"
+      description: "Score hidden, visible-disabled, and visible-enabled control states as distinct predicates."
+      rationale: "Prevents collapsing visibility semantics into a single enabled/disabled check."
+  note: "Proposed only; governance decides whether to activate these criteria."
+evidence_refs:
+  - "runs/run-0010/evaluator/output.yaml"
+  - "runs/run-0010/generator/output.yaml"
+  - "runs/run-0010/generator/specs/auth.conditional-redirect.yaml"
+  - "runs/run-0010/generator/specs/reports.download-button-visibility.yaml"
+  - "runs/run-0010/inputs/formula.yaml"
+  - "runs/run-0010/inputs/rubric.yaml"
+  - "prompts/shared/failure-types.md"
+confidence: 0.91
+confidence_rationale: >
+  The formula already asked for predicate-level distinctions, the generated specs are
+  internally coherent and evidence-backed, and the evaluator's own rubric_gap
+  candidates line up with the exact miss patterns. Remaining uncertainty is limited to
+  how much governance wants to treat the stale golden wording itself as the source of
+  truth.
+analyzer_timestamp: "2026-04-22T08:15:21Z"

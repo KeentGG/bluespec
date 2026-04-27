@@ -1,0 +1,298 @@
+id: download.button-visibility
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: download-button-visibility
+    coverage: full
+    notes: >
+      The golden behavior states the button "becomes visible only after" reaching
+      the download stage. The actual implementation always renders the button but
+      disables it (gray styling, cursor-not-allowed, explanatory title) when
+      progressPercentage < 100. The functional intent—preventing download until
+      the report is complete—is fully covered, but the mechanism is disablement
+      rather than conditional rendering.
+
+description: >
+  The Download button in the report actions toolbar is enabled only when the
+  report progress percentage equals 100. When progress is below 100, the button
+  remains visible but is disabled with gray styling and an explanatory tooltip.
+  When a download is actively in progress, the button shows a loading spinner
+  and remains disabled. The 100% progress threshold is defined per calculator
+  type by mapping the user's current route to a progress percentage; final
+  routes such as /report, /summary, /value-estimate, /thankyou, and
+  /net-proceeds-overview yield 100%.
+
+state_machine:
+  initial: disabled_incomplete
+  states:
+    - id: disabled_incomplete
+      description: >
+        Report progress is below 100%. The Download button is rendered but
+        disabled with gray background, cursor-not-allowed, and a title tooltip
+        explaining that the report must be 100% complete.
+    - id: enabled
+      description: >
+        Report progress is exactly 100% and no download is in progress. The
+        Download button is active with brand-primary styling and accepts clicks.
+    - id: disabled_downloading
+      description: >
+        A download is actively in progress for this report. The button is
+        disabled, shows a loading spinner, and displays "Downloading..." text.
+  transitions:
+    - id: progress_reaches_100
+      from: disabled_incomplete
+      to: enabled
+      trigger: progressPercentage prop changes to 100
+      guards:
+        - field: progressPercentage
+          condition: progressPercentage === 100
+      effects:
+        - Button styling changes from bg-gray-400 to bg-brand-primary
+        - Button title changes from restriction message to "Download report"
+        - disabled attribute becomes false
+    - id: download_starts
+      from: enabled
+      to: disabled_downloading
+      trigger: User clicks the Download button and onDownload initiates download
+      guards:
+        - field: isDownloading
+          condition: isDownloading becomes true
+      effects:
+        - Button text changes to "Downloading..." with spinner icon
+        - Button remains disabled
+    - id: download_completes
+      from: disabled_downloading
+      to: enabled
+      trigger: PDF generation/download finishes
+      guards:
+        - field: isDownloading
+          condition: isDownloading becomes false
+      effects:
+        - Button text reverts to "Download"
+        - Button becomes enabled again
+    - id: progress_drops
+      from: enabled
+      to: disabled_incomplete
+      trigger: progressPercentage prop decreases below 100
+      guards:
+        - field: progressPercentage
+          condition: progressPercentage < 100
+      effects:
+        - Button styling reverts to bg-gray-400
+        - disabled attribute becomes true
+
+conditions:
+  - id: can_download
+    description: Determines whether the report is complete enough to allow download
+    trigger: Component receives progressPercentage prop
+    guards:
+      - field: progressPercentage
+        condition: progressPercentage === 100
+    then:
+      - canDownload flag is set to true
+    else:
+      - canDownload flag is set to false
+  - id: button_clickable
+    description: Determines whether the Download button is interactive
+    trigger: Component re-renders with updated props
+    guards:
+      - field: canDownload
+        condition: canDownload === true
+      - field: isDownloading
+        condition: isDownloading === false
+    then:
+      - Button is not disabled
+      - Button uses bg-brand-primary hover:bg-brand-primary-hover styling
+    else:
+      - Button is disabled
+      - Button uses bg-gray-400 cursor-not-allowed styling
+
+inputs:
+  - id: progressPercentage
+    type: number (integer 0-100)
+    source: Parent component (computed via report-route-progress-contract from the report's last visited calculator route)
+    required: true
+    validation:
+      range: "0 <= progressPercentage <= 100"
+  - id: isDownloading
+    type: boolean
+    source: Parent component (derived from useReportActionStore per-report downloading state)
+    required: false
+    validation:
+      default: "false"
+  - id: onDownload
+    type: "(event: React.MouseEvent<HTMLButtonElement>) => void"
+    source: Parent component (provided by useReportActions hook)
+    required: true
+
+outputs:
+  - id: button_ui_state
+    type: Visual DOM state (enabled/disabled/loading)
+    destination: Browser rendering of the Download button
+    lifespan: immediate (recomputed on every render)
+  - id: download_trigger
+    type: React.MouseEvent callback invocation
+    destination: onDownload handler -> useReportActions.download -> useDownloadStore.startDownload
+    lifespan: immediate (fires on click when enabled)
+  - id: accessibility_title
+    type: string tooltip
+    destination: Button title attribute
+    lifespan: immediate
+
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportSplitActions.tsx
+    snippet: |
+      const canDownload = progressPercentage === 100;
+
+      return (
+        <div className="inline-flex items-stretch rounded-md overflow-visible shadow-sm">
+          <button
+            type="button"
+            onClick={onDownload}
+            disabled={isDownloading || !canDownload}
+            title={canDownload ? "Download report" : "Report must be 100% complete to download"}
+            className={`h-8 px-3 text-white text-[12px] font-medium transition-colors rounded-l-md cursor-pointer flex items-center gap-1 ${
+              isDownloading || !canDownload
+                ? "bg-gray-400 cursor-not-allowed"
+                : "bg-brand-primary hover:bg-brand-primary-hover"
+            }`}
+          >
+            {isDownloading ? (
+              <>
+                <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                  ...
+                </svg>
+                Downloading...
+              </>
+            ) : (
+              "Download"
+            )}
+          </button>
+    covers:
+      - condition: can_download
+      - condition: button_clickable
+      - transition: progress_reaches_100
+      - transition: download_starts
+      - transition: download_completes
+      - input: progressPercentage
+      - input: isDownloading
+      - input: onDownload
+      - output: button_ui_state
+      - output: accessibility_title
+    line_range:
+      start: 34
+      end: 71
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/report-route-progress-contract.js
+    snippet: |
+      if (
+        route === "/value-estimate" ||
+        route === "/thankyou" ||
+        route.includes("optional-questions")
+      ) {
+        return 100;
+      }
+      ...
+      if (route === "/summary" || route === "/thankyou") {
+        return 100;
+      }
+      ...
+      if (
+        route === "/summary" ||
+        route === "/thankyou" ||
+        route === "/value-estimate" ||
+        route === "/net-worth-allocation"
+      ) {
+        return 100;
+      }
+      ...
+      if (route === "/net-proceeds-overview" || route === "/thankyou" || route === "/value-estimate") {
+        return 100;
+      }
+    covers:
+      - condition: can_download
+      - input: progressPercentage
+    line_range:
+      start: 147
+      end: 299
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/store/useReportActionStore.ts
+    snippet: |
+      interface ReportActionState {
+        downloading: Record<string, boolean>;
+        ...
+        setDownloading: (reportId: string, isLoading: boolean) => void;
+        isDownloading: (reportId: string) => boolean;
+        ...
+      }
+
+      export const useReportActionStore = create<ReportActionState>((set, get) => ({
+        downloading: {},
+        ...
+        setDownloading: (reportId, isLoading) =>
+          set((state) => ({
+            downloading: { ...state.downloading, [reportId]: isLoading },
+          })),
+        isDownloading: (reportId) => !!get().downloading[reportId],
+        ...
+      }));
+    covers:
+      - input: isDownloading
+      - transition: download_starts
+      - transition: download_completes
+    line_range:
+      start: 1
+      end: 61
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportActions.ts
+    snippet: |
+      const handleDownloadReport = useCallback(
+        async (params: { reportId: string; calculatorId: string }) => {
+          const { reportId, calculatorId } = params;
+
+          try {
+            const token = getToken();
+            const success = await startDownload({
+              userId: token?._id,
+              reportId,
+              cid: calculatorId || "1",
+            });
+
+            if (!success) {
+              toast.error("Failed to start PDF generation.");
+            }
+
+            return { success };
+          } catch (err: any) {
+            toast.error(err.message || "PDF generation failed.");
+            return { success: false };
+          }
+        },
+        [startDownload]
+      );
+    covers:
+      - output: download_trigger
+    line_range:
+      start: 127
+      end: 150
+
+confidence: 0.95
+confidence_rationale: >
+  The core disablement logic (progressPercentage === 100) and visual states are
+  explicitly confirmed in ReportSplitActions.tsx. The route-to-percentage mapping
+  that defines 100% is confirmed across all four calculator types in
+  report-route-progress-contract.js. The per-report downloading state tracking
+  is confirmed in useReportActionStore.ts. The download action handler is
+  confirmed in useReportActions.ts. Two small uncertainties: (1) the exact
+  parent component that wires progressPercentage into ReportSplitActions was
+  not in the provided source files, though the contract confirms how it is
+  computed; (2) the useDownloadStore.startDownload implementation was not in
+  the provided files, though its interface is used. These do not materially
+  affect the button-visibility specification.
+
+unresolved_questions:
+  - Which parent component (reports table row, card, etc.) computes progressPercentage via resolveCalculatorAwareProgressPercentage and passes it into ReportSplitActions as a prop?
+  - How does useDownloadStore.startDownload set the per-report isDownloading flag in useReportActionStore, and where is the download completion signal that clears it?
+
+status: complete

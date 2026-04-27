@@ -1,0 +1,31 @@
+spec_id: qfm.rollback-gate
+output_path: runs/run-0015/generator/specs/qfm.rollback-gate.yaml
+discovered_behaviors:
+  - id: rollback-threshold-monitor
+    description: Error-rate monitor tracking 4 channels: mutation, handoff, PDF, storage with threshold breach detection
+    priority: high
+    evidence_refs:
+      - src/shared/lib/qfm/rollbackGate.js
+  - id: rollback-automatic-activation
+    description: Automatic rollback to v1 dashboard when error rates breach thresholds in 2 consecutive windows
+    priority: high
+    evidence_refs:
+      - src/shared/lib/qfm/rollbackGate.js
+  - id: rollback-manual-override
+    description: Manual rollback override via NEXT_PUBLIC_DASHBOARD_PARITY_ROLLBACK environment variable
+    priority: medium
+    evidence_refs:
+      - src/shared/lib/qfm/rollbackGate.js
+source_files:
+  - src/shared/lib/qfm/rollbackGate.js
+  - src/shared/lib/contracts/storage-contract.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - Rollback gate monitors error rates across 4 channels
+  - Threshold breach detection with sustained breach (2 consecutive windows)
+  - Automatic redirect to v1 dashboard when rollback activated
+  - Manual override via environment variable
+  - Preserved storage keys during rollback
+  - Legacy dashboard URL configurable via environment
+  - Rollback state persisted to localStorage

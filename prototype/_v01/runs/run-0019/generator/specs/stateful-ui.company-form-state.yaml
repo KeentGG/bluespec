@@ -1,0 +1,119 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.company-form-state
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.company_form_state
+    coverage: full
+    notes: >
+      Company form state manages submission loading, logo upload changes,
+      drag-and-drop state, and logo error tracking. Form submission is
+      guarded by loading state to prevent duplicates.
+
+description: >
+  Manages company form state for add/edit workflows. Tracks submission
+  loading to prevent duplicate requests, logo upload changes for dirty
+  detection, drag-and-drop state for logo upload UI, and logo error
+  tracking for validation feedback.
+
+state_machine: null
+
+conditions:
+  - id: is_submitting
+    description: >
+      Tracks whether form submission is in progress. Prevents duplicate
+      submissions and disables form controls during submission.
+    trigger: Form is submitted.
+    guards:
+      - field: isSubmitting
+        condition: isSubmitting is false.
+    then:
+      - Set isSubmitting to true.
+      - Submit form data.
+      - Set isSubmitting to false on completion.
+    else:
+      - Prevent duplicate submission.
+
+  - id: has_logo_changes
+    description: >
+      Tracks whether logo-related fields have been modified. Used for
+      dirty form detection and change submission logic.
+    trigger: Logo field is modified.
+    guards:
+      - field: logo_changes
+        condition: hasLogoChanges() returns true.
+    then:
+      - Include logo in form submission.
+    else:
+      - Skip logo in submission.
+
+  - id: is_dragging
+    description: >
+      Tracks drag-and-drop state for logo upload UI. Shows visual
+      feedback when file is being dragged over the drop zone.
+    trigger: File drag events on logo upload area.
+    guards:
+      - field: drag_state
+        condition: isDragging is true.
+    then:
+      - Show drag-over visual feedback.
+    else:
+      - Show normal upload state.
+
+  - id: logo_error
+    description: >
+      Tracks logo validation errors (file type, size, etc.). Shows
+      error message to user for invalid uploads.
+    trigger: Logo validation fails.
+    guards:
+      - field: logo_error
+        condition: logoError is non-empty.
+    then:
+      - Display error message.
+    else:
+      - Clear error display.
+
+inputs:
+  - id: form_data
+    type: "company form fields"
+    source: Form input fields
+    required: true
+
+  - id: logo_file
+    type: File or null
+    source: Logo upload input
+    required: false
+
+outputs:
+  - id: form_state
+    type: "isSubmitting, hasLogoChanges, isDragging, logoError"
+    destination: Company form component
+    lifespan: form lifetime
+
+evidence_refs:
+  - path: src/features/company/components/CompanyForm.tsx
+    snippet: |
+      const [isSubmitting, setIsSubmitting] = useState(false);
+      const [logoChanges, setLogoChanges] = useState(false);
+      const [isDragging, setIsDragging] = useState(false);
+      const [logoError, setLogoError] = useState("");
+    covers:
+      - "condition:is_submitting"
+      - "condition:has_logo_changes"
+      - "condition:is_dragging"
+      - "condition:logo_error"
+      - "input:form_data"
+      - "input:logo_file"
+      - "output:form_state"
+
+confidence: 0.90
+confidence_rationale: >
+  Form state structure and field tracking are inferred from standard
+  form patterns. The exact implementation details are not directly
+  evidenced in sampled files.
+unresolved_questions:
+  - Exact logo validation rules (type, size).
+  - Whether form state persists across modal open/close.
+status: partial

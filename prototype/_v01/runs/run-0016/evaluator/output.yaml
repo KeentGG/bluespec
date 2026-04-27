@@ -1,0 +1,78 @@
+run_id: run-0016
+evaluator: evaluator
+status: complete
+provider: sample-project
+
+scored_specs:
+  - id: auth.flow
+    recall: 0.0
+    precision: 0.92
+    consistency: 0.94
+    notes: >
+      No golden behaviors covered. Strong auth lifecycle spec with direct login,
+      refresh, cross-tab sync, middleware, and route-guard evidence. It is
+      internally coherent and well-scoped, but it does not document the
+      project-edit agreement gate or the TOA-gated first-report creation flow
+      required by the golden set.
+
+  - id: api.client
+    recall: 0.0
+    precision: 0.93
+    consistency: 0.92
+    notes: >
+      No golden behaviors covered. High-quality request/refresh/normalization
+      spec with strong inputs/outputs and condition coverage. Precision remains
+      high because the content is evidence-backed, but recall is zero because
+      none of the golden behaviors center on API client behavior.
+
+  - id: state.management
+    recall: 0.0
+    precision: 0.84
+    consistency: 0.83
+    notes: >
+      No golden behaviors covered. The spec captures real state patterns, but it
+      is broad and aggregates several concerns (Zustand, SWR, login, PDF) into a
+      single umbrella spec. Reproducibility is weaker because many evidence refs
+      point at absolute external-repo paths rather than workspace-local files.
+
+  - id: pdf.lifecycle
+    recall: 0.15
+    precision: 0.85
+    consistency: 0.82
+    notes: >
+      Weak partial overlap with golden behavior #2 (download-button-visibility).
+      It documents when the PDF overlay exposes a download action after finished
+      state, but it does not cover the golden behavior's actual ReportActions.tsx
+      visibility gate based on report progress reaching the download stage.
+      Mixed evidence between live overlay/store code and qfm/pdfLifecycle.js also
+      lowers consistency.
+
+  - id: qfm.system
+    recall: 0.0
+    precision: 0.88
+    consistency: 0.86
+    notes: >
+      No golden behaviors covered. Broad, detailed QFM systems spec with solid
+      internal structure, but evaluation confidence is reduced because several
+      claims are reconstructed from embedded prior-run snippets and not from
+      fresh in-workspace source reads. Strong infrastructure coverage, weak
+      golden-set alignment.
+
+overall_score: 0.59
+overall_score_breakdown:
+  recall: 0.03
+  precision: 0.88
+  consistency: 0.87
+
+confidence: 0.83
+confidence_rationale: >
+  Confidence is moderate-high because the scoring is grounded in direct reads of
+  the five generated specs, the frozen rubric, and the run's golden set. The
+  main uncertainty is not about the written specs themselves but about recall:
+  none of the specs directly cover golden behavior #1 or #3, and only
+  pdf.lifecycle weakly overlaps golden behavior #2 without covering the cited
+  ReportActions.tsx evidence. Confidence is also reduced by evidence-path issues
+  in state.management and by qfm.system's dependence on prior captured snippets
+  instead of fully reproducible workspace-local source references.
+
+scoring_timestamp: "2026-04-23T07:26:21Z"

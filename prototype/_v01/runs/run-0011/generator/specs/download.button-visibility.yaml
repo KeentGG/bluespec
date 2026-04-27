@@ -1,0 +1,195 @@
+id: download.button-visibility
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: download-button-visibility
+    coverage: partial
+    notes: |
+      The golden behavior states the download button "becomes visible only after report
+      progress reaches the download stage." The actual behavior is that the Download
+      button is ALWAYS visible for every report row, but it is DISABLED when
+      progressPercentage < 100 and ENABLED when progressPercentage === 100.
+      The golden behavior's "visible only after" wording implies conditional
+      rendering (hidden until complete), which does not match the codebase.
+      The enablement gate (disabled vs enabled) is correctly covered.
+
+description: |
+  For each report row in the reports table, the primary Download button is always
+  rendered but is enabled only when the report's progress percentage equals 100.
+  When progress is below 100, the button remains visible in a disabled state with
+  a gray background, a not-allowed cursor, and a tooltip explaining that the report
+  must be 100% complete to download. The progress percentage is derived upstream
+  from the report's last calculator route via a calculator-aware mapping contract.
+
+conditions:
+  - id: download-enablement-gate
+    description: |
+      Controls whether the Download button is interactive (enabled) or
+      non-interactive (disabled) based on report completion.
+    trigger: Report row is rendered in the reports table
+    guards:
+      - field: progressPercentage
+        condition: progressPercentage === 100
+    then:
+      - Button is enabled (clickable)
+      - Button uses brand-primary background color
+      - Button title shows "Download report"
+      - onDownload handler is callable
+    else:
+      - Button is disabled (not clickable)
+      - Button uses gray-400 background color
+      - Button shows not-allowed cursor
+      - Button title shows "Report must be 100% complete to download"
+
+  - id: download-action-in-progress-gate
+    description: |
+      When a download is already in progress for a specific report, the Download
+      button enters a loading state regardless of completion.
+    trigger: User clicks Download and download request is in flight
+    guards:
+      - field: isDownloading
+        condition: isDownloading === true
+    then:
+      - Button is disabled
+      - Button label changes to "Downloading..." with a spinner icon
+
+inputs:
+  - id: progressPercentage
+    type: number (0–100)
+    source: Computed upstream from report record via resolveCalculatorAwareProgressPercentage
+    required: true
+    validation:
+      range: "0 to 100 inclusive"
+      source_calculator: "Determined by calculatorId and reportProgress route"
+
+  - id: isDownloading
+    type: boolean
+    source: Report action store (useReportActionStore)
+    required: true
+    validation:
+      default: "false"
+
+outputs:
+  - id: download_trigger
+    type: onDownload callback invocation
+    destination: useReportRowController.handleDownload -> reportActions.download
+    lifespan: immediate
+
+  - id: ui_state
+    type: visual button state (enabled / disabled / loading)
+    destination: DOM rendering in ReportSplitActions
+    lifespan: per-render
+
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportSplitActions.tsx
+    snippet: |
+      const canDownload = progressPercentage === 100;
+
+      return (
+        <div className="inline-flex items-stretch rounded-md overflow-visible shadow-sm">
+          <button
+            type="button"
+            onClick={onDownload}
+            disabled={isDownloading || !canDownload}
+            title={canDownload ? "Download report" : "Report must be 100% complete to download"}
+            className={`h-8 px-3 text-white text-[12px] font-medium transition-colors rounded-l-md cursor-pointer flex items-center gap-1 ${
+              isDownloading || !canDownload
+                ? "bg-gray-400 cursor-not-allowed"
+                : "bg-brand-primary hover:bg-brand-primary-hover"
+            }`}
+          >
+    covers:
+      - condition: download-enablement-gate
+      - condition: download-action-in-progress-gate
+      - output: ui_state
+    line_range:
+      start: 34
+      end: 48
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsTable.tsx
+    snippet: |
+      <div className="flex justify-center relative">
+        <ReportSplitActions
+          reportName={report.name}
+          progressPercentage={report.reportProgressPercentage}
+          isDownloading={rowController.isDownloading(report.reportId)}
+          ...
+        />
+      </div>
+    covers:
+      - input: progressPercentage
+      - input: isDownloading
+      - condition: download-enablement-gate
+    line_range:
+      start: 157
+      end: 174
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/report-route-progress-contract.js
+    snippet: |
+      export function resolveCalculatorAwareProgressPercentage(options = {}) {
+        const input = resolveReportProgressInput(options);
+        ...
+        const calculatorId = normalizeCalculatorId(input.calculatorId);
+        ...
+        const reportProgress = normalizeProgressRoute(input.reportProgress);
+        ...
+        const progressPercentage = resolveProgressPercentageByCalculatorId(calculatorId, reportProgress);
+        ...
+        return createSuccess("progress_percentage", "progress_percentage_resolved", {
+          progressPercentage,
+          calculatorId,
+          reportProgress,
+        });
+      }
+    covers:
+      - input: progressPercentage
+    line_range:
+      start: 325
+      end: 367
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/api/list-service.js
+    snippet: |
+      function enrichReportRecordWithProgress(normalizedRecord) {
+        const progress = resolveCalculatorAwareProgressPercentage({
+          calculatorId: normalizedRecord.calculatorId,
+          reportProgress: normalizedRecord.reportProgress,
+        });
+
+        return {
+          ...normalizedRecord,
+          reportProgressPercentage: progress.progressPercentage ?? 0,
+          reportProgressReason: progress.reason ?? null,
+          reportProgressResolved: progress.ok === true,
+          ...
+        };
+      }
+    covers:
+      - input: progressPercentage
+    line_range:
+      start: 107
+      end: 123
+
+confidence: 0.92
+confidence_rationale: |
+  The enablement/disablement logic is explicit and unambiguous in ReportSplitActions.tsx.
+  The upstream progress computation is fully traceable through list-service.js and
+  report-route-progress-contract.js. The only uncertainty is semantic: the golden
+  behavior describes "visible only after" but the actual implementation is
+  "visible-but-disabled until 100%". There is no evidence of conditional rendering
+  (hidden/removed) anywhere in the call chain. The progress=100 threshold is
+  hard-coded in ReportSplitActions.tsx (line 34) and confirmed by the progress
+  contract final routes.
+
+unresolved_questions:
+  - Does the product requirement actually intend hidden-before-complete behavior,
+    and the current implementation is a deviation? No product requirement docs were
+    available in the source tree.
+  - Is there any downstream consumer (e.g., mobile view, print view) that conditionally
+    hides the button entirely? Only ReportsTable.tsx was found rendering
+    ReportSplitActions.
+  - Should the progress threshold for download be configurable per calculator,
+    or is 100% universally correct? The code hard-codes 100%.
+
+status: complete

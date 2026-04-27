@@ -1,0 +1,44 @@
+run_id: "run-0009"
+mutator: "run_mutator"
+status: "complete"
+provider: "task-agent"
+proposed_change:
+  type: "prompt_tweak"
+  target_step: "analyze"
+  current: "The analyze step only asks for a generic behavior_map."
+  proposed: >
+    Require the analysis to emit a predicate inventory for conditional flows:
+    list each gate predicate separately, label the render mode as hidden,
+    visible-disabled, or visible-enabled, and mark the relation to the golden
+    wording as exact, partial, or mismatch. Preserve agreement-state gating and
+    hidden-vs-disabled differences instead of collapsing them into the nearest
+    live behavior.
+  expected_improvement: >
+    Better recall on golden_set_recall and conditional_flow_documentation by
+    preventing coarse near-matches in conditional branches from being written as
+    if they were exact matches.
+  risk: "low"
+  rationale: >
+    The analyzer says the generator already found the right code but flattened
+    distinct gate/render states into a generic live-behavior summary. A tighter
+    analysis instruction forces the missing predicate-level distinction without
+    changing the rubric or tooling.
+insanity_check:
+  method_already_failed: false
+  failed_runs:
+    - run_id: "lessons/failed.jsonl#1"
+      teaching_method: "prompt_reword_only"
+      scenario: "agent missed conditional routing after prompt wording change"
+      result: "FAILED"
+  learned_runs:
+    - run_id: "lessons/learned.jsonl#1"
+      teaching_method: "verification_crosscheck"
+      scenario: "conditional UI visibility"
+      result: "PASSED"
+rubric_candidate: null
+confidence: 0.78
+confidence_rationale: >
+  This is aligned with the analyzer's diagnosis and is more specific than the
+  failed reword-only lesson. The main uncertainty is whether analysis-only
+  granularity is sufficient without a structural step change.
+mutator_timestamp: "2026-04-22T07:01:54Z"

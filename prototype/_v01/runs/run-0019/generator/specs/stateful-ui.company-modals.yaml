@@ -1,0 +1,101 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.company-modals
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.company_modals
+    coverage: full
+    notes: >
+      Company page modals for add/edit, delete, and create report are managed
+      via Zustand stores. Each modal has open/close lifecycle with optional
+      success callbacks.
+
+description: >
+  Manages company page modal states through Zustand stores. The add/edit
+  modal handles company creation and editing, the delete modal handles
+  company deletion confirmation, and the create report modal handles
+  report creation from company context. Each modal has open/close lifecycle
+  with optional success callbacks.
+
+state_machine: null
+
+conditions:
+  - id: add_edit_modal_lifecycle
+    description: >
+      The add/edit modal manages company creation and editing workflows.
+      Opening stores the target company for editing; closing clears state.
+    trigger: addEdit.open() or addEdit.close() is called.
+    then:
+      - open(company?) sets isOpen=true and stores company for editing.
+      - close() sets isOpen=false and clears company.
+
+  - id: delete_modal_lifecycle
+    description: >
+      The delete modal manages company deletion confirmation. Opening
+      stores the target company; finishing deletion invokes callback.
+    trigger: delete.open() or delete.close() is called.
+    then:
+      - open(company) sets isOpen=true and stores target.
+      - close() sets isOpen=false and clears target.
+      - finish() invokes onDeleteSuccess callback.
+
+  - id: create_report_modal_lifecycle
+    description: >
+      The create report modal handles report creation from company context.
+      Opening stores the business ID; closing clears state.
+    trigger: createReport.open() or createReport.close() is called.
+    then:
+      - open(businessId) sets isOpen=true and stores businessId.
+      - close() sets isOpen=false and clears businessId.
+
+inputs:
+  - id: company_target
+    type: "company object or null"
+    source: Company row action
+    required: false
+
+  - id: business_id
+    type: string
+    source: Company context
+    required: false
+
+outputs:
+  - id: modal_states
+    type: "isOpen booleans and targets"
+    destination: Modal components
+    lifespan: in-memory until closed
+
+evidence_refs:
+  - path: src/features/company/store/useCompanyModalsStore.ts
+    snippet: |
+      export const useCompanyModalsStore = create<CompanyModalsState>((set, get) => ({
+        addEdit: { isOpen: false, company: null },
+        delete: { isOpen: false, company: null, onDeleteSuccess: null },
+        createReport: { isOpen: false, businessId: null },
+        openAddEdit: (company) => set({ addEdit: { isOpen: true, company } }),
+        closeAddEdit: () => set({ addEdit: { isOpen: false, company: null } }),
+        openDelete: (company, onDeleteSuccess) => set({ delete: { isOpen: true, company, onDeleteSuccess } }),
+        closeDelete: () => set({ delete: { isOpen: false, company: null, onDeleteSuccess: null } }),
+        finishDelete: () => { const { onDeleteSuccess } = get().delete; set({ delete: { isOpen: false, company: null, onDeleteSuccess: null } }); onDeleteSuccess?.(); },
+        openCreateReport: (businessId) => set({ createReport: { isOpen: true, businessId } }),
+        closeCreateReport: () => set({ createReport: { isOpen: false, businessId: null } }),
+      }));
+    covers:
+      - "condition:add_edit_modal_lifecycle"
+      - "condition:delete_modal_lifecycle"
+      - "condition:create_report_modal_lifecycle"
+      - "input:company_target"
+      - "input:business_id"
+      - "output:modal_states"
+
+confidence: 0.96
+confidence_rationale: >
+  Modal store structure, open/close lifecycle, and callback patterns are
+  directly evidenced in useCompanyModalsStore.ts. The three-modal design
+  and success callback mechanism are confirmed by the code.
+unresolved_questions:
+  - Whether modals persist state across page navigation.
+  - Exact modal component rendering logic.
+status: complete

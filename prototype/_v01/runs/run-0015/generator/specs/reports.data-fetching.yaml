@@ -1,0 +1,694 @@
+id: reports.data-fetching
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: reports-list-query
+    coverage: full
+    notes: >
+      SWR-based reports list fetching fully documented including pagination,
+      search, sort, calculator filter, enable gate, and state derivation.
+  - id: reports-business-selection
+    coverage: full
+    notes: >
+      Business selection priority resolution (hash > persisted > default)
+      with localStorage persistence, rollback redirect, and hashchange
+      listener fully documented.
+
+description: >
+  Reports data fetching via SWR with paginated list queries (5 items per page),
+  search, sort, and calculator filter. Business selection is resolved from URL
+  hash, localStorage persistence, or a default fallback ("0" = all businesses),
+  with validation against available business IDs. The reports list state machine
+  derives one of five UI states (idle, loading, ready, empty, error) from the
+  combination of selection, loading, and query results.
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: >
+        No business is selected. The "all businesses" sentinel ("0") is active
+        or no selection has been made yet. List is empty and no fetch occurs.
+    - id: loading
+      description: >
+        A specific business is selected and the SWR query is in flight for the
+        first page. No previous data is being shown (keepPreviousData is false).
+    - id: ready
+      description: >
+        Reports data has been received and the list contract indicates the table
+        should be shown (listContract.ui.showTable is true).
+    - id: empty
+      description: >
+        A specific business is selected but the query returned no reports.
+        The list contract does not show the table.
+    - id: error
+      description: >
+        A runtime error message has been set from a failed query response
+        (result.ok is false and reason is not "aborted").
+  transitions:
+    - id: select_business
+      from: idle
+      to: loading
+      trigger: User selects a specific business (not "0") from the business selector
+      guards:
+        - field: selectedBusinessId
+          condition: >
+            selectedBusinessId !== REPORTS_ALL_BUSINESSES_ID ("0")
+      effects:
+        - userPage resets to 1
+        - SWR query fires with businessId, userId, and pagination params
+    - id: select_all_businesses
+      from: loading
+      to: idle
+      trigger: User selects "all businesses" ("0") from the business selector
+      guards:
+        - field: selectedBusinessId
+          condition: selectedBusinessId === "0"
+      effects:
+        - reportList cleared to []
+        - runtimeErrorMessage cleared to ""
+    - id: data_received
+      from: loading
+      to: ready
+      trigger: SWR query returns result.ok === true with non-empty reports array
+      effects:
+        - reportList set to result.reports
+        - runtimeErrorMessage cleared
+    - id: data_empty
+      from: loading
+      to: empty
+      trigger: SWR query returns result.ok === true but reports array is empty or absent
+      effects:
+        - reportList set to []
+    - id: query_error
+      from: loading
+      to: error
+      trigger: SWR query returns result.ok === false and result.reason !== "aborted"
+      guards:
+        - field: result.reason
+          condition: result.reason !== "aborted"
+      effects:
+        - runtimeErrorMessage set to result.message or "Unable to load reports."
+    - id: retry_from_error
+      from: error
+      to: loading
+      trigger: User triggers refetch or business selection changes
+    - id: retry_from_empty
+      from: empty
+      to: loading
+      trigger: User triggers refetch or business selection changes
+    - id: load_more
+      from: ready
+      to: ready
+      trigger: User clicks "load more" to fetch next page
+      effects:
+        - userPage incremented by 1
+        - isLoadingMore becomes true while next page fetches
+        - new reports appended to existing list
+
+conditions:
+  - id: swr_enabled_gate
+    description: >
+      The SWR query is only fired when all three conditions hold: the enabled
+      flag is true, a valid userId exists from the auth token, and a non-empty
+      businessId string is provided. Otherwise the query key is null and no
+      fetch occurs.
+    trigger: >
+      useReportsListQuery is called with options
+    guards:
+      - field: enabled
+        condition: options.enabled === true (default true)
+      - field: userId
+        condition: >
+          token._id is a string with length > 0, extracted via getToken()
+      - field: businessId
+        condition: >
+          businessId is a string with length > 0
+    then:
+      - SWR query fires with the composed queryKey
+    else:
+      - Query key is set to null; SWR does not fetch
+
+  - id: all_businesses_bypass
+    description: >
+      When the selected business is "0" (REPORTS_ALL_BUSINESSES_ID), the reports
+      list query is disabled (enabled=false) and the report list is cleared. No
+      fetch occurs for the "all" view.
+    trigger: >
+      selectedBusinessId equals REPORTS_ALL_BUSINESSES_ID
+    guards:
+      - field: selectedBusinessId
+        condition: >
+          selection.selectedBusinessId === REPORTS_ALL_BUSINESSES_ID ("0")
+    then:
+      - reportsListQuery enabled is set to false
+      - reportList cleared to []
+      - runtimeErrorMessage cleared to ""
+    else:
+      - Normal query execution proceeds
+
+  - id: abort_error_suppression
+    description: >
+      When the SWR query response indicates reason "aborted" (e.g. due to
+      request deduplication or component unmount), the error is silently
+      ignored and no error message is set.
+    trigger: >
+      reportsListQuery.data returns with ok === false
+    guards:
+      - field: result.reason
+        condition: result.reason === "aborted"
+    then:
+      - No state change; error message not set
+    else:
+      - runtimeErrorMessage is set to result.message or fallback
+
+  - id: business_selection_priority
+    description: >
+      Business ID is resolved with priority: URL hash > localStorage persisted
+      value > default fallback ("0"). If availableBusinessIds is provided,
+      the selected value is validated against the set; invalid hash falls back
+      to persisted, invalid persisted falls back to default.
+    trigger: >
+      resolveReportsBusinessSelection is called (on mount and hashchange)
+    guards:
+      - field: hashBusinessId
+        condition: >
+          Extracted from URL hash via extractHashCandidate, then normalized
+          and URI-decoded
+      - field: storedBusinessId
+        condition: >
+          Read from localStorage key "db_businessid", sanitized via
+          sanitizeDashboardPersistedKey
+      - field: availableBusinessSet
+        condition: >
+          If provided, selectedBusinessId must equal fallback or exist in set
+    then:
+      - selectedBusinessId set to highest-priority valid value
+      - source set to "hash", "persisted", or "default"
+      - localStorage updated accordingly
+    else:
+      - Fallback to next priority level
+
+  - id: rollback_redirect
+    description: >
+      On mount, if the rollback route contract indicates a redirect is needed
+      (e.g. QFM rollback in progress), the browser immediately redirects to
+      the rollback destination before any selection logic runs.
+    trigger: >
+      useReportBusinessSelection mounts
+    guards:
+      - field: rollbackRoute.shouldRedirect
+        condition: rollbackRoute.shouldRedirect === true
+      - field: rollbackRoute.destination
+        condition: >
+          window.location.pathname !== withBasePath(rollbackRoute.destination)
+    then:
+      - window.location.replace(rollbackDestination)
+      - Selection logic does not execute
+    else:
+      - Normal selection resolution proceeds
+
+  - id: page_reset_on_selection_change
+    description: >
+      When the selected business changes, the user page resets to 1 so the
+      list starts from the first page for the new business.
+    trigger: >
+      selection.selectedBusinessId changes
+    guards:
+      - field: selectedBusinessId
+        condition: selectedBusinessId value has changed
+    then:
+      - userPage set to 1
+
+inputs:
+  - id: businessId
+    type: string
+    source: >
+      useReportBusinessSelection hook, resolved from URL hash, localStorage,
+      or default "0"
+    required: true
+    validation:
+      must_be_non_empty_string: >
+        SWR query only fires when businessId is a non-empty string
+
+  - id: auth_token
+    type: token object with _id field
+    source: getToken() from auth tokenService
+    required: true
+    validation:
+      _id_must_be_non_empty_string: >
+        userId extracted from token._id; query disabled if null
+
+  - id: page
+    type: integer (1-indexed)
+    source: userPage state in useReportsPageController
+    required: false
+    validation:
+      default: "1"
+
+  - id: pageSize
+    type: integer
+    source: PAGE_SIZE constant (5) in useReportsPageController
+    required: false
+    validation:
+      default: "5"
+
+  - id: search
+    type: string
+    source: searchQuery from useReportsListStore
+    required: false
+    validation:
+      default: ""
+
+  - id: sortBy
+    type: string
+    source: >
+      Resolved from sortId via resolveReportSortOption()
+    required: false
+    validation:
+      default: ""
+
+  - id: sortOrder
+    type: string
+    source: >
+      Resolved from sortId via resolveReportSortOption()
+    required: false
+    validation:
+      default: ""
+
+  - id: calculatorId
+    type: string
+    source: calcTypeFilter from useReportsListStore
+    required: false
+    validation:
+      default: >
+        Falls back to "all" if falsy
+
+  - id: url_hash
+    type: string
+    source: window.location.hash
+    required: false
+    validation:
+      extracted_via: extractHashCandidate
+
+  - id: persisted_business_id
+    type: string | null
+    source: >
+      localStorage.getItem("db_businessid"), sanitized via
+      sanitizeDashboardPersistedKey
+    required: false
+
+outputs:
+  - id: reports_list
+    type: array of report objects
+    destination: >
+      reportList state in useReportsPageController, passed to listContract
+      and filteredReports
+    lifespan: session (re-fetched on mount and revalidation)
+
+  - id: pagination
+    type: "{ page, pageSize, total, hasMore }"
+    destination: >
+      Extracted from SWR response data.pagination, exposed via
+      useReportsListQuery return
+    lifespan: per-query (tied to current SWR cache entry)
+
+  - id: list_state
+    type: "'idle' | 'loading' | 'ready' | 'empty' | 'error'"
+    destination: >
+      Derived in useReportsPageController.listState, consumed by UI
+      to render appropriate view
+    lifespan: reactive (updates with state changes)
+
+  - id: runtime_error_message
+    type: string
+    destination: >
+      runtimeErrorMessage state in useReportsPageController
+    lifespan: >
+      Cleared on successful fetch or when switching to "all businesses"
+
+  - id: has_more
+    type: boolean
+    destination: >
+      reportsListQuery.pagination.hasMore, exposed for load-more UI
+    lifespan: per-query
+
+  - id: is_loading_more
+    type: boolean
+    destination: >
+      Derived: (isLoading || isValidating) && userPage > 1
+    lifespan: reactive
+
+  - id: selected_business_id
+    type: string
+    destination: >
+      selection.selectedBusinessId from useReportBusinessSelection,
+      used as input to useReportsListQuery
+    lifespan: >
+      Persists in localStorage, restored on mount
+
+  - id: localStorage_mutation
+    type: "set | remove | none"
+    destination: >
+      localStorage key "db_businessid" updated based on selection source
+      and validation against availableBusinessIds
+    lifespan: cross-session (localStorage)
+
+evidence_refs:
+  - path: src/features/reports/hooks/useReportsListQuery.ts
+    snippet: |
+      const isEnabled =
+        enabled &&
+        typeof userId === "string" &&
+        userId.length > 0 &&
+        typeof businessId === "string" &&
+        businessId.length > 0;
+    covers:
+      - condition:swr_enabled_gate
+    line_range:
+      start: 24
+      end: 29
+
+  - path: src/features/reports/hooks/useReportsListQuery.ts
+    snippet: |
+      const swrQuery = useSWR(
+        isEnabled ? queryKey : null,
+        () =>
+          fetchReportsListRuntime({
+            businessId,
+            page,
+            pageSize,
+            search,
+            sortBy,
+            sortOrder,
+            calculatorId,
+          }),
+        {
+          keepPreviousData: false,
+          revalidateOnMount: true,
+          shouldRetryOnError: false,
+        },
+      );
+    covers:
+      - condition:swr_enabled_gate
+      - input:businessId
+      - input:page
+      - input:pageSize
+      - input:search
+      - input:sortBy
+      - input:sortOrder
+      - input:calculatorId
+    line_range:
+      start: 46
+      end: 63
+
+  - path: src/features/reports/hooks/useReportsListQuery.ts
+    snippet: |
+      const pagination = swrQuery.data?.pagination ?? { page, pageSize, total: 0, hasMore: false };
+    covers:
+      - output:pagination
+      - output:has_more
+    line_range:
+      start: 66
+      end: 66
+
+  - path: src/features/reports/controllers/useReportsPageController.ts
+    snippet: |
+      const listState = useMemo(() => {
+        if (runtimeErrorMessage) return "error";
+        if (isRuntimeLoading && !isLoadingMore) return "loading";
+        if (listContract.ui.showTable) return "ready";
+        return hasSelectedBusiness ? "empty" : "idle";
+      }, [
+        runtimeErrorMessage,
+        isRuntimeLoading,
+        isLoadingMore,
+        listContract.ui.showTable,
+        hasSelectedBusiness,
+      ]);
+    covers:
+      - state_machine:idle
+      - state_machine:loading
+      - state_machine:ready
+      - state_machine:empty
+      - state_machine:error
+      - output:list_state
+    line_range:
+      start: 106
+      end: 117
+
+  - path: src/features/reports/controllers/useReportsPageController.ts
+    snippet: |
+      useEffect(() => {
+        if (selection.selectedBusinessId === REPORTS_ALL_BUSINESSES_ID) {
+          setReportList([]);
+          setRuntimeErrorMessage("");
+          return;
+        }
+
+        const result = reportsListQuery.data;
+        if (!result) return;
+
+        if (result.ok) {
+          setReportList(result.reports || []);
+          setRuntimeErrorMessage("");
+        } else {
+          if (result.reason !== "aborted") {
+            setRuntimeErrorMessage(result.message || "Unable to load reports.");
+          }
+        }
+      }, [reportsListQuery.data, selection.selectedBusinessId]);
+    covers:
+      - condition:all_businesses_bypass
+      - condition:abort_error_suppression
+      - state_machine:select_all_businesses
+      - state_machine:data_received
+      - state_machine:data_empty
+      - state_machine:query_error
+      - output:reports_list
+      - output:runtime_error_message
+    line_range:
+      start: 54
+      end: 72
+
+  - path: src/features/reports/controllers/useReportsPageController.ts
+    snippet: |
+      useEffect(() => {
+        setUserPage(1);
+      }, [selection.selectedBusinessId]);
+    covers:
+      - condition:page_reset_on_selection_change
+      - state_machine:select_business
+    line_range:
+      start: 27
+      end: 29
+
+  - path: src/features/reports/controllers/useReportsPageController.ts
+    snippet: |
+      const loadMore = useCallback(() => {
+        setUserPage((p) => p + 1);
+      }, []);
+
+      const hasMore = reportsListQuery.pagination?.hasMore ?? false;
+      const isLoadingMore =
+        (reportsListQuery.isLoading || reportsListQuery.isValidating) && userPage > 1;
+    covers:
+      - state_machine:load_more
+      - output:has_more
+      - output:is_loading_more
+    line_range:
+      start: 98
+      end: 104
+
+  - path: src/features/reports/hooks/useReportBusinessSelection.ts
+    snippet: |
+      function updateSelectionFromRouteState() {
+        let persistedRawBusinessId = null;
+        try {
+          persistedRawBusinessId = window.localStorage.getItem(REPORTS_PERSISTED_BUSINESS_KEY);
+        } catch (_e) {}
+
+        const persistedSelection = sanitizeDashboardPersistedKey({
+          key: REPORTS_PERSISTED_BUSINESS_KEY,
+          rawValue: persistedRawBusinessId,
+          fallbackValue: null,
+          flowId: "reports.selection.restore",
+        });
+
+        try {
+          if (persistedSelection.storageMutation.action === "remove") {
+            window.localStorage.removeItem(REPORTS_PERSISTED_BUSINESS_KEY);
+          } else if (
+            persistedSelection.storageMutation.action === "set" &&
+            typeof persistedSelection.storageMutation.value === "string"
+          ) {
+            window.localStorage.setItem(
+              REPORTS_PERSISTED_BUSINESS_KEY,
+              persistedSelection.storageMutation.value,
+            );
+          }
+        } catch (_e) {}
+
+        const nextSelection = resolveReportsBusinessSelection({
+          hash: window.location.hash,
+          persistedBusinessId: persistedSelection.value,
+        });
+
+        try {
+          if (nextSelection.shouldClearPersistedBusinessId) {
+            window.localStorage.removeItem(REPORTS_PERSISTED_BUSINESS_KEY);
+          } else if (nextSelection.source !== "default") {
+            window.localStorage.setItem(
+              REPORTS_PERSISTED_BUSINESS_KEY,
+              nextSelection.selectedBusinessId,
+            );
+          }
+        } catch (_e) {}
+
+        setSelection(nextSelection);
+      }
+
+      updateSelectionFromRouteState();
+      window.addEventListener("hashchange", updateSelectionFromRouteState);
+      return () => window.removeEventListener("hashchange", updateSelectionFromRouteState);
+    covers:
+      - condition:business_selection_priority
+      - input:persisted_business_id
+      - input:url_hash
+      - output:selected_business_id
+      - output:localStorage_mutation
+    line_range:
+      start: 55
+      end: 103
+
+  - path: src/features/reports/hooks/useReportBusinessSelection.ts
+    snippet: |
+      const rollbackRoute = resolveRollbackRouteContract({
+        env: process.env,
+        storage: resolveBrowserStorage(),
+        path: "/reports",
+      });
+
+      if (rollbackRoute.shouldRedirect && rollbackRoute.destination) {
+        const rollbackDestination = withBasePath(rollbackRoute.destination);
+        if (window.location.pathname !== rollbackDestination) {
+          window.location.replace(rollbackDestination);
+        }
+        return;
+      }
+    covers:
+      - condition:rollback_redirect
+    line_range:
+      start: 41
+      end: 53
+
+  - path: src/shared/lib/routing/entryContracts.js
+    snippet: |
+      export function resolveReportsBusinessSelection(options = {}) {
+        const {
+          hash = "",
+          persistedBusinessId = null,
+          availableBusinessIds,
+          fallbackBusinessId = REPORTS_ALL_BUSINESSES_ID,
+        } = options;
+
+        const normalizedFallbackBusinessId =
+          normalizeBusinessId(fallbackBusinessId) ?? REPORTS_ALL_BUSINESSES_ID;
+        const hashBusinessId = normalizeBusinessId(extractHashCandidate(hash));
+        const storedBusinessId = normalizeBusinessId(persistedBusinessId);
+        const availableBusinessSet = toAvailableBusinessSet(availableBusinessIds);
+
+        let selectedBusinessId = hashBusinessId ?? storedBusinessId ?? normalizedFallbackBusinessId;
+        let source = hashBusinessId ? "hash" : storedBusinessId ? "persisted" : "default";
+        let shouldClearPersistedBusinessId = false;
+
+        if (availableBusinessSet) {
+          const hasSelectedBusiness =
+            selectedBusinessId === normalizedFallbackBusinessId ||
+            availableBusinessSet.has(selectedBusinessId);
+
+          if (!hasSelectedBusiness) {
+            if (source === "hash" && storedBusinessId && availableBusinessSet.has(storedBusinessId)) {
+              selectedBusinessId = storedBusinessId;
+              source = "persisted";
+            } else {
+              selectedBusinessId = normalizedFallbackBusinessId;
+              source = "default";
+            }
+          }
+
+          if (storedBusinessId && !availableBusinessSet.has(storedBusinessId)) {
+            shouldClearPersistedBusinessId = true;
+          }
+        }
+
+        return {
+          selectedBusinessId,
+          source,
+          hashBusinessId,
+          persistedBusinessId: storedBusinessId,
+          fallbackBusinessId: normalizedFallbackBusinessId,
+          shouldClearPersistedBusinessId,
+        };
+      }
+    covers:
+      - condition:business_selection_priority
+      - input:url_hash
+      - input:persisted_business_id
+      - output:selected_business_id
+      - output:localStorage_mutation
+    line_range:
+      start: 174
+      end: 220
+
+  - path: src/shared/lib/routing/entryContracts.js
+    snippet: |
+      export const REPORTS_ALL_BUSINESSES_ID = "0";
+      export const REPORTS_PERSISTED_BUSINESS_KEY = "db_businessid";
+    covers:
+      - condition:all_businesses_bypass
+      - input:persisted_business_id
+    line_range:
+      start: 27
+      end: 28
+
+confidence: 0.88
+confidence_rationale: >
+  High confidence. All state transitions in the listState derivation are
+  directly confirmed in useReportsPageController.ts (lines 106-117). The
+  SWR enabled gate logic is explicit in useReportsListQuery.ts (lines 24-29).
+  The business selection priority chain (hash > persisted > default) is fully
+  implemented in entryContracts.js resolveReportsBusinessSelection (lines 174-220)
+  and consumed by useReportBusinessSelection.ts. The rollback redirect path is
+  confirmed in useReportBusinessSelection.ts (lines 41-53). The "aborted" error
+  suppression is confirmed in the controller effect (line 68). Remaining uncertainty:
+  the sanitizeDashboardPersistedKey and resolveRollbackRouteContract internals are
+  imported from shared/lib/qfm and not in scope — their exact sanitization rules
+  are opaque. The resolveReportSortOption and resolveReportsListContract internals
+  are also imported and not fully visible, though their usage patterns are clear.
+
+unresolved_questions:
+  - >
+    What are the exact sanitization rules inside sanitizeDashboardPersistedKey?
+    The function is imported from shared/lib/qfm and its internal validation
+    logic (e.g. what constitutes an invalid persisted key) is not visible in
+    the scoped source files.
+  - >
+    What conditions trigger resolveRollbackRouteContract to set shouldRedirect=true?
+    The rollback route contract is imported from shared/lib/qfm and its internal
+    logic is not in scope.
+  - >
+    What does resolveReportsListContract.ui.showTable depend on beyond the
+    isLoading flag? The contract is imported from features/reports/contracts/list-contract
+    and its full derivation logic is not in the scoped files.
+  - >
+    How does resolveReportSortOption map sortId values to sortBy/sortOrder pairs?
+    The mapping is imported from features/reports/contracts/list-contract.
+  - >
+    What is the shape of the fetchReportsListRuntime response? The controller
+    checks result.ok, result.reports, result.reason, and result.message, but
+    the full response type definition is in features/reports/api/list-service.
+
+status: complete

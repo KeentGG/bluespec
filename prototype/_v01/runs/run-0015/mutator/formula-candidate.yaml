@@ -1,0 +1,108 @@
+id: frontend-derived-v004-predicate-universality
+version: v004
+ecosystem: frontend
+behavior_shapes:
+  - stateful_ui
+  - conditional_flow
+  - data_dashboard_layout
+compatible_rubric_snapshots:
+  - v002
+steps:
+  - id: explore
+    name: Explore structure, dependencies, and state-machine boundaries
+    prompt: prompts/generator.md
+    outputs:
+      - trace
+      - exploration_notes
+      - state_machine_boundaries
+  - id: analyze
+    name: Analyze discovered behavior
+    prompt: >
+      Analyze the explored code to produce a predicate inventory for conditional
+      flows. For each conditional flow discovered: - List each gate predicate
+      separately (e.g. agreement-state, progress-percentage, auth-session) -
+      Label the render mode as exactly one of: hidden, visible-disabled,
+      visible-enabled - Mark the relation to the golden wording as: exact,
+      partial, or mismatch - Preserve agreement-state gating and
+      hidden-vs-disabled differences instead of collapsing
+        them into the nearest live behavior
+      - Flag partial matches with explicit notes about what code evidence
+      supports vs what
+        the golden wording requires
+      - CRITICAL: For each conditional flow, check whether agreement state,
+      auth state, or progress state is a gate condition REGARDLESS of the
+      flow's primary purpose. Do not limit agreement-state checks to report
+      creation flows — apply the same predicate pattern to project editing,
+      route protection, and UI visibility gating contexts. When a gate
+      predicate appears in one module (e.g. toa-contract.js), scan for the
+      same predicate class in all other modules that share the same state
+      dependency.
+    outputs:
+      - behavior_map
+      - predicate_inventory
+  - id: draft
+    name: Draft specs with explicit states, transitions, guards, and side effects
+    outputs:
+      - spec_set
+      - state_transition_map
+  - id: verify
+    name: Verify schema and reference consistency
+    outputs:
+      - verification_report
+  - id: cross_ref
+    name: Link related specs and evidence
+    outputs:
+      - reference_map
+validations:
+  - schema_valid
+  - references_resolve
+  - no_internal_contradictions
+mutation_tiers:
+  - prompt_tweak
+  - step_management
+  - parent_guideline
+  - schema_change
+  - tool_change
+  - rubric_mutation
+_extends_chain:
+  - formulas/seed/universal.yaml
+  - formulas/seed/frontend.yaml
+  - formulas/promoted/frontend-derived-v003-consolidated.yaml
+specializations:
+  - component_state_tracking
+  - conditional_rendering_checks
+  - accessibility_review
+  - layout_intent_capture
+  - data_table_behavior
+  - state_machine_boundary_detection
+  - explicit_state_transition_enumeration
+  - conditional_predicate_inventory
+parent: frontend-derived-v003
+fine_tune_run: run-0015
+consolidated_mutations:
+  - source: frontend-derived-state-boundaries (run-0003)
+    type: step_management
+    target_step: explore
+    change: Added state_machine_boundaries output to explore step
+  - source: frontend-derived-draft-state-transitions (run-0004)
+    type: prompt_tweak
+    target_step: draft
+    change: Added state_transition_map output to draft step
+  - source: frontend-derived-v002-predicate-inventory (run-0009)
+    type: prompt_tweak
+    target_step: analyze
+    change: Added predicate_inventory output to analyze step with
+      hidden/visible-disabled/visible-enabled distinctions
+  - source: frontend-derived-v004-predicate-universality (run-0015)
+    type: prompt_tweak
+    target_step: analyze
+    change: Added CRITICAL directive to check agreement state, auth state,
+      and progress state as gate conditions across ALL conditional flows,
+      not just report creation flows
+status: candidate
+discovered_in_run: run-0015
+created_at: 2026-04-23T10:30:00.000Z
+governance_notes: "Candidate v004 from run-0015: prompt_tweak to analyze step
+  for predicate universality. Addresses recognition_failure where agreement-state
+  pattern was not recognized across modules. Expected recall improvement:
+  0.42 -> 0.55+."

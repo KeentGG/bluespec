@@ -1,0 +1,138 @@
+run_id: run-0014
+evaluator: evaluator-agent
+status: completed
+provider: local
+
+recall_hits:
+  - spec_id: toa-gated-first-report-creation
+    behavior_id: toa-gated-first-report-creation
+    hit_type: full_coverage
+    description: Dashboard TOA gate check, redirect to introduction, calculator report creation post-TOA
+    severity: info
+
+  - spec_id: download.button-visibility.yaml
+    behavior_id: download-button-visibility
+    hit_type: partial_coverage
+    description: Interactivity gate on progressPercentage, disabled state, tooltip, opacity changes
+    severity: info
+
+  - spec_id: auth-conditional-redirect
+    behavior_id: auth-conditional-redirect
+    hit_type: partial_coverage
+    description: Gated edit flow validation, report fetch, progress route mapping, redirect/fallback
+    severity: info
+
+recall_misses:
+  - spec_id: download.button-visibility.yaml
+    behavior_id: download-button-visibility
+    miss_type: behavior_mismatch
+    description: >
+      Golden behavior claims a visibility toggle (hidden -> visible), but code
+      implements an interactivity toggle (disabled -> enabled). The spec
+      correctly identifies this mismatch, but the golden behavior itself is not
+      fully recalled.
+    severity: medium
+
+  - spec_id: auth-conditional-redirect
+    behavior_id: auth-conditional-redirect
+    miss_type: missing_condition
+    description: >
+      The golden behavior's central condition — "only when agreement state is
+      satisfied" — is completely absent from the edit flow code. No TOA or
+      agreement-state check exists in any evidenced file.
+    severity: high
+
+  - spec_id: auth-conditional-redirect
+    behavior_id: auth-conditional-redirect
+    miss_type: stale_evidence
+    description: >
+      Golden-set evidence_ref src/routes/project-edit.tsx does not exist in the
+      codebase. The actual implementation lives in gate-edit-contract.js and
+      useGateEditEntryState.ts.
+    severity: medium
+
+precision_findings:
+  - spec_id: download.button-visibility.yaml
+    finding_type: incorrect_id
+    description: >
+      Spec id field is "download.button-visibility.yaml" which includes the .yaml
+      file extension. This is inconsistent with the other specs and the
+      golden behavior id format.
+    severity: low
+
+  - spec_id: auth-conditional-redirect
+    finding_type: honest_negative
+    description: >
+      The spec correctly documents the ABSENCE of the agreement-state check
+      rather than fabricating it. This is precise but lowers recall against
+      the golden behavior.
+    severity: info
+
+  - spec_id: toa-gated-first-report-creation
+    finding_type: unresolved_trigger
+    description: >
+      The exact user action or route that triggers gate-new initialization after
+      TOA acceptance is not fully evidenced. The spec notes this honestly.
+    severity: low
+
+consistency_findings:
+  - spec_id: auth-conditional-redirect
+    finding_type: cross_ref_correct
+    description: >
+      The auth spec correctly cross-references the separate toa-gated-first-report-creation
+      behavior for new report creation, avoiding contradiction.
+    severity: info
+
+  - spec_id: download.button-visibility.yaml
+    finding_type: prop_chain_complete
+    description: >
+      Prop chain from list-contract.js -> ReportsTable.tsx -> ReportSplitActions.tsx
+      is fully traced and internally consistent.
+    severity: info
+
+  - spec_id: toa-gated-first-report-creation
+    finding_type: state_machine_aligned
+    description: >
+      State machine transitions align with conditions and evidence snippets.
+      No internal contradictions detected.
+    severity: info
+
+rubric_gap_candidates:
+  proposed_only: true
+  gaps:
+    - id: visibility-vs-interactivity-toggle
+      description: >
+        The rubric does not distinguish between "visibility" (render/unmount)
+        and "interactivity" (disabled/enabled) as separate UI gate patterns.
+        A spec that correctly identifies an interactivity toggle is penalized on
+        recall when the golden behavior imprecisely claims visibility.
+      affected_specs:
+        - download.button-visibility.yaml
+      suggested_criterion: ui_gate_pattern_precision
+
+    - id: evidence-freshness-validation
+      description: >
+        No rubric criterion checks whether golden-set evidence_refs still exist
+        in the codebase. Stale refs (e.g., src/routes/project-edit.tsx) mislead
+        both generators and evaluators.
+      affected_specs:
+        - auth-conditional-redirect
+      suggested_criterion: evidence_ref_existence
+
+    - id: server-side-enforcement-documentation
+      description: >
+        When a frontend gate is purely cosmetic (e.g., disabled button), the
+        rubric does not require documenting whether server-side enforcement
+        exists. This leaves security-relevant behavior unspecified.
+      affected_specs:
+        - download.button-visibility.yaml
+      suggested_criterion: backend_enforcement_documentation
+
+    - id: absent-condition-annotation
+      description: >
+        When a golden behavior claims a condition that does not exist in code,
+        there is no rubric credit for explicitly documenting its absence.
+        The auth spec does this correctly but is penalized on recall.
+      affected_specs:
+        - auth-conditional-redirect
+      suggested_criterion: negative_condition_documentation

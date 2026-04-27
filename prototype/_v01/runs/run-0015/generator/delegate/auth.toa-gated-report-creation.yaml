@@ -1,0 +1,35 @@
+spec_id: auth.toa-gated-report-creation
+output_path: runs/run-0015/generator/specs/auth.toa-gated-report-creation.yaml
+discovered_behaviors:
+  - id: toa-status-check
+    description: Check user TOA (Terms of Agreement) status from user profile before allowing report creation
+    priority: high
+    evidence_refs:
+      - src/features/auth/contracts/toa-contract.js
+      - src/features/auth/api/user-service.js
+  - id: toa-redirect-flow
+    description: If TOA not accepted, redirect to calculator introduction page with businessId and reportName as query params
+    priority: high
+    evidence_refs:
+      - src/features/reports/hooks/useReportCreation.ts
+      - src/shared/lib/routing/gate-finder.js
+  - id: toa-deferred-report-creation
+    description: Dashboard does NOT persist report until TOA is accepted; calculator handles report creation post-TOA-acceptance
+    priority: high
+    evidence_refs:
+      - src/features/reports/hooks/useReportCreation.ts
+source_files:
+  - src/features/auth/contracts/toa-contract.js
+  - src/features/auth/api/user-service.js
+  - src/features/reports/hooks/useReportCreation.ts
+  - src/shared/lib/routing/gate-finder.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - toa-contract.js resolves TOA status and calculator gate URLs
+  - resolveToaStatus checks userData.agreedToa === true
+  - buildIntroductionUrl constructs introduction page URL with businessId and reportname params
+  - useReportCreation fetches user data, checks agreedToa, redirects to introduction if not accepted
+  - Dashboard does NOT call createReport API until TOA is accepted
+  - Calculator handles report creation after user completes TOA introduction/commitment flow
+  - Introduction URL format: {basePath}/introduction/?businessId=X&reportname=Y

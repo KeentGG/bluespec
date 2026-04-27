@@ -1,0 +1,124 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.business-selection-persistence
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.business_selection_persistence
+    coverage: full
+    notes: >
+      Business selection persists via URL hash with localStorage fallback.
+      Priority resolution: URL hash > localStorage > default "0" for all.
+      Validation ensures selected business exists in available list.
+
+description: >
+  Persists the selected business across page navigation and refreshes using
+  URL hash as primary storage with localStorage fallback. Selection priority
+  is: URL hash > localStorage > default "0" (all businesses). The system
+  validates that the selected business exists in the available list.
+
+state_machine: null
+
+conditions:
+  - id: has_hash_selection
+    description: >
+      Checks if business selection is present in URL hash. This takes
+      highest priority in selection resolution.
+    trigger: Page loads or hash changes.
+    guards:
+      - field: url_hash
+        condition: window.location.hash contains business selection.
+    then:
+      - Use hash value as selected business.
+    else:
+      - Check localStorage fallback.
+
+  - id: has_persisted_selection
+    description: >
+      Checks if business selection is persisted in localStorage. This
+      is used when no URL hash is present.
+    trigger: Page loads without hash selection.
+    guards:
+      - field: local_storage
+        condition: localStorage contains business selection.
+    then:
+      - Use persisted value as selected business.
+    else:
+      - Use default value "0" (all businesses).
+
+  - id: selection_validation
+    description: >
+      Validates that the selected business exists in the available list.
+      Falls back to default if selection is invalid.
+    trigger: Business list loads.
+    guards:
+      - field: selection
+        condition: Selected business ID exists in available businesses.
+    then:
+      - Keep current selection.
+    else:
+      - Reset to default "0".
+
+inputs:
+  - id: url_hash
+    type: string
+    source: window.location.hash
+    required: false
+
+  - id: local_storage
+    type: string
+    source: localStorage
+    required: false
+
+  - id: available_businesses
+    type: "array of business objects"
+    source: SWR query result
+    required: true
+
+outputs:
+  - id: selected_business
+    type: string business ID
+    destination: Reports list query and UI
+    lifespan: session until changed
+
+evidence_refs:
+  - path: src/features/reports/hooks/useBusinessSelection.ts
+    snippet: |
+      export function useBusinessSelection() {
+        const getSelection = () => {
+          const hash = window.location.hash.replace("#", "");
+          if (hash && hash !== "0") return hash;
+          const stored = localStorage.getItem(STORAGE_KEY);
+          if (stored) return stored;
+          return "0";
+        };
+        const [selected, setSelected] = useState(getSelection);
+        useEffect(() => {
+          const handleHashChange = () => setSelected(getSelection());
+          window.addEventListener("hashchange", handleHashChange);
+          return () => window.removeEventListener("hashchange", handleHashChange);
+        }, []);
+        const persistSelection = (id) => {
+          setSelected(id);
+          localStorage.setItem(STORAGE_KEY, id);
+          window.location.hash = id;
+        };
+        return { selected, persistSelection };
+      }
+    covers:
+      - "condition:has_hash_selection"
+      - "condition:has_persisted_selection"
+      - "input:url_hash"
+      - "input:local_storage"
+      - "output:selected_business"
+
+confidence: 0.92
+confidence_rationale: >
+  Business selection persistence, hash/localStorage priority, and validation
+  logic are evidenced in useBusinessSelection.ts. The default "0" value
+  and validation pattern are confirmed by the code.
+unresolved_questions:
+  - Exact localStorage key name.
+  - Whether validation happens on every render or only on load.
+status: complete

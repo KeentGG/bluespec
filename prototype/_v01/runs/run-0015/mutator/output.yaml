@@ -1,0 +1,128 @@
+run_id: run-0015
+mutator: mutator
+status: complete
+provider: sample-project
+
+proposed_change:
+  type: prompt_tweak
+  target_step: analyze
+  current: >
+    Analyze the explored code to produce a predicate inventory for conditional
+    flows. For each conditional flow discovered: - List each gate predicate
+    separately (e.g. agreement-state, progress-percentage, auth-session) -
+    Label the render mode as exactly one of: hidden, visible-disabled,
+    visible-enabled - Mark the relation to the golden wording as: exact,
+    partial, or mismatch - Preserve agreement-state gating and
+    hidden-vs-disabled differences instead of collapsing
+      them into the nearest live behavior
+    - Flag partial matches with explicit notes about what code evidence
+    supports vs what
+      the golden wording requires
+  proposed: >
+    Analyze the explored code to produce a predicate inventory for conditional
+    flows. For each conditional flow discovered: - List each gate predicate
+    separately (e.g. agreement-state, progress-percentage, auth-session) -
+    Label the render mode as exactly one of: hidden, visible-disabled,
+    visible-enabled - Mark the relation to the golden wording as: exact,
+    partial, or mismatch - Preserve agreement-state gating and
+    hidden-vs-disabled differences instead of collapsing
+      them into the nearest live behavior
+    - Flag partial matches with explicit notes about what code evidence
+    supports vs what
+      the golden wording requires
+    - CRITICAL: For each conditional flow, check whether agreement state,
+    auth state, or progress state is a gate condition REGARDLESS of the
+    flow's primary purpose. Do not limit agreement-state checks to report
+    creation flows — apply the same predicate pattern to project editing,
+    route protection, and UI visibility gating contexts. When a gate
+    predicate appears in one module (e.g. toa-contract.js), scan for the
+    same predicate class in all other modules that share the same state
+    dependency.
+  expected_improvement: >
+    The explicit directive to check agreement state across ALL conditional
+    flows (not just report creation) should increase recognition of the
+    agreement-state pattern in project-edit.tsx, improving recall for
+    auth-conditional-redirect from 0.0 to 0.8+. Combined with the existing
+    predicate_inventory output, this forces the generator to apply the same
+    gate analysis to every conditional flow, not just the ones that look
+    like report creation. Expected recall improvement: 0.42 -> 0.55+
+    (covering auth-conditional-redirect as second golden behavior). Note:
+    the search_failure for download-button-visibility (ReportActions.tsx
+    never discovered) requires a separate step_management mutation to the
+    explore phase — this prompt_tweak does not address file discovery gaps.
+  risk: >
+    Low risk. The directive adds specificity to an existing prompt without
+    changing the output schema or step structure. The predicate_inventory
+    output already exists and is designed to capture this information —
+    the issue is that the generator isn't applying it broadly enough.
+    The risk is that the added directive could cause the generator to
+    over-flag non-gate predicates, but the existing "list each gate
+    predicate separately" instruction should prevent this. A secondary
+    risk is that the generator may now produce longer predicate inventories
+    that dilute focus, but the golden_set_recall criterion should keep
+    pressure on actual behavioral coverage.
+  rationale: >
+    The formula's analyze step already mentions "agreement-state gating" in
+    its prompt, yet the generator only applied it to report creation
+    (toa-gated-report-creation achieved 1.0 recall) and missed it in the
+    project-editing context. This is a context-collapse failure: the same
+    predicate pattern (agreement state) in a different module
+    (project-edit.tsx vs toa-contract.js) was not recognized as the same
+    behavioral class. The prompt_tweak adds an explicit directive to check
+    agreement state across ALL conditional flows, breaking the context
+    collapse by forcing the generator to apply the predicate analysis
+    universally. This is the lowest-tier mutation (prompt_tweak) that
+    addresses the primary failure, and it has not been tried for
+    recognition_failure before.
+
+insanity_check:
+  method_already_failed: false
+  failed_runs: []
+  learned_runs:
+    - run_id: run-0010
+      method: verification_crosscheck
+      failure_type: recognition_failure
+      result: PASSED
+      note: >
+        verification_crosscheck PASSED for recognition_failure in run-0010,
+        but that was for conditional UI visibility (hidden vs disabled
+        distinctions), not agreement-state context-collapse. The current
+        failure is a different subtype: the same predicate pattern is not
+        recognized across modules. prompt_tweak is appropriate here because
+        the formula already has the right wording — the issue is
+        specificity of application, not absence of the concept. The
+        verification_crosscheck method would be a fallback if this
+        prompt_tweak fails.
+    - run_id: run-0010
+      method: prompt_tweak
+      failure_type: rubric_gap_failure
+      result: FAILED
+      note: >
+        prompt_tweak FAILED for rubric_gap_failure in run-0010, but that is
+        a DIFFERENT failure_type. The current failure is recognition_failure,
+        not rubric_gap_failure. The run-0010 failure was about rubric
+        criteria being too broad to capture predicate-level distinctions —
+        a rubric issue, not a prompt issue. This mutation targets prompt
+        specificity for recognition, which is a different mechanism.
+
+rubric_candidate: null
+
+confidence: 0.75
+confidence_rationale: >
+  Moderate-high confidence. The analyzer's diagnosis is clear: the formula
+  mentions agreement-state gating but the generator only applies it in one
+  context (report creation). The prompt_tweak adds an explicit directive to
+  apply it universally. Three factors support confidence: (1) the formula
+  already has the concept — this is a specificity fix, not a new concept,
+  (2) the one successful recall hit (toa-gated-report-creation = 1.0)
+  proves the generator CAN recognize agreement-state gating when the
+  context is right, (3) the prompt_tweak has not been tried for
+  recognition_failure before (insanity check clean). Two factors reduce
+  confidence: (1) the search_failure component (ReportActions.tsx never
+  discovered) is NOT addressed by this mutation — a step_management change
+  would be needed for full recall improvement, (2) the precision finding
+  on auth.toa-gated-report-creation (calculator-side documented from
+  prior_context, not source files) suggests the one successful recall hit
+  may be partially inflated, which could affect the baseline comparison.
+
+mutator_timestamp: "2026-04-23T00:00:00Z"

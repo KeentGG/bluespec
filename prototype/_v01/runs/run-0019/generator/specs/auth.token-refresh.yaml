@@ -1,0 +1,226 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.token-refresh
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth_flow.token_refresh
+    coverage: full
+    notes: >
+      Token refresh is coordinated both within one tab and across tabs using
+      localStorage mutex locks. One tab performs /auth/refresh while others
+      wait for TOKEN_REFRESHED broadcast. The refresh uses HTTP-only
+      refreshToken cookie and propagates CSRF headers when present.
+
+description: >
+  Coordinates JWT access token refresh across browser tabs using a
+  localStorage-based mutex lock. When a tab needs a fresh token, it attempts
+  to acquire the lock. If another tab owns the lock, the current tab waits
+  for a TOKEN_REFRESHED broadcast. The refreshing tab calls /auth/refresh
+  with the refreshToken cookie and optional CSRF header, then broadcasts
+  the result to all waiting tabs.
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: No token refresh is in progress.
+    - id: acquiring_lock
+      description: Attempting to acquire localStorage mutex lock for refresh.
+    - id: refreshing
+      description: This tab owns the lock and is performing /auth/refresh.
+    - id: waiting
+      description: Another tab owns the lock, waiting for TOKEN_REFRESHED broadcast.
+    - id: success
+      description: Token refresh succeeded, new token is staged.
+    - id: failed
+      description: Token refresh failed, session will be cleared.
+  transitions:
+    - id: refresh_requested
+      from: idle
+      to: acquiring_lock
+      trigger: refreshAccessToken() is called because current tab needs fresh token.
+      effects:
+        - Check if refresh is already in progress in this tab.
+        - Attempt to acquire localStorage mutex lock.
+    - id: lock_acquired
+      from: acquiring_lock
+      to: refreshing
+      trigger: localStorage lock is acquired successfully.
+      guards:
+        - field: lock_owner
+          condition: Lock is owned by this tab or lock is expired.
+      effects:
+        - Set lock timestamp in localStorage.
+        - Call /auth/refresh with cookie header and CSRF token.
+    - id: lock_not_acquired
+      from: acquiring_lock
+      to: waiting
+      trigger: Another tab owns the lock and it hasn't expired.
+      effects:
+        - Subscribe to TOKEN_REFRESHED broadcast.
+        - Wait for result with timeout.
+    - id: refresh_success
+      from: refreshing
+      to: success
+      trigger: /auth/refresh returns valid token payload.
+      guards:
+        - field: response
+          condition: raw.user or raw.data.user contains string _id and accessToken.
+      effects:
+        - Stage new access token in memory.
+        - Write user cookie.
+        - Broadcast TOKEN_REFRESHED to other tabs.
+        - Release localStorage lock.
+    - id: refresh_failure
+      from: refreshing
+      to: failed
+      trigger: /auth/refresh errors, times out, or returns invalid payload.
+      effects:
+        - Broadcast failed refresh result.
+        - Release localStorage lock.
+        - Clear session and redirect to /login.
+    - id: wait_success
+      from: waiting
+      to: success
+      trigger: TOKEN_REFRESHED broadcast received with success=true.
+      effects:
+        - Apply token from other tab's refresh.
+    - id: wait_timeout
+      from: waiting
+      to: failed
+      trigger: Wait timeout expires without TOKEN_REFRESHED broadcast.
+      effects:
+        - Try to acquire lock again.
+        - If still unavailable, clear session.
+
+conditions:
+  - id: lock_coordination
+    description: >
+      Only one tab performs /auth/refresh at a time. The lock is stored in
+      localStorage with a timestamp. If the lock is younger than
+      LOCK_TIMEOUT_MS, other tabs wait for the result.
+    trigger: refreshAccessToken() runs while another tab may be refreshing.
+    guards:
+      - field: refresh_lock
+        condition: localStorage refresh lock exists and is younger than LOCK_TIMEOUT_MS.
+    then:
+      - Wait for TOKEN_REFRESHED via waitForResult.
+      - If result succeeds, apply token from other tab.
+      - If waiting fails or times out, try to acquire lock again.
+    else:
+      - Acquire lock and perform refresh in current tab.
+
+  - id: csrf_header_injection
+    description: >
+      Refresh requests attach x-csrf-token when a csrfToken cookie is
+      available. This prevents CSRF attacks on the refresh endpoint.
+    trigger: /auth/refresh request is prepared.
+    guards:
+      - field: csrf_cookie
+        condition: getCsrfToken(cookieString) returns non-empty value.
+    then:
+      - Add x-csrf-token to request headers.
+    else:
+      - Send request without CSRF header.
+
+inputs:
+  - id: refresh_cookie
+    type: HTTP-only refreshToken cookie
+    source: Browser cookie header
+    required: true
+    validation:
+      presence: cookieHeader includes refreshToken=
+
+  - id: csrf_cookie
+    type: csrfToken cookie value
+    source: Browser cookies
+    required: false
+    validation:
+      format: non-empty string for header injection
+
+outputs:
+  - id: refresh_request
+    type: POST /auth/refresh HTTP request
+    destination: Backend /auth/refresh endpoint
+    lifespan: per refresh attempt
+
+  - id: refresh_result_broadcast
+    type: TOKEN_REFRESHED event
+    destination: BroadcastChannel and localStorage
+    lifespan: 500ms cleanup window
+
+  - id: refreshed_token
+    type: "normalized session with _id, accessToken"
+    destination: In-memory authSession
+    lifespan: until next refresh or logout
+
+evidence_refs:
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      export async function refreshAccessToken(options = {}) {
+        if (isRefreshing || refreshPromise) {
+          return refreshPromise || Promise.resolve({ success: false, error: "Refresh in progress", token: null });
+        }
+        const { apiClient } = options;
+        isRefreshing = true;
+        refreshPromise = performCoordinatedRefresh(apiClient).finally(() => {
+          isRefreshing = false;
+          refreshPromise = null;
+        });
+        return refreshPromise;
+      }
+    covers:
+      - "transition:refresh_requested"
+      - "condition:lock_coordination"
+
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      async function performCoordinatedRefresh(apiClient) {
+        const hasLock = acquireRefreshLock();
+        if (!hasLock) {
+          const { waitForResult } = await getCrossTab();
+          const result = await waitForResult({
+            storageKey: REFRESH_RESULT_KEY,
+            eventType: "TOKEN_REFRESHED",
+            timeoutMs: 8000,
+          });
+          if (result && result.success) {
+            setToken(result.token);
+            return result;
+          }
+        }
+        // ... perform refresh with lock
+      }
+    covers:
+      - "condition:lock_coordination"
+      - "transition:lock_acquired"
+      - "transition:lock_not_acquired"
+
+  - path: src/features/auth/api/auth-service.js
+    snippet: |
+      export async function refreshToken(paramsOrOptions = {}, maybeOptions = {}) {
+        const client = getClient(options);
+        return client.post({
+          path: "/auth/refresh",
+          body: null,
+          headers: applyCsrfHeaders(),
+          skipTokenRefresh: true,
+          skipAuthErrorHandling: true,
+        });
+      }
+    covers:
+      - "condition:csrf_header_injection"
+      - "output:refresh_request"
+
+confidence: 0.94
+confidence_rationale: >
+  Token refresh coordination, lock management, CSRF header injection, and
+  cross-tab broadcasting are directly evidenced in tokenRefresher.js and
+  auth-service.js. The refresh timeout and lock expiration logic are
+  confirmed by the code structure.
+unresolved_questions:
+  - Exact LOCK_TIMEOUT_MS value not specified in sampled code.
+  - Backend refresh endpoint response contract beyond user/accessToken.
+status: complete

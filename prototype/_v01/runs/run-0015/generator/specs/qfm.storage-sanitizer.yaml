@@ -1,0 +1,709 @@
+id: qfm.storage-sanitizer
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: storage-validation
+    coverage: full
+    notes: >
+      Validates 7 dashboard localStorage keys against type-specific rules.
+      Each key has a dedicated validator: targetId and downloadPdfKey require
+      non-empty identity strings; db_businessid enforces length limit (128),
+      rejects reserved literals ("null", "undefined"), whitespace, and
+      serialized payloads; downloadingpdf accepts boolean or string "true"/"false";
+      questionnaireSteps requires valid JSON array; currentStepper and LastformValues
+      require valid JSON objects. Unknown keys pass through with valid=true.
+  - id: storage-recovery
+    coverage: full
+    notes: >
+      When validation fails, replaces corrupted value with a safe default from
+      DEFAULT_KEY_FALLBACKS. Emits recovery events with taxonomy bucket
+      "storage corruption", failure mode ID "FM-STORAGE-001", and reason code
+      "storage_recovery_applied". Produces storageMutation objects with action
+      "none" (valid), "set" (recovered to default), or "remove" (fallback is null).
+      Recovery events include flowId for traceability.
+  - id: storage-corruption-patterns
+    coverage: full
+    notes: >
+      Handles 5 corruption patterns: (1) literal "null"/"undefined" strings from
+      JSON.stringify(null), (2) malformed JSON from interrupted writes, (3) type
+      mismatches (string instead of array), (4) whitespace/newlines in business IDs
+      from copy-paste, (5) serialized payloads (starting with [{") in identity fields.
+      Business ID validator also rejects values longer than 128 characters.
+
+description: >
+  Validates and recovers corrupted localStorage values used by the dashboard.
+  The sanitizer reads a localStorage key, validates it against type-specific rules
+  (non-empty string, valid JSON array, boolean, etc.), and if invalid, replaces it
+  with a safe default. Each recovery emits a QFM event with taxonomy bucket
+  "storage corruption" for observability. The storage contract module defines key
+  ownership, identity-bearing status, and provides owner-based cleanup for logout
+  flows. Identity-bearing keys (targetId, downloadPdfKey) require special handling:
+  they are committed only after successful persistence and must be cleaned up on
+  logout.
+
+state_machine: null
+
+conditions:
+  - id: key-normalization
+    description: >
+      Normalizes the input key against the allowed DASHBOARD_STORAGE_KEYS list.
+      Unknown or empty keys are treated as unsupported and trigger recovery with
+      the "unsupported_key" validation reason.
+    trigger: sanitizeDashboardPersistedKey() called with options.key
+    guards:
+      - field: key
+        condition: >
+          Key must be a non-empty string that matches one of the 7 dashboard
+          storage keys: targetId, db_businessid, downloadPdfKey, downloadingpdf,
+          questionnaireSteps, currentStepper, LastformValues.
+    then:
+      - Proceed to type-specific validation via validateStorageValueByKey()
+    else:
+      - Return recovery result with validationReason "unsupported_key"
+      - Emit "qfm.storage.recovered" event
+
+  - id: validation-dispatch
+    description: >
+      Dispatches to the appropriate type-specific validator based on the key name.
+      Each validator returns {valid, reason, value} where valid indicates whether
+      the raw value meets the contract.
+    trigger: Key normalization succeeds
+    guards:
+      - field: key
+        condition: >
+          Key is one of the 7 recognized dashboard storage keys.
+    then:
+      - targetId/downloadPdfKey → validateNonEmptyIdentity()
+      - db_businessid → validatePersistedBusinessId()
+      - downloadingpdf → validateBooleanStorageValue()
+      - questionnaireSteps → validateJsonArray()
+      - currentStepper/LastformValues → validateJsonObject()
+    else:
+      - Return passthrough with reason "unknown_key_passthrough"
+
+  - id: business-id-validation
+    description: >
+      Multi-rule validation for db_businessid: rejects empty strings, values
+      longer than 128 characters, reserved literals ("null", "undefined"),
+      whitespace/newlines, and serialized payloads (strings starting with [{").
+    trigger: validatePersistedBusinessId() called
+    guards:
+      - field: normalized_value
+        condition: Non-empty string after trim
+      - field: length
+        condition: <= 128 characters
+      - field: reserved_literal
+        condition: Does not match /^(null|undefined)$/i
+      - field: whitespace
+        condition: No \r, \n, \t, or \s characters
+      - field: serialized_payload
+        condition: Does not start with [{"
+    then:
+      - "Return valid=true, reason=valid, value=normalized"
+    else:
+      - "Return valid=false with specific failure reason, value=null"
+
+  - id: recovery-event-emission
+    description: >
+      When validation fails (recovered=true), emits a recovery event with full
+      QFM taxonomy integration. The event includes taxonomy bucket, failure mode
+      ID, reason code, validation reason, previous value type, and recovery action.
+      When valid, emits a "qfm.storage.valid" event with null taxonomy fields.
+    trigger: Validation completes with recovered=true
+    guards:
+      - field: recovered
+        condition: validation.valid !== true
+    then:
+      - Set eventName to "qfm.storage.recovered"
+      - Set taxonomyBucket to "storage corruption"
+      - Set failureModeId to "FM-STORAGE-001"
+      - Set reasonCode to "storage_recovery_applied"
+      - Set recoveryAction based on storageMutation.action
+    else:
+      - Set eventName to "qfm.storage.valid"
+      - Set taxonomyBucket, failureModeId to null
+      - Set reasonCode to "storage_value_valid"
+
+  - id: owner-based-cleanup
+    description: >
+      Builds a cleanup plan for a given owner by checking each key's contract.
+      Keys owned by the caller are removable; keys owned by others are blocked;
+      unknown keys are flagged separately. applyOwnedCleanup() executes the plan
+      by deleting removable keys from a storage snapshot.
+    trigger: buildOwnedCleanupPlan() or applyOwnedCleanup() called
+    guards:
+      - field: owner
+        condition: Non-empty string
+      - field: keys
+        condition: Array of non-empty strings
+    then:
+      - For each key: check STORAGE_KEY_CONTRACTS[key].owners.includes(owner)
+      - If owner matches → add to removableKeys
+      - If contract exists but owner doesn't match → add to blockedKeys
+      - If no contract → add to unknownKeys
+    else:
+      - Throw TypeError for invalid owner or keys
+
+  - id: identity-key-commitment
+    description: >
+      After a persistence operation, commits identity-bearing key values only
+      if persistence succeeded AND the candidate value is non-empty. If
+      persistence failed or the candidate is empty, retains the previous value.
+      Throws if key is not in STORAGE_IDENTITY_KEYS.
+    trigger: commitIdentityKeyAfterPersistence() called
+    guards:
+      - field: key
+        condition: Must be an identity-bearing key (targetId or downloadPdfKey)
+      - field: persistenceSucceeded
+        condition: Boolean indicating if the write to storage succeeded
+      - field: candidateValue
+        condition: >
+          After normalization, must be a non-empty string for targetId/downloadPdfKey
+    then:
+      - "Return committed=true, value=normalizedCandidate, previousValue=normalizedPersisted"
+    else:
+      - "Return committed=false with reason, value=normalizedPersisted"
+
+inputs:
+  - id: storage_key
+    type: "string — one of 7 dashboard localStorage key names"
+    source: "Caller of sanitizeDashboardPersistedKey() — typically dashboard initialization or storage change handlers"
+    required: true
+    validation:
+      allowed_values: "targetId, db_businessid, downloadPdfKey, downloadingpdf, questionnaireSteps, currentStepper, LastformValues"
+
+  - id: raw_value
+    type: "string | null — raw localStorage value"
+    source: "localStorage.getItem() or equivalent storage read"
+    required: false
+    validation:
+      note: "null indicates key does not exist in storage"
+
+  - id: fallback_value
+    type: "any — explicit fallback override"
+    source: "Caller-provided default, overrides DEFAULT_KEY_FALLBACKS"
+    required: false
+    validation:
+      note: "If undefined, uses DEFAULT_KEY_FALLBACKS[key]"
+
+  - id: flow_id
+    type: "string — traceability identifier"
+    source: "Caller-provided or defaults to 'dashboard.storage.sanitizer'"
+    required: false
+
+  - id: owner
+    type: "string — module name requesting cleanup"
+    source: "Auth flow or logout handler"
+    required: true
+    validation:
+      note: "Must be a non-empty string matching a known owner in STORAGE_KEY_CONTRACTS"
+
+  - id: cleanup_keys
+    type: "string[] — keys to evaluate for cleanup"
+    source: "Caller-provided list of storage keys"
+    required: true
+
+  - id: storage_snapshot
+    type: "object — current storage state"
+    source: "In-memory snapshot of localStorage contents"
+    required: true
+    validation:
+      note: "Must be a plain object for applyOwnedCleanup()"
+
+outputs:
+  - id: sanitization_result
+    type: "{ schema: string, key: string, value: any, recovered: boolean, storageMutation: { action: 'none'|'set'|'remove', key: string, value: string|null }, recovery: { schema: string, eventName: string, flowId: string, key: string, recovered: boolean, taxonomyBucket: string|null, failureModeId: string|null, reasonCode: string, validationReason: string, previousValueType: string, recoveryAction: string } }"
+    destination: "Caller of sanitizeDashboardPersistedKey() — drives storage writes and QFM event emission"
+    lifespan: "immediate"
+
+  - id: cleanup_plan
+    type: "{ owner: string, removableKeys: string[], blockedKeys: string[], unknownKeys: string[] }"
+    destination: "Caller of buildOwnedCleanupPlan() — drives logout cleanup logic"
+    lifespan: "immediate"
+
+  - id: cleanup_result
+    type: "{ owner: string, removableKeys: string[], blockedKeys: string[], unknownKeys: string[], nextStorageSnapshot: object }"
+    destination: "Caller of applyOwnedCleanup() — updated storage snapshot after cleanup"
+    lifespan: "immediate"
+
+  - id: identity_commitment
+    type: "{ key: string, committed: boolean, reason: string, value: any, previousValue: any }"
+    destination: "Caller of commitIdentityKeyAfterPersistence() — drives identity state updates"
+    lifespan: "immediate"
+
+evidence_refs:
+  - path: src/shared/lib/qfm/storageSanitizer.js
+    snippet: |
+      const DASHBOARD_STORAGE_KEYS = Object.freeze([
+        "targetId",
+        "db_businessid",
+        "downloadPdfKey",
+        "downloadingpdf",
+        "questionnaireSteps",
+        "currentStepper",
+        "LastformValues",
+      ]);
+    covers:
+      - "condition:key-normalization"
+      - "condition:validation-dispatch"
+    line_range:
+      start: 45
+      end: 53
+
+  - path: src/shared/lib/qfm/storageSanitizer.js
+    snippet: |
+      const DEFAULT_KEY_FALLBACKS = Object.freeze({
+        targetId: "",
+        db_businessid: null,
+        downloadPdfKey: null,
+        downloadingpdf: false,
+        questionnaireSteps: [],
+        currentStepper: null,
+        LastformValues: {},
+      });
+    covers:
+      - "output:sanitization_result"
+    line_range:
+      start: 55
+      end: 63
+
+  - path: src/shared/lib/qfm/storageSanitizer.js
+    snippet: |
+      function validatePersistedBusinessId(rawValue) {
+        const normalized = normalizeString(rawValue);
+        if (!normalized) {
+          return {
+            valid: false,
+            reason: "missing_or_empty_string",
+            value: null,
+          };
+        }
+
+        if (normalized.length > 128) {
+          return {
+            valid: false,
+            reason: "value_too_long",
+            value: null,
+          };
+        }
+
+        if (/^(null|undefined)$/i.test(normalized)) {
+          return {
+            valid: false,
+            reason: "reserved_literal_value",
+            value: null,
+          };
+        }
+
+        if (/[\r\n\t]/.test(normalized) || /\s/.test(normalized)) {
+          return {
+            valid: false,
+            reason: "contains_whitespace",
+            value: null,
+          };
+        }
+
+        if (/^[\[{"]/.test(normalized)) {
+          return {
+            valid: false,
+            reason: "serialized_payload_detected",
+            value: null,
+          };
+        }
+
+        return {
+          valid: true,
+          reason: "valid",
+          value: normalized,
+        };
+      }
+    covers:
+      - "condition:business-id-validation"
+    line_range:
+      start: 148
+      end: 195
+
+  - path: src/shared/lib/qfm/storageSanitizer.js
+    snippet: |
+      function validateStorageValueByKey(key, rawValue) {
+        if (key === "targetId" || key === "downloadPdfKey") {
+          return validateNonEmptyIdentity(rawValue);
+        }
+
+        if (key === "db_businessid") {
+          return validatePersistedBusinessId(rawValue);
+        }
+
+        if (key === "downloadingpdf") {
+          return validateBooleanStorageValue(rawValue);
+        }
+
+        if (key === "questionnaireSteps") {
+          return validateJsonArray(rawValue);
+        }
+
+        if (key === "currentStepper" || key === "LastformValues") {
+          return validateJsonObject(rawValue);
+        }
+
+        return {
+          valid: true,
+          reason: "unknown_key_passthrough",
+          value: rawValue,
+        };
+      }
+    covers:
+      - "condition:validation-dispatch"
+    line_range:
+      start: 265
+      end: 291
+
+  - path: src/shared/lib/qfm/storageSanitizer.js
+    snippet: |
+      export function sanitizeDashboardPersistedKey(options = {}) {
+        const key = normalizeStorageKey(options.key);
+        const rawValue = Object.prototype.hasOwnProperty.call(options, "rawValue")
+          ? options.rawValue
+          : null;
+        const flowId = normalizeString(options.flowId) ?? "dashboard.storage.sanitizer";
+
+        if (!key) {
+          const fallbackValue = resolveFallbackValue("unknown", options.fallbackValue);
+
+          return {
+            schema: QFM_STORAGE_SANITIZER_SCHEMA,
+            key: normalizeString(options.key),
+            value: fallbackValue,
+            recovered: true,
+            storageMutation: createStorageMutation(true, normalizeString(options.key), fallbackValue),
+            recovery: {
+              schema: QFM_STORAGE_SANITIZER_SCHEMA,
+              eventName: "qfm.storage.recovered",
+              flowId,
+              key: normalizeString(options.key),
+              recovered: true,
+              taxonomyBucket: QFM_STORAGE_RECOVERY_BUCKET,
+              failureModeId: QFM_STORAGE_RECOVERY_FAILURE_MODE_ID,
+              reasonCode: QFM_STORAGE_RECOVERY_REASON_CODE,
+              validationReason: "unsupported_key",
+              previousValueType: resolveValueType(rawValue),
+              recoveryAction: fallbackValue === null ? "remove" : "set_default",
+            },
+          };
+        }
+
+        const fallbackValue = resolveFallbackValue(key, options.fallbackValue);
+        const validation = validateStorageValueByKey(key, rawValue);
+        const recovered = validation.valid !== true;
+        const value = recovered ? fallbackValue : validation.value;
+        const storageMutation = createStorageMutation(recovered, key, value);
+
+        return {
+          schema: QFM_STORAGE_SANITIZER_SCHEMA,
+          key,
+          value,
+          recovered,
+          storageMutation,
+          recovery: {
+            schema: QFM_STORAGE_SANITIZER_SCHEMA,
+            eventName: recovered ? "qfm.storage.recovered" : "qfm.storage.valid",
+            flowId,
+            key,
+            recovered,
+            taxonomyBucket: recovered ? QFM_STORAGE_RECOVERY_BUCKET : null,
+            failureModeId: recovered ? QFM_STORAGE_RECOVERY_FAILURE_MODE_ID : null,
+            reasonCode: recovered ? QFM_STORAGE_RECOVERY_REASON_CODE : "storage_value_valid",
+            validationReason: validation.reason,
+            previousValueType: resolveValueType(rawValue),
+            recoveryAction:
+              storageMutation.action === "none"
+                ? "none"
+                : storageMutation.action === "remove"
+                  ? "remove"
+                  : "set_default",
+          },
+        };
+      }
+    covers:
+      - "condition:recovery-event-emission"
+      - "output:sanitization_result"
+    line_range:
+      start: 338
+      end: 401
+
+  - path: src/shared/lib/qfm/storageSanitizer.js
+    snippet: |
+      function createStorageMutation(recovered, key, value) {
+        if (!recovered) {
+          return {
+            action: "none",
+            key,
+            value: null,
+          };
+        }
+
+        const serializedValue = serializeSanitizedDashboardStorageValue(value);
+        if (serializedValue === null) {
+          return {
+            action: "remove",
+            key,
+            value: null,
+          };
+        }
+
+        return {
+          action: "set",
+          key,
+          value: serializedValue,
+        };
+      }
+    covers:
+      - "output:sanitization_result"
+    line_range:
+      start: 313
+      end: 336
+
+  - path: src/shared/lib/qfm/storageSanitizer.js
+    snippet: |
+      export const QFM_STORAGE_SANITIZER_SCHEMA = "qfm.storage-sanitizer.v1";
+      export const QFM_STORAGE_RECOVERY_BUCKET = "storage corruption";
+      export const QFM_STORAGE_RECOVERY_FAILURE_MODE_ID = "FM-STORAGE-001";
+      export const QFM_STORAGE_RECOVERY_REASON_CODE = "storage_recovery_applied";
+    covers:
+      - "condition:recovery-event-emission"
+    line_range:
+      start: 40
+      end: 43
+
+  - path: src/shared/lib/contracts/storage-contract.js
+    snippet: |
+      export const STORAGE_KEY_CONTRACTS = Object.freeze({
+        user: Object.freeze({
+          medium: "cookie",
+          owners: Object.freeze(["tokenService", "authFlows"]),
+          identityBearing: false,
+        }),
+        rememberMe: Object.freeze({
+          medium: "cookie",
+          owners: Object.freeze(["tokenService"]),
+          identityBearing: false,
+        }),
+        targetId: Object.freeze({
+          medium: "secureLocalStorage",
+          owners: Object.freeze(["useTargetId", "gateReportFlows"]),
+          identityBearing: true,
+        }),
+        questionnaireSteps: Object.freeze({
+          medium: "secureLocalStorage",
+          owners: Object.freeze(["useQuestionnaireStore"]),
+          identityBearing: false,
+        }),
+        currentStepper: Object.freeze({
+          medium: "secureLocalStorage",
+          owners: Object.freeze(["useQuestionnaireStore"]),
+          identityBearing: false,
+        }),
+        isClassificationFinished: Object.freeze({
+          medium: "secureLocalStorage",
+          owners: Object.freeze(["useIndustryClassification"]),
+          identityBearing: false,
+        }),
+        LastformValues: Object.freeze({
+          medium: "secureLocalStorage",
+          owners: Object.freeze(["useLocalStorage", "StoredAnswersContext"]),
+          identityBearing: false,
+        }),
+        downloadingpdf: Object.freeze({
+          medium: "secureLocalStorage",
+          owners: Object.freeze(["useDownloadStore"]),
+          identityBearing: false,
+        }),
+        downloadPdfKey: Object.freeze({
+          medium: "secureLocalStorage",
+          owners: Object.freeze(["useDownloadStore"]),
+          identityBearing: true,
+        }),
+      });
+    covers:
+      - "condition:owner-based-cleanup"
+      - "condition:identity-key-commitment"
+    line_range:
+      start: 109
+      end: 155
+
+  - path: src/shared/lib/contracts/storage-contract.js
+    snippet: |
+      export const STORAGE_IDENTITY_KEYS = Object.freeze(["targetId", "downloadPdfKey"]);
+    covers:
+      - "condition:identity-key-commitment"
+    line_range:
+      start: 157
+      end: 157
+
+  - path: src/shared/lib/contracts/storage-contract.js
+    snippet: |
+      export function buildOwnedCleanupPlan(owner, keys = []) {
+        const normalizedOwner = ensureOwner(owner);
+        const normalizedKeys = normalizeCleanupKeys(keys);
+        const removableKeys = [];
+        const blockedKeys = [];
+        const unknownKeys = [];
+
+        for (const key of normalizedKeys) {
+          const contract = getStorageKeyContract(key);
+
+          if (!contract) {
+            unknownKeys.push(key);
+            continue;
+          }
+
+          if (contract.owners.includes(normalizedOwner)) {
+            removableKeys.push(key);
+            continue;
+          }
+
+          blockedKeys.push(key);
+        }
+
+        return {
+          owner: normalizedOwner,
+          removableKeys,
+          blockedKeys,
+          unknownKeys,
+        };
+      }
+    covers:
+      - "condition:owner-based-cleanup"
+      - "output:cleanup_plan"
+    line_range:
+      start: 240
+      end: 269
+
+  - path: src/shared/lib/contracts/storage-contract.js
+    snippet: |
+      export function applyOwnedCleanup(owner, keys = [], storageSnapshot = {}) {
+        const plan = buildOwnedCleanupPlan(owner, keys);
+
+        if (!isPlainObject(storageSnapshot)) {
+          throw new TypeError("storageSnapshot must be a plain object.");
+        }
+
+        const nextStorageSnapshot = { ...storageSnapshot };
+
+        for (const key of plan.removableKeys) {
+          delete nextStorageSnapshot[key];
+        }
+
+        return {
+          ...plan,
+          nextStorageSnapshot,
+        };
+      }
+    covers:
+      - "condition:owner-based-cleanup"
+      - "output:cleanup_result"
+    line_range:
+      start: 271
+      end: 288
+
+  - path: src/shared/lib/contracts/storage-contract.js
+    snippet: |
+      export function commitIdentityKeyAfterPersistence({
+        key,
+        persistedValue,
+        candidateValue,
+        persistenceSucceeded,
+        options = {},
+      } = {}) {
+        if (!isIdentityBearingStorageKey(key)) {
+          throw new TypeError(`key must be an identity-bearing storage key. Received: ${String(key)}`);
+        }
+
+        const normalizedPersisted = resolveStorageContractValue(key, persistedValue, options);
+        const normalizedCandidate = resolveStorageContractValue(key, candidateValue, options);
+
+        if (!persistenceSucceeded) {
+          return {
+            key,
+            committed: false,
+            reason: "persistence_failed",
+            value: normalizedPersisted,
+            previousValue: normalizedPersisted,
+          };
+        }
+
+        if (!hasCommittedIdentityValue(key, normalizedCandidate)) {
+          return {
+            key,
+            committed: false,
+            reason: "missing_identity_in_success_response",
+            value: normalizedPersisted,
+            previousValue: normalizedPersisted,
+          };
+        }
+
+        return {
+          key,
+          committed: true,
+          reason: "persisted",
+          value: normalizedCandidate,
+          previousValue: normalizedPersisted,
+        };
+      }
+    covers:
+      - "condition:identity-key-commitment"
+      - "output:identity_commitment"
+    line_range:
+      start: 302
+      end: 343
+
+  - path: src/shared/lib/contracts/storage-contract.js
+    snippet: |
+      function hasCommittedIdentityValue(key, value) {
+        if (key === "targetId") {
+          return typeof value === "string" && value.length > 0;
+        }
+
+        if (key === "downloadPdfKey") {
+          return typeof value === "string" && value.length > 0;
+        }
+
+        return value !== null && typeof value !== "undefined";
+      }
+    covers:
+      - "condition:identity-key-commitment"
+    line_range:
+      start: 290
+      end: 300
+
+confidence: 0.91
+confidence_rationale: >
+  All 3 discovered behaviors are fully evidenced across 2 primary source files
+  with direct code snippets. Storage validation confirmed in storageSanitizer.js
+  with 7 keys, type-specific validators, and multi-rule business ID validation.
+  Storage recovery confirmed with safe defaults, QFM taxonomy integration
+  (bucket, failure mode ID, reason code), and storageMutation output shape.
+  Corruption pattern handling confirmed with 5 distinct patterns. Storage contract
+  confirmed in storage-contract.js with 9 key contracts, owner-based cleanup plan,
+  and identity key commitment logic. Deducted 0.09 because: (1) the sanitizer
+  only covers 7 of the 9 keys in storage-contract.js (user, rememberMe,
+  isClassificationFinished are not sanitized), (2) the storage-contract.js
+  STORAGE_VALIDATORS have their own validation logic that may diverge from the
+  sanitizer's validators (e.g., questionnaireSteps default is ["step-1"..."step-4"]
+  in contract but [] in sanitizer), (3) the interaction between
+  sanitizeDashboardPersistedKey and resolveStorageContractValue is not explicitly
+  wired — callers must coordinate both modules, (4) the cloneValue deep-clone
+  implementation does not handle circular references (documented as known limitation
+  in comments).
+
+unresolved_questions:
+  - "Why do storageSanitizer.js and storage-contract.js have different default values for questionnaireSteps? Sanitizer defaults to [] while contract defaults to ['step-1', 'step-2', 'step-3', 'step-4']. Which is authoritative?"
+  - "The sanitizer covers 7 keys but the contract defines 9 (including user, rememberMe, isClassificationFinished). Are the cookie-based keys (user, rememberMe) intentionally excluded from sanitizer validation?"
+  - "How do callers coordinate between sanitizeDashboardPersistedKey() and resolveStorageContractValue()? Are they called in sequence, or does one replace the other?"
+  - "The STORAGE_VALIDATORS in storage-contract.js have their own normalization logic (e.g., normalizeIdentityString, parseJsonOrNull) that differs from the sanitizer's validators. Are these intentional redundancies or drift?"
+  - "commitIdentityKeyAfterPersistence() throws for non-identity keys. Is this a hard contract or should callers guard with isIdentityBearingStorageKey() first?"
+  - "The storageMutation action 'remove' fires when fallbackValue is null (e.g., db_businessid, downloadPdfKey, currentStepper). Does the caller actually call localStorage.removeItem() in this case, or is the mutation just advisory?"
+
+status: complete

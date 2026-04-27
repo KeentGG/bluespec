@@ -1,0 +1,202 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.cross-tab-sync
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth_cross_tab_sync
+    coverage: full
+    notes: >
+      Login and logout events are broadcast across tabs through
+      BroadcastChannel with localStorage fallback. Login redirects other tabs
+      away from /login; logout clears auth state and redirects protected routes
+      to /login. Debounce mechanisms prevent duplicate event processing.
+
+description: >
+  Synchronizes authentication state across browser tabs using BroadcastChannel
+  API with localStorage fallback for Safari compatibility. Login events redirect
+  other tabs from /login to /companies, while logout events clear auth state
+  and redirect protected routes to /login. Debounce mechanisms prevent
+  duplicate event processing.
+
+state_machine:
+  initial: listening
+  states:
+    - id: listening
+      description: Tab is listening for cross-tab auth events.
+    - id: processing_login
+      description: Processing a login event from another tab.
+    - id: processing_logout
+      description: Processing a logout event from another tab.
+  transitions:
+    - id: login_event_received
+      from: listening
+      to: processing_login
+      trigger: BroadcastChannel or localStorage receives login event.
+      guards:
+        - field: debounce
+          condition: Not within debounce window of previous login event.
+      effects:
+        - If on /login page, redirect to /companies.
+        - Update local auth state.
+    - id: logout_event_received
+      from: listening
+      to: processing_logout
+      trigger: BroadcastChannel or localStorage receives logout event.
+      guards:
+        - field: debounce
+          condition: Not within debounce window of previous logout event.
+      effects:
+        - If on protected route, redirect to /login.
+        - Clear local auth state.
+    - id: event_processed
+      from: processing_login
+      to: listening
+      trigger: Login event handling complete.
+    - id: event_processed
+      from: processing_logout
+      to: listening
+      trigger: Logout event handling complete.
+
+conditions:
+  - id: broadcast_channel_available
+    description: >
+      Uses BroadcastChannel API when available for reliable cross-tab
+      communication. Falls back to localStorage for Safari and older browsers.
+    trigger: Cross-tab sync is initialized.
+    guards:
+      - field: browser_support
+        condition: typeof BroadcastChannel !== "undefined".
+    then:
+      - Create BroadcastChannel for auth events.
+    else:
+      - Use localStorage event listener as fallback.
+
+  - id: debounce_window
+    description: >
+      Prevents duplicate event processing within a configurable time window
+      (1000ms). This prevents rapid successive login/logout events from causing
+      multiple redirects.
+    trigger: Cross-tab event is received.
+    guards:
+      - field: last_event_time
+        condition: Current time is outside debounce window of last event.
+    then:
+      - Process the event.
+      - Update last event timestamp.
+    else:
+      - Skip duplicate event processing.
+
+inputs:
+  - id: auth_event
+    type: "BroadcastChannel message or localStorage event"
+    source: Other browser tabs
+    required: true
+    validation:
+      event_types: login, logout
+
+  - id: current_path
+    type: string URL path
+    source: window.location.pathname
+    required: true
+    validation:
+      format: normalized URL path
+
+outputs:
+  - id: login_broadcast
+    type: login event
+    destination: BroadcastChannel and localStorage
+    lifespan: until processed by other tabs
+
+  - id: logout_broadcast
+    type: logout event
+    destination: BroadcastChannel and localStorage
+    lifespan: until processed by other tabs
+
+  - id: redirect_action
+    type: browser navigation
+    destination: window.location.href
+    lifespan: immediate
+
+evidence_refs:
+  - path: src/features/auth/lib/authBroadcast.js
+    snippet: |
+      export function broadcastLogout() {
+        if (typeof window === "undefined") return;
+        const timestamp = Date.now();
+        broadcastMessage({
+          channelName: CHANNEL_NAME,
+          eventType: LOGOUT_EVENT,
+          data: { timestamp },
+          storageKey: `${LOGOUT_KEY_PREFIX}${timestamp}`,
+          cleanupMs: 100,
+        });
+      }
+    covers:
+      - "output:logout_broadcast"
+      - "condition:broadcast_channel_available"
+
+  - path: src/features/auth/lib/authBroadcast.js
+    snippet: |
+      export function broadcastLogin() {
+        if (typeof window === "undefined") return;
+        const timestamp = Date.now();
+        broadcastMessage({
+          channelName: CHANNEL_NAME,
+          eventType: LOGIN_EVENT,
+          data: { timestamp },
+          storageKey: `${LOGIN_KEY_PREFIX}${timestamp}`,
+          cleanupMs: 100,
+        });
+      }
+    covers:
+      - "output:login_broadcast"
+
+  - path: src/features/auth/lib/authBroadcast.js
+    snippet: |
+      function handleLoginEvent(callback) {
+        const now = Date.now();
+        if (now - lastLoginTime < LOGIN_DEBOUNCE_MS) return;
+        lastLoginTime = now;
+        const currentPath = window.location.pathname;
+        const isLoginPage = currentPath.includes("/login");
+        if (isLoginPage) {
+          const basePath = currentPath.split("/login")[0] || "";
+          const companiesPath = basePath ? `${basePath}/companies` : "/companies";
+          window.location.href = companiesPath;
+        }
+        if (typeof callback === "function") callback();
+      }
+    covers:
+      - "transition:login_event_received"
+      - "condition:debounce_window"
+      - "output:redirect_action"
+
+  - path: src/features/auth/lib/authBroadcast.js
+    snippet: |
+      function handleLogoutEvent(callback) {
+        const now = Date.now();
+        if (now - lastRedirectTime < REDIRECT_DEBOUNCE_MS) return;
+        lastRedirectTime = now;
+        const currentPath = window.location.pathname;
+        const isProtected = currentPath.includes("/companies") || currentPath.includes("/reports");
+        if (isProtected) {
+          const basePath = window.location.pathname.split("/companies")[0].split("/reports")[0] || "";
+          const loginPath = basePath ? `${basePath}/login` : "/login";
+          window.location.href = loginPath;
+        }
+        if (typeof callback === "function") callback();
+      }
+    covers:
+      - "transition:logout_event_received"
+      - "condition:debounce_window"
+
+confidence: 0.91
+confidence_rationale: >
+  BroadcastChannel usage, localStorage fallback, login/logout event handling,
+  and debounce mechanisms are directly evidenced in authBroadcast.js.
+  The debounce window of 1000ms is confirmed by the constant definition.
+unresolved_questions:
+  - Safari-specific workarounds beyond localStorage fallback.
+status: complete

@@ -1,0 +1,32 @@
+spec_id: company.list-management
+output_path: runs/run-0015/generator/specs/company.list-management.yaml
+discovered_behaviors:
+  - id: company-list-fetching
+    description: SWR-based company list fetching with debounced search and sort options
+    priority: high
+    evidence_refs:
+      - src/features/company/hooks/useCompaniesPage.ts
+      - src/features/company/hooks/useCompanyListQuery.ts
+  - id: company-search-debounce
+    description: 300ms debounce on search input before sending to API
+    priority: medium
+    evidence_refs:
+      - src/features/company/hooks/useCompaniesPage.ts
+  - id: company-logo-error-handling
+    description: Per-business logo load failure tracking with fallback UI
+    priority: low
+    evidence_refs:
+      - src/features/company/hooks/useCompaniesPage.ts
+source_files:
+  - src/features/company/hooks/useCompaniesPage.ts
+  - src/features/company/hooks/useCompanyListQuery.ts
+  - src/features/company/components/CompaniesPageClient.tsx
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - Company list fetched via SWR with debounced search
+  - Sort by name or updated_at (asc/desc)
+  - 300ms debounce on search input
+  - Logo load failures tracked per business ID
+  - Rollback gate check on mount
+  - URL entry handling for auto-open modals

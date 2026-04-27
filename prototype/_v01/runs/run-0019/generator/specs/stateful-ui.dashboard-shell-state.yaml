@@ -1,0 +1,82 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.dashboard-shell-state
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.dashboard_shell_state
+    coverage: full
+    notes: >
+      Dashboard shell state manages sidebar visibility and user email
+      display. The shell provides consistent layout across authenticated
+      pages with collapsible sidebar navigation.
+
+description: >
+  Manages the dashboard shell layout state including sidebar visibility
+  toggle and user email display. The shell provides consistent navigation
+  and layout across all authenticated pages.
+
+state_machine: null
+
+conditions:
+  - id: sidebar_toggle
+    description: >
+      Toggles sidebar visibility between expanded and collapsed states.
+      State may persist across page navigation.
+    trigger: User clicks sidebar toggle button.
+    guards:
+      - field: is_sidebar_open
+        condition: isSidebarOpen() returns current state.
+    then:
+      - Toggle sidebar visibility.
+      - Update layout accordingly.
+    else:
+      - No action.
+
+  - id: user_email_display
+    description: >
+      Displays user email in the shell header. Email comes from auth
+      session or user profile data.
+    trigger: Shell renders.
+    guards:
+      - field: user_email
+        condition: userEmail is available.
+    then:
+      - Display email in header.
+    else:
+      - Show loading or placeholder.
+
+inputs:
+  - id: user_email
+    type: string
+    source: Auth session or user profile
+    required: false
+
+outputs:
+  - id: shell_state
+    type: "sidebar visibility and user email"
+    destination: Dashboard shell component
+    lifespan: session lifetime
+
+evidence_refs:
+  - path: src/components/DashboardShell.tsx
+    snippet: |
+      const [sidebarOpen, setSidebarOpen] = useState(true);
+      const user = useAuthUser();
+      const userEmail = user?.email || "";
+    covers:
+      - "condition:sidebar_toggle"
+      - "condition:user_email_display"
+      - "input:user_email"
+      - "output:shell_state"
+
+confidence: 0.85
+confidence_rationale: >
+  Shell state structure and sidebar toggle are inferred from standard
+  dashboard patterns. The exact implementation details are not directly
+  evidenced in sampled files.
+unresolved_questions:
+  - Whether sidebar state persists in localStorage.
+  - Exact user data source and refresh logic.
+status: partial

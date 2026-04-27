@@ -1,0 +1,23 @@
+spec_id: routing.base-path
+output_path: runs/run-0015/generator/specs/routing.base-path.yaml
+discovered_behaviors:
+  - id: base-path-resolution
+    description: Dashboard runs at sub-path (default: /dashboard) with withBasePath() for URL construction
+    priority: medium
+    evidence_refs:
+      - src/shared/lib/routing/basePath.js
+  - id: external-url-bypass
+    description: External URLs bypass base path construction
+    priority: low
+    evidence_refs:
+      - src/shared/lib/routing/basePath.js
+source_files:
+  - src/shared/lib/routing/basePath.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - Dashboard runs at sub-path configured via NEXT_PUBLIC_BASE_PATH
+  - Default base path is /dashboard
+  - withBasePath() prepends base path to internal routes
+  - External URLs (http/https) bypass base path
+  - Used throughout app for URL construction

@@ -1,0 +1,18 @@
+rubric_version: v002
+parent_version: v001
+seed_sources:
+  - rubrics/seed/universal.yaml
+active_criteria:
+  - coverage_core_behavior
+  - completeness_inputs_outputs
+  - consistency_cross_refs
+  - golden_set_recall
+  - conditional_flow_documentation
+weights:
+  coverage_core_behavior: 1
+  completeness_inputs_outputs: 1
+  consistency_cross_refs: 0.8
+  golden_set_recall: 1.2
+  conditional_flow_documentation: 0.81
+effective_from_run: run-0002
+official_channel_only: true

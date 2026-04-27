@@ -1,0 +1,959 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: api.client
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: api-client-request-flow
+    coverage: full
+    notes: >
+      The client resolves request URLs from the configured API base, merges caller
+      headers with Bearer and userId auth headers, injects CSRF headers for
+      state-changing requests, forwards cache and AbortSignal options into fetch,
+      and always sends cookies with credentials included.
+  - id: api-client-token-refresh
+    coverage: full
+    notes: >
+      Requests that fail with 401, jwt-expired 500 responses, or CSRF-related 403
+      responses trigger a coordinated refresh flow. Successful refresh retries the
+      original request once; failed refresh escalates to centralized auth-error
+      cleanup and login redirect.
+  - id: api-client-response-normalization
+    coverage: full
+    notes: >
+      Successful transport responses are normalized through the QFM response
+      adapter into a consistent ApiResult shape, including wrapped/raw envelope
+      detection and explicit contract-failure tagging.
+
+description: >
+  Provides a centralized frontend HTTP client that prepares authenticated browser
+  requests, automatically includes session cookies, adds Bearer and CSRF headers
+  when needed, normalizes backend responses into a stable result envelope, and
+  attempts one coordinated token refresh before falling back to global auth-error
+  cleanup and redirect when a session can no longer be recovered.
+
+state_machine:
+  initial: ready
+  states:
+    - id: ready
+      description: The client is idle and can accept a new request.
+    - id: preparing_request
+      description: The client is resolving URL, headers, body, and retry flags for an outgoing request.
+    - id: awaiting_response
+      description: Fetch is in flight with credentials included and optional cache/signal settings.
+    - id: refreshing_credentials
+      description: The client has invoked refreshAccessToken to recover from missing CSRF state or expired auth.
+    - id: retrying_request
+      description: The original request is being reissued once after a successful refresh.
+    - id: handling_auth_failure
+      description: Centralized auth cleanup and redirect logic is running because refresh recovery failed.
+    - id: request_completed
+      description: A normalized ApiResult has been returned to the caller.
+    - id: request_aborted
+      description: The request was cancelled through AbortSignal and returns an aborted result.
+  transitions:
+    - id: request_started
+      from: ready
+      to: preparing_request
+      trigger: Caller invokes request(), get(), post(), patch(), or delete().
+      guards:
+        - field: fetch_impl
+          condition: resolveFetchImpl returns a callable fetch implementation.
+        - field: request_url
+          condition: resolveRequestUrl returns a non-null URL.
+      effects:
+        - Resolve the freshest auth session from getToken().
+        - Normalize caller-supplied headers and determine method/body behavior.
+    - id: request_dispatched
+      from: preparing_request
+      to: awaiting_response
+      trigger: Request headers and body are finalized.
+      effects:
+        - Merge Authorization and userId headers when a valid token exists.
+        - Inject x-csrf-token for state-changing non-refresh requests when a CSRF cookie is available.
+        - Call fetch with method, headers, body, signal, cache, and credentials set to include.
+    - id: response_requires_refresh
+      from: awaiting_response
+      to: refreshing_credentials
+      trigger: The first normalized response indicates expired auth or CSRF recovery is needed.
+      guards:
+        - field: retry_flags
+          condition: retriedAfterRefresh is false, skipTokenRefresh is false, and path is not /auth/refresh.
+        - field: response_status
+          condition: status is 401, or 500 with message containing "jwt expired", or 403 with message containing "csrf".
+      effects:
+        - Call refreshAccessToken with the current apiClient methods.
+    - id: refresh_retries_request
+      from: refreshing_credentials
+      to: retrying_request
+      trigger: refreshAccessToken returns success with a token payload.
+      effects:
+        - Copy the original request options into retryOptions.
+        - Replace or clear x-csrf-token headers based on refreshResult.csrfToken when retrying a CSRF failure.
+        - Mark the retry as retriedAfterRefresh to prevent loops.
+    - id: retry_reissued
+      from: retrying_request
+      to: awaiting_response
+      trigger: executeRequest() recurses with the retry options.
+      effects:
+        - Re-run the same request flow once using refreshed session state.
+    - id: refresh_failure_escalates
+      from: refreshing_credentials
+      to: handling_auth_failure
+      trigger: refreshAccessToken fails or does not yield a retryable token.
+      guards:
+        - field: skip_auth_error_handling
+          condition: requestOptions.skipAuthErrorHandling is not true.
+      effects:
+        - Invoke handleAuthError with redirectUrl /login and reason session_expired.
+    - id: auth_failure_returned
+      from: handling_auth_failure
+      to: request_completed
+      trigger: handleAuthError finishes.
+      effects:
+        - Return the original failed ApiResult to the caller after cleanup/redirect is initiated.
+    - id: response_returned
+      from: awaiting_response
+      to: request_completed
+      trigger: Fetch resolves and no retry or terminal auth-handling path takes over.
+      effects:
+        - Parse JSON when available and normalize the payload into ApiResult fields.
+        - Return ok/statusCode/message/data/envelopeType/contractFailure/taxonomyBucket/raw metadata.
+    - id: request_aborted_transition
+      from: awaiting_response
+      to: request_aborted
+      trigger: fetch throws an AbortError.
+      effects:
+        - Return a failed ApiResult with aborted true and reason aborted.
+    - id: request_failed_transition
+      from: awaiting_response
+      to: request_completed
+      trigger: fetch throws a non-abort error.
+      effects:
+        - Return a failed ApiResult with reason request_failed.
+
+conditions:
+  - id: auth_header_injection
+    description: Valid in-memory auth sessions are translated into Authorization and userId headers before dispatch.
+    trigger: executeRequest() constructs request headers.
+    guards:
+      - field: auth_session
+        condition: token.accessToken and token._id are non-empty strings.
+    then:
+      - "Add Authorization: Bearer {accessToken}."
+      - "Add userId: {_id}."
+    else:
+      - Preserve caller headers without auth additions.
+
+  - id: csrf_header_injection
+    description: State-changing requests automatically attach x-csrf-token unless the caller already provided one or the request is the refresh endpoint.
+    trigger: executeRequest() prepares a non-GET/non-HEAD request.
+    guards:
+      - field: request_shape
+        condition: withBody is true, x-csrf-token is absent, skipTokenRefresh is false, and path is not /auth/refresh.
+      - field: csrf_cookie
+        condition: getCsrfToken() returns a non-empty cookie value.
+    then:
+      - Set headers["x-csrf-token"] to the decoded csrfToken cookie value.
+    else:
+      - Send the request without adding a CSRF header.
+
+  - id: proactive_csrf_refresh
+    description: Missing CSRF state on the first state-changing attempt triggers a refresh before dispatch so the client can re-read a fresh csrfToken cookie.
+    trigger: executeRequest() prepares a state-changing request without a csrfToken cookie.
+    guards:
+      - field: csrf_cookie
+        condition: getCsrfToken() returns null and retriedAfterRefresh is false.
+    then:
+      - Call refreshAccessToken before the first fetch attempt.
+      - Re-read document.cookie and attach x-csrf-token if refresh succeeds.
+    else:
+      - Continue with the current request preparation path.
+
+  - id: coordinated_refresh_lock
+    description: Refresh attempts are coordinated across tabs so one tab refreshes while others wait for the shared result.
+    trigger: refreshAccessToken() runs while another tab may already be refreshing.
+    guards:
+      - field: refresh_lock
+        condition: localStorage contains eoyt-refresh-lock with a timestamp newer than LOCK_TIMEOUT_MS.
+    then:
+      - Wait for TOKEN_REFRESHED through waitForResult using eoyt-refresh-result.
+      - Apply the token from another tab when the shared result succeeds.
+      - Attempt lock acquisition again if the wait fails or times out.
+    else:
+      - Acquire the lock and performRefresh locally.
+      - Broadcast TOKEN_REFRESHED with cleanupMs 500 when refresh succeeds.
+
+  - id: qfm_response_normalization
+    description: Transport responses and raw payloads are converted into one consistent result envelope before the caller receives them.
+    trigger: fetch resolves and parseResponsePayload() returns a payload or undefined.
+    then:
+      - Treat { status, data } inputs as transport responses and pass transportStatus into normalizeMixedEnvelope.
+      - Return ok, statusCode, message, data, envelopeType, raw, taxonomyBucket, and contractFailure fields.
+
+  - id: contract_failure_marking
+    description: Broken wrapped/raw response shapes are marked as data-contract failures instead of being treated as successful responses.
+    trigger: normalizeQfmResponse() evaluates the normalized payload.
+    guards:
+      - field: normalized_payload
+        condition: statusCode is invalid, transport data is missing, wrapped data/statusCode is missing or invalid, normalized data is undefined, or the original payload is undefined.
+    then:
+      - Set ok to false.
+      - Set taxonomyBucket to data contract.
+      - Attach a structured contractFailure object with reasonCode and message.
+    else:
+      - Preserve normalized.ok and leave taxonomyBucket null.
+
+  - id: terminal_auth_error_cleanup
+    description: Non-refreshable auth failures clear client auth state and redirect to login unless the caller opted out.
+    trigger: A response remains an auth error after refresh handling or is immediately classified as an auth error.
+    guards:
+      - field: auth_error_handling
+        condition: skipAuthErrorHandling is false and the request path is not /auth/refresh.
+    then:
+      - Clear SWR client cache.
+      - Clear token memory, user cookie, and known auth localStorage keys.
+      - Redirect to /login with reason=session_expired using window.location.replace().
+    else:
+      - Return the failed ApiResult without invoking global cleanup.
+
+inputs:
+  - id: request_path
+    type: string path or absolute HTTP URL
+    source: Caller of request/get/post/patch/delete
+    required: true
+    validation:
+      resolution: joined with apiBaseUrl unless already absolute
+
+  - id: request_method
+    type: HTTP method string
+    source: Caller of request() or convenience methods
+    required: false
+    validation:
+      default: GET
+      normalization: uppercased by normalizeRequestMethod
+
+  - id: request_headers
+    type: Record<string,string>
+    source: Caller-supplied request options
+    required: false
+    validation:
+      normalization: Headers objects and plain objects are normalized into a mutable header record
+
+  - id: request_query
+    type: Record<string,unknown> or URLSearchParams
+    source: Caller-supplied request options
+    required: false
+    validation:
+      encoding: appended to the resolved URL and skips nullish entries
+
+  - id: request_body
+    type: unknown body payload
+    source: Caller-supplied request options
+    required: false
+    validation:
+      serialization: objects and arrays are JSON.stringified unless already FormData, URLSearchParams, or string
+
+  - id: auth_session
+    type: Token object with _id, email, accessToken
+    source: In-memory auth session via getToken()
+    required: false
+    validation:
+      headers: Authorization and userId are added only when _id and accessToken are non-empty strings
+
+  - id: csrf_cookie
+    type: csrfToken cookie value
+    source: document.cookie
+    required: false
+    validation:
+      decoding: decoded from the csrfToken cookie before header injection
+
+  - id: refresh_cookie
+    type: HTTP-only refreshToken cookie
+    source: Browser-managed cookie jar sent automatically because fetch uses credentials include
+    required: false
+    validation:
+      visibility: unreadable to client JavaScript and only used indirectly during /auth/refresh
+
+  - id: abort_signal
+    type: AbortSignal
+    source: Caller-supplied request options
+    required: false
+    validation:
+      effect: passed directly to fetch and maps AbortError to an aborted ApiResult
+
+  - id: transport_response
+    type: Response status plus parsed payload
+    source: Backend fetch response
+    required: true
+    validation:
+      normalization: wrapped/raw payloads are normalized through normalizeQfmResponse before return
+
+outputs:
+  - id: outgoing_request_headers
+    type: merged HTTP header object
+    destination: fetch(requestUrl, { headers })
+    lifespan: per-request
+
+  - id: outgoing_request
+    type: fetch invocation with method/body/query/cache/signal/credentials
+    destination: backend API endpoint
+    lifespan: per-request
+
+  - id: refreshed_token
+    type: token payload with _id, email, accessToken and optional csrfToken
+    destination: tokenRefresher result, in-memory auth session, and readable user cookie via setToken()
+    lifespan: session for access token state; 7 days for the user cookie mirror
+
+  - id: retried_request
+    type: one recursive executeRequest() call after refresh
+    destination: original API endpoint
+    lifespan: one retry attempt per request
+
+  - id: normalized_api_result
+    type: ApiResult<T> with ok/statusCode/message/data/envelopeType/contractFailure/taxonomyBucket/raw/headers/url/error/aborted/reason
+    destination: caller of the api client
+    lifespan: immediate return value
+
+  - id: auth_failure_redirect
+    type: browser redirect to /login?reason=session_expired
+    destination: window.location.replace()
+    lifespan: immediate navigation side effect
+
+evidence_refs:
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      export interface RequestOptions {
+        path?: string;
+        method?: string;
+        body?: unknown;
+        headers?: Record<string, string>;
+        query?: Record<string, unknown> | URLSearchParams;
+        signal?: AbortSignal;
+        cache?: RequestCache;
+        token?: Token;
+        tokenOptions?: TokenOptions;
+        apiBaseUrl?: string;
+        fetchImpl?: typeof fetch;
+        skipTokenRefresh?: boolean;
+        skipAuthErrorHandling?: boolean;
+      }
+    covers:
+      - input:request_path
+      - input:request_method
+      - input:request_headers
+      - input:request_query
+      - input:request_body
+      - input:abort_signal
+    line_range:
+      start: 392
+      end: 406
+
+  - path: src/shared/lib/contracts/api-contract.ts
+    snippet: |
+      export function buildAuthHeaders(
+        headers: Record<string, string> = {},
+        token: Token | null = null,
+      ): AuthHeaders {
+        const nextHeaders: AuthHeaders = isPlainObject(headers) ? { ...headers } : {};
+        const accessToken = typeof token?.accessToken === "string" ? token.accessToken.trim() : "";
+        const userId = typeof token?._id === "string" ? token._id.trim() : "";
+
+        if (!accessToken || !userId) {
+          return nextHeaders;
+        }
+
+        nextHeaders.Authorization = `Bearer ${accessToken}`;
+        nextHeaders.userId = userId;
+        return nextHeaders;
+      }
+    covers:
+      - condition:auth_header_injection
+      - input:auth_session
+      - output:outgoing_request_headers
+    line_range:
+      start: 65
+      end: 79
+
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      export function createApiClient(options: ApiClientOptions = {}): ApiClient {
+        async function executeRequest<T>(
+          requestOptions: RequestOptions = {},
+          { retriedAfterRefresh = false }: { retriedAfterRefresh?: boolean } = {},
+        ): Promise<ApiResult<T>> {
+          const fetchImpl = resolveFetchImpl(requestOptions, options);
+          if (typeof fetchImpl !== "function") {
+            throw new TypeError("apiClient requires a fetch implementation.");
+          }
+
+          const requestUrl = resolveRequestUrl(requestOptions, options);
+          if (!requestUrl) {
+            return createResult<T>({
+              ok: false,
+              statusCode: 503,
+              message: "API service is unavailable.",
+              reason: "missing_api_base_url",
+            });
+          }
+
+          const token = resolveTokenForRequest(requestOptions, options);
+          const requestHeaders = normalizeHeaderInput(requestOptions.headers);
+          const headers = buildAuthHeaders(requestHeaders, token);
+          const method = normalizeRequestMethod(requestOptions.method);
+          const withBody = method !== "GET" && method !== "HEAD";
+          const isRefreshEndpoint = requestOptions.path === "/auth/refresh";
+          const skipRefresh = requestOptions.skipTokenRefresh === true;
+
+          // Global CSRF Interceptor: Attach x-csrf-token to all state-changing requests
+          if (withBody && !hasHeader(headers, "x-csrf-token") && !skipRefresh && !isRefreshEndpoint) {
+            let csrfToken = getCsrfToken();
+
+            // Proactive refresh: if no CSRF token and not already retried, trigger refresh
+            if (!csrfToken && !retriedAfterRefresh) {
+              const refreshAccessToken = await getRefreshAccessToken();
+              const refreshResult = await refreshAccessToken({
+                apiClient: { request, get, post, patch, delete: remove },
+              });
+
+              if (refreshResult.success) {
+                // Re-read CSRF token after successful refresh
+                csrfToken = getCsrfToken();
+              }
+            }
+
+            if (csrfToken) {
+              headers["x-csrf-token"] = csrfToken;
+            }
+          }
+
+          const requestBody = withBody
+            ? resolveRequestBody(requestOptions.body, headers)
+            : {
+                body: undefined,
+                headers,
+              };
+
+          try {
+            const response = await fetchImpl(requestUrl, {
+              method,
+              headers: requestBody.headers,
+              body: requestBody.body,
+              signal: requestOptions.signal,
+              cache: requestOptions.cache,
+              credentials: "include",
+            });
+    covers:
+      - transition:request_started
+      - transition:request_dispatched
+      - condition:csrf_header_injection
+      - condition:proactive_csrf_refresh
+      - input:csrf_cookie
+      - input:refresh_cookie
+      - output:outgoing_request
+      - output:outgoing_request_headers
+    line_range:
+      start: 445
+      end: 510
+
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      const payload = await parseResponsePayload(response);
+      const normalized = normalizeQfmResponse(
+        {
+          status: response.status,
+          data: payload,
+        },
+        {
+          transportStatus: response.status,
+        },
+      );
+
+      const result = createResult<T>({
+        ok: normalized.ok,
+        statusCode: normalized.statusCode,
+        message: normalized.message,
+        data: normalized.data as T,
+        envelopeType: normalized.envelopeType,
+        contractFailure: normalized.contractFailure ?? null,
+        taxonomyBucket: normalized.taxonomyBucket ?? null,
+        raw: normalized.raw,
+        response,
+        status: response.status,
+        headers: headersToObject(response.headers),
+        url: requestUrl,
+        reason: normalized.ok ? "success" : "response_rejected",
+      });
+    covers:
+      - transition:response_returned
+      - condition:qfm_response_normalization
+      - input:transport_response
+      - output:normalized_api_result
+    line_range:
+      start: 512
+      end: 537
+
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      // Detect CSRF failures: 403 with CSRF-related message
+      const isCsrfFailure =
+        Number(result.statusCode ?? result.status) === 403 &&
+        typeof result.message === "string" &&
+        result.message.toLowerCase().includes("csrf");
+
+      const shouldRetryAfterRefresh =
+        !retriedAfterRefresh &&
+        !skipRefresh &&
+        !isRefreshEndpoint &&
+        (Number(result.statusCode ?? result.status) === 401 ||
+          (Number(result.statusCode ?? result.status) === 500 &&
+            typeof result.message === "string" &&
+            result.message.includes("jwt expired")) ||
+          isCsrfFailure);
+
+      if (shouldRetryAfterRefresh) {
+        const refreshAccessToken = await getRefreshAccessToken();
+        const refreshResult = await refreshAccessToken({
+          apiClient: { request, get, post, patch, delete: remove },
+        });
+
+        if (refreshResult.success && refreshResult.token) {
+          // Build new request options with refreshed token
+          const retryOptions = {
+            ...requestOptions,
+            token: refreshResult.token,
+          };
+
+          // For CSRF failures, use csrfToken from refresh response if available
+          // Otherwise clear stale CSRF headers to force re-read from cookie
+          if (isCsrfFailure) {
+            const retryHeaders = { ...(retryOptions.headers || {}) };
+
+            if (refreshResult.csrfToken) {
+              // Use CSRF token from refresh response
+              retryHeaders["x-csrf-token"] = refreshResult.csrfToken;
+            } else {
+              // Clear stale CSRF headers to force re-read from cookie
+              delete retryHeaders["x-csrf-token"];
+              delete retryHeaders["X-CSRF-Token"];
+            }
+
+            retryOptions.headers = retryHeaders;
+          }
+
+          return executeRequest<T>(retryOptions, { retriedAfterRefresh: true });
+        }
+
+        if (!requestOptions.skipAuthErrorHandling) {
+          await handleAuthError({
+            redirectUrl: "/login",
+            reason: "session_expired",
+            skipRedirect: false,
+          });
+        }
+
+        return result;
+      }
+    covers:
+      - transition:response_requires_refresh
+      - transition:refresh_retries_request
+      - transition:retry_reissued
+      - transition:refresh_failure_escalates
+      - output:retried_request
+      - output:auth_failure_redirect
+    line_range:
+      start: 539
+      end: 597
+
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      if (!requestOptions.skipAuthErrorHandling && isAuthError(result) && !isRefreshEndpoint) {
+        await handleAuthError({
+          redirectUrl: "/login",
+          reason: "session_expired",
+          skipRedirect: false,
+        });
+      }
+
+      return result;
+      } catch (error) {
+        const aborted = Boolean(
+          error && typeof error === "object" && (error as Error).name === "AbortError",
+        );
+
+        return createResult<T>({
+          ok: false,
+          statusCode: null,
+          message: aborted ? "Request was aborted." : "Request failed.",
+          error: error instanceof Error ? error : null,
+          aborted,
+          url: requestUrl,
+          reason: aborted ? "aborted" : "request_failed",
+        });
+      }
+    covers:
+      - condition:terminal_auth_error_cleanup
+      - transition:response_returned
+      - transition:request_aborted_transition
+      - transition:request_failed_transition
+      - output:normalized_api_result
+    line_range:
+      start: 599
+      end: 621
+
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      export async function refreshAccessToken(options = {}) {
+        // Promise-based lock: if refresh is in progress in THIS tab, return existing promise
+        // Use || for safety - if either flag is set, we're refreshing
+        if (isRefreshing || refreshPromise) {
+          log("Refresh already in progress in this tab, waiting...");
+          return (
+            refreshPromise ||
+            Promise.resolve({ success: false, error: "Refresh in progress", token: null })
+          );
+        }
+
+        const { apiClient } = options;
+
+        isRefreshing = true;
+
+        refreshPromise = performCoordinatedRefresh(apiClient).finally(() => {
+          isRefreshing = false;
+          refreshPromise = null;
+        });
+
+        return refreshPromise;
+      }
+
+      async function performCoordinatedRefresh(apiClient) {
+        // Try to acquire cross-tab lock
+        const hasLock = acquireRefreshLock();
+
+        if (!hasLock) {
+          // Another tab is refreshing, wait for its result
+          log("Waiting for another tab to complete refresh...");
+
+          try {
+            const { waitForResult } = await getCrossTab();
+            const result = await waitForResult({
+              storageKey: REFRESH_RESULT_KEY,
+              eventType: "TOKEN_REFRESHED",
+              timeoutMs: 8000,
+            });
+
+            if (result && result.success) {
+              // Apply the token from the other tab
+              log("Applying token from other tab's refresh");
+              setToken(result.token);
+              return result;
+            }
+          } catch (error) {
+            log("Cross-tab wait failed, proceeding with own refresh:", error.message);
+          }
+
+          // If other tab failed or timed out, try to acquire lock again
+          log("Other tab refresh failed or timed out, trying to acquire lock...");
+          if (!acquireRefreshLock()) {
+            log("Still couldn't acquire lock, proceeding with caution");
+          }
+        }
+
+        try {
+          const result = await performRefresh(apiClient);
+
+          // Broadcast result to other tabs
+          if (result.success) {
+            log("Refresh successful, broadcasting to other tabs");
+            try {
+              const { broadcastMessage } = await getCrossTab();
+              broadcastMessage({
+                eventType: "TOKEN_REFRESHED",
+                data: result,
+                storageKey: REFRESH_RESULT_KEY,
+                cleanupMs: 500,
+              });
+            } catch (error) {
+              log("Cross-tab broadcast failed:", error.message);
+            }
+          }
+
+          return result;
+        } finally {
+          releaseRefreshLock();
+        }
+      }
+    covers:
+      - state:refreshing_credentials
+      - condition:coordinated_refresh_lock
+      - transition:response_requires_refresh
+      - output:refreshed_token
+    line_range:
+      start: 139
+      end: 222
+
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      async function performRefresh(apiClient) {
+        try {
+          // Create timeout promise that resolves (not rejects) with a marker
+          const timeoutPromise = new Promise((resolve) => {
+            setTimeout(() => resolve({ __timeout: true }), REFRESH_TIMEOUT_MS);
+          });
+
+          // Race between API call and timeout
+          const result = await Promise.race([
+            refreshToken({}, apiClient ? { client: apiClient } : {}),
+            timeoutPromise,
+          ]);
+
+          // Check if timeout won
+          if (result && result.__timeout) {
+            log(`REFRESH TIMEOUT: No response after ${REFRESH_TIMEOUT_MS}ms`);
+            return {
+              success: false,
+              error: `Token refresh timed out after ${REFRESH_TIMEOUT_MS}ms`,
+              token: null,
+            };
+          }
+
+          const actualResponse = result;
+          const raw = actualResponse?.raw;
+          const rawStatusCode = raw?.statusCode ?? actualResponse?.statusCode;
+
+          if (actualResponse?.error || (typeof rawStatusCode === "number" && rawStatusCode >= 400)) {
+            return {
+              success: false,
+              error: raw?.message || actualResponse?.message || "Token refresh failed",
+              statusCode: rawStatusCode,
+              token: null,
+            };
+          }
+
+          const userData = raw?.user ?? raw?.data?.user;
+
+          if (!userData || typeof userData.accessToken !== "string" || typeof userData._id !== "string") {
+            return {
+              success: false,
+              error: "No access token in refresh response",
+              token: null,
+            };
+          }
+
+          const newTokenPayload = {
+            _id: userData._id,
+            email: typeof userData.email === "string" ? userData.email : "",
+            accessToken: userData.accessToken,
+          };
+
+          // Extract CSRF token from refresh response (backend may return it in body or header)
+          const csrfToken = raw?.csrfToken ?? raw?.data?.csrfToken ?? null;
+
+          setToken(newTokenPayload);
+
+          return {
+            success: true,
+            token: newTokenPayload,
+            csrfToken, // Include CSRF token for client-side access after refresh
+            message: raw?.message || "Token refreshed successfully",
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error?.message || "Token refresh error",
+            token: null,
+          };
+        }
+      }
+    covers:
+      - transition:refresh_retries_request
+      - transition:refresh_failure_escalates
+      - output:refreshed_token
+    line_range:
+      start: 226
+      end: 295
+
+  - path: src/shared/lib/qfm/responseAdapter.js
+    snippet: |
+      function detectContractFailure({ normalized, transportResponse, originalInput }) {
+        if (!isValidHttpStatusCode(normalized.statusCode)) {
+          return createContractFailure(
+            "invalid_normalized_status",
+            "Normalized response statusCode is not a valid HTTP status code.",
+          );
+        }
+
+        if (transportResponse && !hasOwn(transportResponse, "data")) {
+          return createContractFailure(
+            "missing_transport_data",
+            "Transport response is missing required data payload.",
+          );
+        }
+
+        if (normalized.envelopeType === "wrapped") {
+          const wrapped = normalized.raw;
+
+          if (!isPlainObject(wrapped) || !hasOwn(wrapped, "statusCode")) {
+            return createContractFailure(
+              "missing_envelope_status_code",
+              "Wrapped response envelope is missing statusCode.",
+            );
+          }
+
+          if (!isValidHttpStatusCode(wrapped.statusCode)) {
+            return createContractFailure(
+              "invalid_envelope_status_code",
+              "Wrapped response envelope contains an invalid statusCode.",
+            );
+          }
+
+          if (!hasOwn(wrapped, "data")) {
+            return createContractFailure(
+              "missing_envelope_data",
+              "Wrapped response envelope is missing required data field.",
+            );
+          }
+        }
+
+        if (typeof normalized.data === "undefined") {
+          return createContractFailure(
+            "missing_normalized_data",
+            "Normalized response data is undefined.",
+          );
+        }
+
+        if (typeof originalInput === "undefined") {
+          return createContractFailure("missing_payload", "Response payload is undefined.");
+        }
+
+        return null;
+      }
+
+      export function normalizeQfmResponse(responseOrPayload, options = {}) {
+        const transportResponse = isTransportResponseLike(responseOrPayload) ? responseOrPayload : null;
+        const payload = transportResponse
+          ? hasOwn(transportResponse, "data")
+            ? transportResponse.data
+            : undefined
+          : responseOrPayload;
+        const transportStatus = transportResponse ? transportResponse.status : options.transportStatus;
+        const normalized = normalizeMixedEnvelope(payload, { transportStatus });
+        const contractFailure = detectContractFailure({
+          normalized,
+          transportResponse,
+          originalInput: responseOrPayload,
+        });
+
+        return {
+          ok: contractFailure ? false : normalized.ok,
+          statusCode: normalized.statusCode,
+          message: normalized.message || contractFailure?.message || "",
+          data: normalized.data,
+          envelopeType: normalized.envelopeType,
+          raw: normalized.raw,
+          taxonomyBucket: contractFailure ? CONTRACT_BUCKET : null,
+          contractFailure,
+        };
+      }
+    covers:
+      - condition:qfm_response_normalization
+      - condition:contract_failure_marking
+      - output:normalized_api_result
+    line_range:
+      start: 54
+      end: 133
+
+  - path: src/features/auth/api/authErrorHandler.js
+    snippet: |
+      export async function handleAuthError(options = {}) {
+        const { 
+          redirectUrl = "/login", 
+          reason = "session_expired",
+          skipRedirect = false 
+        } = options;
+
+        // Prevent concurrent handling
+        if (isAuthErrorHandling) {
+          return { handled: false, reason: "already_handling" };
+        }
+
+        isAuthErrorHandling = true;
+
+        try {
+          // Clear client data cache first
+          await clearClientDataCache();
+
+          // Clear auth session state
+          clearToken();
+
+          // Clear only explicitly known auth keys (not pattern-based)
+          if (typeof window !== "undefined") {
+            try {
+              for (const key of EOYT_AUTH_KEYS) {
+                try {
+                  window.localStorage.removeItem(key);
+                } catch (_e) {
+                  // Ignore localStorage errors for individual keys
+                }
+              }
+            } catch (_e) {
+              // Ignore localStorage errors
+            }
+          }
+
+          // Redirect to login page (unless skipRedirect)
+          if (!skipRedirect && typeof window !== "undefined") {
+            // Add reason to URL for user feedback
+            const separator = redirectUrl.includes("?") ? "&" : "?";
+            const fullUrl = `${withBasePath(redirectUrl)}${separator}reason=${encodeURIComponent(reason)}`;
+
+            // Use replace to prevent back-button returning to authenticated page
+            window.location.replace(fullUrl);
+          }
+
+          return {
+            handled: true,
+            redirectUrl: skipRedirect ? null : redirectUrl,
+            reason,
+          };
+
+        } catch (error) {
+          return {
+            handled: false,
+            error: error.message,
+            reason: "handler_error",
+          };
+        } finally {
+          // Reset flag after a short delay to allow redirect to start
+          setTimeout(() => {
+            isAuthErrorHandling = false;
+          }, 100);
+        }
+      }
+    covers:
+      - condition:terminal_auth_error_cleanup
+      - state:handling_auth_failure
+      - transition:auth_failure_returned
+      - output:auth_failure_redirect
+    line_range:
+      start: 80
+      end: 144
+
+confidence: 0.94
+confidence_rationale: >
+  Request preparation, fetch dispatch, retry decisions, terminal auth cleanup,
+  refresh coordination, refresh response validation, and QFM normalization were
+  all confirmed directly in five primary source files. Confidence is reduced by
+  two implementation ambiguities: executeRequest() sets retryOptions.token after
+  refresh, but resolveTokenForRequest() ignores requestOptions.token and instead
+  relies on tokenRefresher.setToken() updating shared auth state; and apiClient.ts
+  imports csrfHelper utilities that are not used by the current execution path,
+  so CSRF validation semantics are partly implied by adjacent code rather than by
+  the request flow itself.
+
+unresolved_questions:
+  - Does retryOptions.token exist only for future-proofing? The current retry path works because setToken() updates shared auth state before executeRequest() recurses, not because requestOptions.token is consulted.
+  - Are the imported csrfHelper utilities intended to replace the local getCsrfToken() implementation in apiClient.ts, or are they intentionally kept unused for now?
+
+status: complete

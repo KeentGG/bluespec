@@ -1,0 +1,129 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.user-data-query
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.user_data_query
+    coverage: full
+    notes: >
+      User data query layer fetches user profile data using SWR with
+      auth-gated enable logic. Loading and error states are tracked
+      for UI feedback.
+
+description: >
+  Manages user data fetching through SWR with authentication-gated
+  enable logic. The query only runs when a valid auth token is present.
+  Loading and error states are tracked for UI feedback and error handling.
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: Query not yet started or disabled.
+    - id: loading
+      description: User data fetch in progress.
+    - id: ready
+      description: User data loaded successfully.
+    - id: error
+      description: User data fetch failed.
+  transitions:
+    - id: query_enabled
+      from: idle
+      to: loading
+      trigger: Auth token becomes available.
+      guards:
+        - field: has_user_id
+          condition: hasUserId() returns true.
+      effects:
+        - Enable SWR query.
+    - id: data_loaded
+      from: loading
+      to: ready
+      trigger: SWR query resolves successfully.
+      effects:
+        - Store user data.
+    - id: query_error
+      from: loading
+      to: error
+      trigger: SWR query fails.
+      effects:
+        - Set error state.
+
+conditions:
+  - id: has_user_id
+    description: >
+      Checks if a valid user ID is available from auth token. Query
+      is only enabled when userId is present.
+    trigger: User data query is evaluated.
+    guards:
+      - field: user_id
+        condition: getToken()?._id is non-empty string.
+    then:
+      - Enable SWR query.
+    else:
+      - Disable query (pass null key).
+
+  - id: is_loading
+    description: >
+      Tracks whether user data fetch is in progress. Used for loading
+      indicators.
+    trigger: SWR query state changes.
+    guards:
+      - field: isLoading
+        condition: SWR isLoading is true.
+    then:
+      - Show loading indicator.
+    else:
+      - Hide loading indicator.
+
+  - id: is_error
+    description: >
+      Tracks whether user data fetch failed. Used for error display.
+    trigger: SWR query fails.
+    guards:
+      - field: error
+        condition: SWR error is present.
+    then:
+      - Show error state.
+    else:
+      - Clear error state.
+
+inputs:
+  - id: auth_token
+    type: "token object with _id"
+    source: Auth session
+    required: true
+
+outputs:
+  - id: user_data
+    type: "user profile object"
+    destination: User data consumers
+    lifespan: query lifecycle
+
+evidence_refs:
+  - path: src/features/auth/hooks/useUserData.ts
+    snippet: |
+      export function useUserData() {
+        const token = getToken();
+        const userId = typeof token?._id === "string" && token._id.length > 0 ? token._id : null;
+        const query = useSWR(userId ? ["user.data", userId] : null, fetchUserData);
+        return { ...query, hasUserId: !!userId };
+      }
+    covers:
+      - "condition:has_user_id"
+      - "condition:is_loading"
+      - "condition:is_error"
+      - "input:auth_token"
+      - "output:user_data"
+
+confidence: 0.90
+confidence_rationale: >
+  User data query structure and auth-gated enable logic are evidenced in
+  useUserData.ts. The loading and error state tracking is confirmed by
+  SWR integration patterns.
+unresolved_questions:
+  - Exact user data fields fetched.
+  - Cache invalidation strategy.
+status: complete

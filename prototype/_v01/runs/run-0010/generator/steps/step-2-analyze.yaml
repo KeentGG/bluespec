@@ -1,0 +1,49 @@
+step: analyze
+step_number: 2
+status: complete
+confidence: 0.93
+summary: Produced a behavior map and predicate inventory for both frozen goldens, explicitly separating agreement-state gating from ordinary handoff and visible-disabled from visible-enabled download states.
+behavior_map:
+  auth-conditional-redirect:
+    live_surfaces:
+      - useReportCreation.ts + toa-contract.js + user-service.js
+      - useReportNavigation.ts + gate-finder.js + gate-edit-contract.js
+    summary: The live code checks agreedToa in the report-creation flow and redirects to the introduction/commitment page when the agreement is missing. The ordinary edit flow uses gate handoff and resume routing without an agreement-state predicate.
+  download-button-visibility:
+    live_surfaces:
+      - ReportsTable.tsx + ReportSplitActions.tsx
+      - useReportRowController.ts + useReportActions.ts + useDownloadStore.ts
+      - report-route-progress-contract.js
+    summary: The reports table always mounts the download action. The button is disabled until progressPercentage reaches 100 and becomes enabled at that threshold; clicking it starts PDF generation.
+predicate_inventory:
+  auth-conditional-redirect:
+    - predicate: userData.agreedToa === false
+      render_mode: visible-enabled
+      relation_to_golden: partial
+      note: the control remains visible; the code redirects to the introduction/commitment page instead of hiding or disabling the action.
+    - predicate: userData.agreedToa === true
+      render_mode: visible-enabled
+      relation_to_golden: partial
+      note: agreement-state gating is real, but it guards report creation rather than the stale edit-route wording from the golden.
+    - predicate: "resolveGateHandoffRoute(intent: \"edit\")"
+      render_mode: visible-enabled
+      relation_to_golden: mismatch
+      note: this is an ordinary handoff for edit navigation; it has target/calculator/gate-path validation but no agreement-state predicate.
+  download-button-visibility:
+    - predicate: progressPercentage < 100
+      render_mode: visible-disabled
+      relation_to_golden: partial
+      note: the button is not hidden before the download stage; it is mounted and disabled instead.
+    - predicate: progressPercentage === 100
+      render_mode: visible-enabled
+      relation_to_golden: partial
+      note: the threshold matches the download-ready point, but the golden wording says the control becomes visible only then, which is not how the code behaves.
+    - predicate: isDownloading === true
+      render_mode: visible-disabled
+      relation_to_golden: mismatch
+      note: a separate in-flight lock keeps the control visible but disabled while the PDF generation request is running.
+unresolved_questions: []
+flags_for_analyzer:
+  - "auth golden wording is stale: it points at an edit route, while the agreement-state check lives in create-report TOA logic"
+  - "download golden wording is stale: the button is always mounted and only toggles disabled/enabled"
+error_reason: null

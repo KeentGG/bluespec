@@ -1,0 +1,22 @@
+spec_id: auth.conditional-redirect.yaml
+output_path: /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0008/generator/specs/auth.conditional-redirect.yaml
+golden_behaviors:
+  - id: auth-conditional-redirect
+    description: editing project routes through a gated edit flow only when agreement state is satisfied
+    priority: high
+    evidence_refs:
+      - src/routes/project-edit.tsx
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportNavigation.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-finder.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/routing/hooks/useGateEditEntryState.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-edit-contract.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - The golden evidence path src/routes/project-edit.tsx is stale; the live gated edit flow is implemented through the dashboard report actions and shared routing contracts.
+  - Report editing starts in useReportNavigation.navigateToReportGate(), which asks gate-finder to build an edit handoff destination from report._id and calculatorId.
+  - The /gate/edit entry path is handled by useGateEditEntryState(), which waits for router/search params, applies rollback/fallback logic, fetches the report by id, and delegates progress-route resolution to gate-edit-contract helpers.
+  - executeGateEditInitialization() validates target/calculator query params, fetches the report, resolves a mapped resume route, and redirects either to the calculator edit handoff or a fallback dashboard route.
+  - gate-edit-contract contains the progress-route normalization and calculator-specific route remapping logic used to resume existing reports.
+  - I did not find an explicit agreement-state predicate in the discovered code. The subagent should treat the golden's agreement wording as potentially stale and score coverage accordingly.

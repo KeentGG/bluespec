@@ -1,0 +1,84 @@
+id: frontend-derived
+version: v002
+ecosystem: frontend
+parent: frontend-derived
+fine_tune_run: run-0009
+behavior_shapes:
+  - stateful_ui
+  - conditional_flow
+  - data_dashboard_layout
+compatible_rubric_snapshots:
+  - v002
+steps:
+  - id: explore
+    name: Explore structure and dependencies
+    prompt: prompts/generator.md
+    outputs:
+      - trace
+      - exploration_notes
+  - id: analyze
+    name: Analyze discovered behavior
+    prompt: >
+      Analyze the explored code to produce a predicate inventory for conditional
+      flows. For each conditional flow discovered: - List each gate predicate
+      separately (e.g. agreement-state, progress-percentage, auth-session) -
+      Label the render mode as exactly one of: hidden, visible-disabled,
+      visible-enabled - Mark the relation to the golden wording as: exact,
+      partial, or mismatch - Preserve agreement-state gating and
+      hidden-vs-disabled differences instead of collapsing
+        them into the nearest live behavior
+      - Flag partial matches with explicit notes about what code evidence
+      supports vs what
+        the golden wording requires
+    outputs:
+      - behavior_map
+      - predicate_inventory
+  - id: draft
+    name: Draft specs
+    outputs:
+      - spec_set
+  - id: verify
+    name: Verify schema and reference consistency
+    outputs:
+      - verification_report
+  - id: cross_ref
+    name: Link related specs and evidence
+    outputs:
+      - reference_map
+validations:
+  - schema_valid
+  - references_resolve
+  - no_internal_contradictions
+mutation_tiers:
+  - prompt_tweak
+  - step_management
+  - parent_guideline
+  - schema_change
+  - tool_change
+  - rubric_mutation
+specializations:
+  - component_state_tracking
+  - conditional_rendering_checks
+  - accessibility_review
+  - data_table_behavior
+  - conditional_predicate_inventory
+status: candidate
+discovered_in_run: run-0009
+mutation_applied:
+  type: prompt_tweak
+  target_step: analyze
+  source_run: run-0009
+  rationale: >
+    The analyze step only asked for a generic behavior_map, causing the
+    generator to collapse distinct gate/render states (agreement-state gating,
+    hidden-vs-disabled) into nearest live behavior. This produced code-faithful
+    but golden-mismatched specs (recall: 0.76). The new instructions force
+    predicate-level conditional-flow inventory with explicit partial-match
+    labeling.
+  previous_output: behavior_map
+  new_outputs:
+    - behavior_map
+    - predicate_inventory
+created_at: 2026-04-22T07:05:00.000Z
+_extends_chain:
+  - formulas/candidates/frontend-derived-v002-predicate-inventory.yaml

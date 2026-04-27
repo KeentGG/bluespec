@@ -1,0 +1,24 @@
+spec_id: auth.conditional-redirect.yaml
+output_path: /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0009/generator/specs/auth.conditional-redirect.yaml
+golden_behaviors:
+  - id: auth-conditional-redirect
+    description: editing project routes through a gated edit flow only when agreement state is satisfied
+    priority: high
+    evidence_refs:
+      - src/routes/project-edit.tsx
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportNavigation.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-finder.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/routing/hooks/useGateEditEntryState.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-edit-contract.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/queryValidators.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - The golden evidence path src/routes/project-edit.tsx does not exist in the current codebase.
+  - The closest live behavior is the gated edit/resume flow for existing reports.
+  - User intent starts in useReportNavigation.ts, which resolves an edit handoff URL via resolveGateHandoffRoute().
+  - gate-finder.js builds and validates the edit handoff URL for the target calculator gate.
+  - useGateEditEntryState.ts runs the client entry state machine for /gate/edit and calls executeGateEditInitialization().
+  - gate-edit-contract.js validates the target query, fetches the report, maps reportProgress to a resume route, and redirects when valid; otherwise it falls back to /reports.
+  - No agreement-state check was found in the explored files. The spec should explicitly mark whether the golden behavior is only partially matched or absent rather than inferring a nonexistent agreement gate.

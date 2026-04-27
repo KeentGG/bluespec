@@ -1,0 +1,183 @@
+id: download.button-visibility.yaml
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: download-button-visibility
+    coverage: partial
+    notes: >
+      The golden behavior claims the download button becomes visible only
+      after report progress reaches the download stage. The actual code
+      behavior is that the button is always visible but is disabled and
+      shows a tooltip when progress < 100%. The interactivity gate is
+      fully covered; the visibility toggle described in the golden
+      behavior is not present.
+
+description: >
+  The download button inside the report actions split-button component is
+  always rendered but is gated on report completion percentage. When
+  reportProgressPercentage equals 100, the button is enabled with a
+  "Download report" tooltip and normal opacity. When progress is less
+  than 100, the button is disabled with a
+  "Report must be 100% complete to download" tooltip and reduced opacity
+  (75%). The progress percentage is sourced from the report row data,
+  computed server-side and passed through the reports list contract.
+
+conditions:
+  - id: download-interactivity-gate
+    description: >
+      Controls whether the download button is interactive based on report
+      completion percentage and concurrent download state.
+    trigger: >
+      ReportSplitActions renders with progressPercentage and isDownloading
+      props
+    guards:
+      - field: progressPercentage
+        condition: progressPercentage === 100
+      - field: isDownloading
+        condition: isDownloading === false
+    then:
+      - "Button is enabled (disabled={false})"
+      - "Button title is set to 'Download report'"
+      - "Button opacity is normal (no opacity-75 class applied)"
+    else:
+      - "Button is disabled"
+      - "Button title is set to 'Report must be 100% complete to download' when !canDownload"
+      - "Button opacity is reduced to 75% when disabled"
+
+inputs:
+  - id: progressPercentage
+    type: number (0-100)
+    source: >
+      ReportRow data, computed server-side and passed through
+      ReportsTable -> ReportSplitActions
+    required: true
+    validation:
+      range: "0 to 100 inclusive"
+
+  - id: isDownloading
+    type: boolean
+    source: >
+      useReportActionStore state, passed via ReportsTable ->
+      ReportSplitActions
+    required: false
+
+outputs:
+  - id: download_button_ui_state
+    type: "enabled/disabled boolean + tooltip string + CSS opacity class"
+    destination: UI rendering in ReportSplitActions
+    lifespan: immediate (re-evaluated on every render)
+
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportSplitActions.tsx
+    snippet: |
+      const canDownload = progressPercentage === 100;
+      ...
+      <Button
+        type="button"
+        onClick={onDownload}
+        disabled={isDownloading || !canDownload}
+        title={canDownload ? "Download report" : "Report must be 100% complete to download"}
+        variant="primary"
+        size="sm"
+        className={`rounded-r-none border-r border-brand-dark ${
+          isDownloading || !canDownload ? "opacity-75" : ""
+        }`}
+      >
+        {isDownloading ? (
+          <>
+            <Spinner size="sm" className="mr-1" />
+            Downloading...
+          </>
+        ) : (
+          "Download"
+        )}
+      </Button>
+    covers:
+      - "condition: download-interactivity-gate"
+      - "input: progressPercentage"
+      - "input: isDownloading"
+      - "output: download_button_ui_state"
+    line_range:
+      start: 41
+      end: 64
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsTable.tsx
+    snippet: |
+      <ReportSplitActions
+        reportName={report.name}
+        progressPercentage={report.reportProgressPercentage}
+        isDownloading={rowController.isDownloading(report.reportId)}
+        isRenaming={rowController.isRenaming(report.reportId)}
+        isDeleting={rowController.isDeleting(report.reportId)}
+        isEmailing={rowController.isEmailing(report.reportId)}
+        onDownload={(e) => {
+          e.stopPropagation();
+          rowController.handleDownload(report);
+        }}
+        onEditReport={() => rowController.handleEdit(report)}
+        onRename={() => rowController.startRename(report.reportId, report.name)}
+        onEmailPdf={() => rowController.handleEmail(report.reportId)}
+        onDelete={() => rowController.handleDelete(report)}
+      />
+    covers:
+      - "input: progressPercentage"
+      - "input: isDownloading"
+    line_range:
+      start: 111
+      end: 126
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/contracts/list-contract.js
+    snippet: |
+      const reportProgress = report.reportProgressPercentage ?? 0;
+      const rawProgress = report.reportProgressRawPercentage ?? reportProgress;
+      const penaltyApplied = report.reportProgressPenaltyApplied ?? false;
+      ...
+      return {
+        _id: reportId,
+        reportId,
+        name,
+        businessId,
+        calculatorId,
+        calculatorLabel: CALCULATOR_LABELS[calculatorId] ?? "Unknown",
+        calculatorColor: CALCULATOR_COLORS[calculatorId] ?? "bg-gray-100 text-gray-800",
+        updatedAt,
+        updatedAtTimestamp: normalizeUpdatedAtTimestamp(updatedAt),
+        formattedDate: formatDate(updatedAt),
+        reportProgressPercentage: reportProgress,
+        reportProgressRawPercentage: rawProgress,
+        reportProgressPenaltyApplied: penaltyApplied,
+      };
+    covers:
+      - "input: progressPercentage"
+    line_range:
+      start: 152
+      end: 171
+
+confidence: 0.85
+confidence_rationale: >
+  The button's disabled state, tooltip text, and opacity changes are fully
+  confirmed in ReportSplitActions.tsx. The prop chain from
+  reportProgressPercentage through ReportsTable is traced in two additional
+  files. The only ambiguity is the golden behavior's claim of a visibility
+  toggle (hidden -> visible), which does not exist in the code; the actual
+  behavior is an interactivity toggle (disabled -> enabled). Additionally,
+  it is unknown whether there are discrete server-side workflow stages
+  beyond the numeric percentage.
+
+unresolved_questions:
+  - >
+    The golden behavior mentions "reaches the download stage" which implies
+    discrete workflow stages, but only a continuous numeric percentage
+    (0-100) is observed in the UI. Are there server-side stage definitions
+    not surfaced to the frontend?
+  - >
+    Is there any server-side enforcement preventing downloads for incomplete
+    reports, or is the gate purely client-side cosmetic?
+  - >
+    Does the presence of reportProgressRawPercentage and
+    reportProgressPenaltyApplied in list-contract.js indicate additional
+    business rules that should affect the download gate?
+
+status: partial

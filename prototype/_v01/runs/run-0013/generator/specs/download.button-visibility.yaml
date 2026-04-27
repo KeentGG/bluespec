@@ -1,0 +1,43 @@
+id: download.button-visibility
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: download-button-visibility
+    coverage: partial
+    notes: Documents progress-based enablement but not hidden-until-ready rendering.
+description: Shows a download action that becomes enabled when report progress reaches completion.
+conditions:
+  - id: download-affordance
+    description: Controls the download affordance based on report progress.
+    trigger: progress value changes
+    guards:
+      - field: progress_percentage
+        condition: progress_percentage >= 100
+    then:
+      - enable download action
+    else:
+      - keep download action disabled
+inputs:
+  - id: progress_percentage
+    type: number
+    source: report status API
+    required: true
+outputs:
+  - id: download_action_state
+    type: ui control state
+    destination: report actions component
+state_machine: null
+evidence_refs:
+  - path: src/features/reports/components/ReportSplitActions.tsx
+    snippet: |
+      const disabled = progressPercentage < 100;
+      return <button disabled={disabled}>Download</button>;
+    covers:
+      - condition: download-affordance
+      - output: download_action_state
+confidence: 0.80
+confidence_rationale: Progress gating is clear, but visibility-versus-disable semantics remain ambiguous.
+unresolved_questions:
+  - Whether any route hides the button entirely before completion.
+status: partial

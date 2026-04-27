@@ -1,0 +1,181 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.middleware-silent-refresh
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth_flow.middleware_silent_refresh
+    coverage: full
+    notes: >
+      Middleware attempts silent token refresh for protected routes when
+      refreshToken cookie is available. Retry logic handles CSRF token
+      expiration by retrying without the header.
+
+description: >
+  Performs silent token refresh in Next.js middleware before enforcing route
+  redirects. When a protected route is accessed without a valid session but
+  a refreshToken cookie exists, the middleware attempts to refresh the token
+  silently. Includes retry logic for CSRF token expiration scenarios.
+
+state_machine:
+  initial: checking
+  states:
+    - id: checking
+      description: Middleware is evaluating if silent refresh is needed.
+    - id: refreshing
+      description: Silent refresh is in progress.
+    - id: success
+      description: Token refreshed, session restored.
+    - id: failed
+      description: Refresh failed, will enforce redirect.
+  transitions:
+    - id: refresh_needed
+      from: checking
+      to: refreshing
+      trigger: Protected route accessed without valid session but with refreshToken.
+      guards:
+        - field: is_protected_route
+          condition: shouldResolveSession(pathname) is true.
+        - field: has_refresh_token
+          condition: cookieHeader includes refreshToken=.
+      effects:
+        - Extract CSRF token from cookie.
+        - Call /auth/refresh with cookie header.
+    - id: refresh_success
+      from: refreshing
+      to: success
+      trigger: /auth/refresh returns valid session.
+      guards:
+        - field: response_status
+          condition: Response status is 200 with valid user.
+      effects:
+        - Set new session cookies (user, csrfToken, refreshToken).
+        - Re-run authGuard with refreshed session.
+    - id: refresh_csrf_retry
+      from: refreshing
+      to: refreshing
+      trigger: First refresh attempt fails with CSRF error.
+      guards:
+        - field: first_attempt
+          condition: isFirstAttempt() is true.
+        - field: error_type
+          condition: Error indicates CSRF mismatch.
+      effects:
+        - Retry refresh without x-csrf-token header.
+    - id: refresh_failed
+      from: refreshing
+      to: failed
+      trigger: Refresh fails after retry or non-recoverable error.
+      effects:
+        - Return null session.
+        - Enforce redirect to /login.
+
+conditions:
+  - id: should_resolve_session
+    description: >
+      Determines if a pathname requires session resolution in middleware.
+      Protected routes and certain public routes trigger session checks.
+    trigger: Middleware evaluates a request.
+    guards:
+      - field: pathname
+        condition: Pathname matches protected or session-resolving routes.
+    then:
+      - Proceed with session resolution.
+    else:
+      - Skip session resolution.
+
+  - id: first_attempt_check
+    description: >
+      Tracks whether this is the first refresh attempt to enable CSRF retry.
+      Only one retry is allowed to prevent infinite loops.
+    trigger: Refresh attempt fails.
+    guards:
+      - field: attempt_count
+        condition: isFirstAttempt() returns true.
+    then:
+      - Allow single retry without CSRF header.
+    else:
+      - Fail without retry.
+
+inputs:
+  - id: cookie_header
+    type: string
+    source: Request cookie header
+    required: true
+    validation:
+      format: HTTP cookie string
+
+  - id: pathname
+    type: string URL path
+    source: Request URL
+    required: true
+
+  - id: request_origin
+    type: string
+    source: Request origin header
+    required: true
+
+outputs:
+  - id: refresh_request
+    type: POST /auth/refresh HTTP request
+    destination: Backend /auth/refresh endpoint
+    lifespan: per middleware invocation
+
+  - id: session_cookies
+    type: "user, csrfToken, refreshToken cookies"
+    destination: NextResponse cookies
+    lifespan: 14 days
+
+  - id: guard_decision
+    type: "route guard decision"
+    destination: Middleware response
+    lifespan: per request
+
+evidence_refs:
+  - path: middleware.js
+    snippet: |
+      async function attemptSilentRefresh(options = {}) {
+        const { cookieHeader, requestOrigin, fetchImpl } = options;
+        const hasRefreshToken = cookieHeader.includes("refreshToken=");
+        if (!hasRefreshToken) return null;
+        const csrfToken = extractCookieValue(cookieHeader, CSRF_TOKEN_COOKIE);
+        let result = await callRefreshEndpoint({ cookieHeader, requestOrigin, fetchImpl, csrfToken, appApiUrl });
+        if (result.error || (result.response && result.response.error)) {
+          result = await callRefreshEndpoint({ cookieHeader, requestOrigin, fetchImpl, csrfToken: null, appApiUrl });
+        }
+        // ... process result
+      }
+    covers:
+      - "transition:refresh_needed"
+      - "condition:first_attempt_check"
+      - "output:refresh_request"
+
+  - path: middleware.js
+    snippet: |
+      if (!session && shouldResolveSession(pathname)) {
+        const hasRefreshToken = cookieHeader.includes(`${REFRESH_TOKEN_COOKIE}=`);
+        if (hasRefreshToken) {
+          const refreshResult = await attemptSilentRefresh({ cookieHeader, requestOrigin, fetchImpl: fetch });
+          if (refreshResult?.session) {
+            session = refreshResult.session;
+            const response = NextResponse.next();
+            response.cookies.set({ name: USER_COOKIE, value: JSON.stringify(session), path: "/", maxAge: COOKIE_MAX_AGE_SECONDS, sameSite: "lax" });
+            // ... set other cookies
+          }
+        }
+      }
+    covers:
+      - "condition:should_resolve_session"
+      - "transition:refresh_success"
+      - "output:session_cookies"
+
+confidence: 0.93
+confidence_rationale: >
+  Middleware silent refresh logic, CSRF retry mechanism, and cookie setting
+  are directly evidenced in middleware.js. The shouldResolveSession check
+  and first-attempt tracking are confirmed by the code.
+unresolved_questions:
+  - Exact list of routes that trigger session resolution.
+  - Whether refresh sets all cookies or only changed ones.
+status: complete

@@ -1,0 +1,43 @@
+run_id: "run-0009"
+analyzer: "run_analyzer"
+status: "complete"
+provider: "task-agent"
+primary_failure_type: "prompt_failure"
+diagnosis: >
+  The generator explored the right code and produced evidence-grounded partial specs,
+  but the frozen formula only asked for generic explore/analyze/draft/verify outputs.
+  It never required predicate-level distinctions for agreement-state gating or the
+  hidden-vs-disabled difference on the download action, so the generator documented
+  the nearest live behavior instead of the stale golden wording. The rubric already
+  has golden_set_recall, so this is not a valid rubric-gap case.
+failure_tier: "prompt_tweak"
+suggested_mutation: >
+  Add explicit formula instructions to enumerate concrete gating predicates and
+  rendering modes in conditional flows (e.g. agreement-state gate vs ordinary edit
+  handoff, hidden vs rendered-but-disabled controls) and to call out partial
+  matches when code evidence only supports a near-match to the golden behavior.
+expected_effect: >
+  Fewer recall misses where the spec is accurate to code but too coarse to satisfy
+  a finer golden behavior check.
+rubric_gap_proposed: false
+rubric_gap_proposal: null
+evidence_refs:
+  - "runs/run-0009/evaluator/output.yaml"
+  - "runs/run-0009/generator/output.yaml"
+  - "runs/run-0009/generator/specs/auth.conditional-redirect.yaml"
+  - "runs/run-0009/generator/specs/reports.download-button-visibility.yaml"
+  - "runs/run-0009/generator/delegate/auth.conditional-redirect.yaml"
+  - "runs/run-0009/generator/delegate/reports.download-button-visibility.yaml"
+  - "runs/run-0009/inputs/formula.yaml"
+  - "runs/run-0009/inputs/rubric.yaml"
+  - "prompts/generator.md"
+  - "prompts/shared/failure-types.md"
+confidence: 0.78
+confidence_rationale: >
+  The formula and generator prompt are both generic, while the generated specs and
+  delegate notes show the agent found the relevant files and documented the actual
+  code-backed behavior. That makes a prompt under-specification explanation stronger
+  than search, recognition, or format failure. The only residual uncertainty is
+  whether governance would prefer a rubric mutation for golden drift, but the decision
+  tree stops before that because the formula never asked for the exact distinctions.
+analyzer_timestamp: "2026-04-22T06:59:30Z"

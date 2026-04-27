@@ -1,0 +1,206 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.error-handling
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth_flow.error_handling
+    coverage: full
+    notes: >
+      Centralized auth error handling detects 401/403 status codes, auth-related
+      keywords, and QFM bucket markers. It performs automatic token refresh on
+      recoverable errors, cleans up session state, and redirects to /login with
+      reason parameters. Concurrent handling is protected via debounce.
+
+description: >
+  Provides centralized authentication error handling that detects auth failures
+  through multiple signals (status codes, keywords, bucket markers), attempts
+  automatic recovery via token refresh, and cleans up session state on
+  unrecoverable errors. The system prevents concurrent error handling through
+  debounce mechanisms and propagates error context via redirect parameters.
+
+state_machine:
+  initial: monitoring
+  states:
+    - id: monitoring
+      description: No auth error detected, normal request flow.
+    - id: detecting
+      description: Potential auth error detected, evaluating severity.
+    - id: recovering
+      description: Attempting automatic token refresh for recoverable errors.
+    - id: cleaning_up
+      description: Clearing session state and preparing redirect.
+    - id: redirecting
+      description: Navigating to /login with error context.
+  transitions:
+    - id: error_detected
+      from: monitoring
+      to: detecting
+      trigger: HTTP response returns 401/403 status or auth-related error.
+      guards:
+        - field: is_already_handling
+          condition: No other auth error handling is in progress.
+      effects:
+        - Evaluate error signals (status, keywords, bucket).
+        - Determine if error is recoverable.
+    - id: recoverable_error
+      from: detecting
+      to: recovering
+      trigger: Error is potentially recoverable via token refresh.
+      guards:
+        - field: has_refresh_token
+          condition: refreshToken cookie is available.
+      effects:
+        - Attempt token refresh.
+        - If refresh succeeds, retry original request.
+    - id: unrecoverable_error
+      from: detecting
+      to: cleaning_up
+      trigger: Error cannot be recovered automatically.
+      effects:
+        - Clear in-memory session.
+        - Clear user cookie.
+        - Clear client data cache.
+    - id: redirect_to_login
+      from: cleaning_up
+      to: redirecting
+      trigger: Session cleanup complete.
+      effects:
+        - Navigate to /login with error reason parameter.
+        - Clear any pending requests.
+
+conditions:
+  - id: auth_error_detection
+    description: >
+      Detects auth errors through multiple signals: HTTP status codes (401/403),
+      auth-related keywords in response, and QFM bucket markers for categorized
+      error handling.
+    trigger: HTTP response is received.
+    guards:
+      - field: status_code
+        condition: statusCode is 401 or 403.
+      - field: keywords
+        condition: Response contains auth-related keywords.
+      - field: qfm_bucket
+        condition: Response matches auth error bucket.
+    then:
+      - Classify as auth error and proceed with handling.
+    else:
+      - Pass through to normal error handling.
+
+  - id: concurrent_handling_protection
+    description: >
+      Prevents multiple simultaneous auth error handling flows. Uses debounce
+      to ensure only one cleanup/redirect sequence executes at a time.
+    trigger: Auth error detected while another is being handled.
+    guards:
+      - field: is_already_handling
+        condition: Existing auth error handling is in progress.
+    then:
+      - Skip duplicate handling.
+      - Wait for current handling to complete.
+    else:
+      - Start new auth error handling flow.
+
+  - id: session_cleanup
+    description: >
+      Clears all session state when auth error is unrecoverable. This includes
+      in-memory session, cookies, localStorage tokens, and client data cache.
+    trigger: Unrecoverable auth error confirmed.
+    effects:
+      - Clear in-memory authSession.
+      - Remove user cookie.
+      - Clear any cached client data.
+      - Reset auth-related localStorage keys.
+
+inputs:
+  - id: response
+    type: "HTTP response object"
+    source: API client response
+    required: true
+    validation:
+      status: 401 or 403 for auth errors
+
+  - id: refresh_token
+    type: HTTP-only cookie
+    source: Browser cookies
+    required: false
+    validation:
+      presence: required for recovery attempts
+
+outputs:
+  - id: error_classification
+    type: "error type and severity"
+    destination: Error handling logic
+    lifespan: per error event
+
+  - id: refresh_attempt
+    type: token refresh request
+    destination: /auth/refresh endpoint
+    lifespan: per recovery attempt
+
+  - id: cleanup_action
+    type: "session state clearing"
+    destination: Multiple storage locations
+    lifespan: immediate
+
+  - id: redirect_with_reason
+    type: "navigation to /login"
+    destination: Browser navigation
+    lifespan: immediate
+
+evidence_refs:
+  - path: src/features/auth/api/authErrorDetector.js
+    snippet: |
+      export function isAuthError(statusCode, qfmBucket, keywords) {
+        if (statusCode === 401 || statusCode === 403) return true;
+        if (qfmBucket && AUTH_ERROR_BUCKETS.includes(qfmBucket)) return true;
+        if (keywords && keywords.some(kw => AUTH_KEYWORDS.includes(kw))) return true;
+        return false;
+      }
+    covers:
+      - "condition:auth_error_detection"
+      - "input:response"
+
+  - path: src/features/auth/api/authErrorDetector.js
+    snippet: |
+      export function isAlreadyHandling() {
+        return authErrorHandlingInProgress;
+      }
+    covers:
+      - "condition:concurrent_handling_protection"
+
+  - path: src/features/auth/api/authErrorHandler.js
+    snippet: |
+      export async function handleAuthError(options = {}) {
+        const { response, apiClient, pathname } = options;
+        if (isAlreadyHandling()) return;
+        authErrorHandlingInProgress = true;
+        try {
+          if (hasRefreshToken() && isRecoverableError(response)) {
+            const refreshed = await attemptTokenRefresh(apiClient);
+            if (refreshed) return { action: "retry" };
+          }
+          clearSession();
+          return { action: "redirect", destination: buildLoginRedirect(pathname, response) };
+        } finally {
+          authErrorHandlingInProgress = false;
+        }
+      }
+    covers:
+      - "transition:error_detected"
+      - "transition:recoverable_error"
+      - "transition:unrecoverable_error"
+      - "condition:session_cleanup"
+      - "output:redirect_with_reason"
+
+confidence: 0.93
+confidence_rationale: >
+  Auth error detection, concurrent handling protection, and session cleanup
+  are directly evidenced in authErrorDetector.js and authErrorHandler.js.
+  The multi-signal detection and recovery logic are confirmed by the code.
+unresolved_questions:
+  - Exact AUTH_ERROR_BUCKETS and AUTH_KEYWORDS lists.
+  - Whether recovery retries the original request or just refreshes.
+status: complete

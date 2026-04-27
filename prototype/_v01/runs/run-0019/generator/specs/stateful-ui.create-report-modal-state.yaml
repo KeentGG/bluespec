@@ -1,0 +1,86 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.create-report-modal-state
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.create_report_modal_state
+    coverage: full
+    notes: >
+      Create report modal visibility and default business ID are managed
+      via Zustand store. Opening sets isOpen and optional defaultBusinessId;
+      closing clears both values.
+
+description: >
+  Manages the create report modal's visibility state and default business
+  selection through a Zustand store. The modal can be opened with an optional
+  defaultBusinessId parameter. Closing the modal clears both visibility and
+  the default selection.
+
+state_machine: null
+
+conditions:
+  - id: modal_open_with_default
+    description: >
+      Opening the modal with a defaultBusinessId pre-selects the business
+      in the form. This is used when creating a report from a specific
+      business context.
+    trigger: open(defaultBusinessId) is called.
+    guards:
+      - field: default_business_id
+        condition: defaultBusinessId is provided.
+    then:
+      - Set isOpen to true.
+      - Store defaultBusinessId.
+    else:
+      - Set isOpen to true.
+      - Set defaultBusinessId to null.
+
+  - id: modal_close_cleanup
+    description: >
+      Closing the modal clears both visibility and default selection to
+      prevent stale state on next open.
+    trigger: close() is called.
+    effects:
+      - Set isOpen to false.
+      - Set defaultBusinessId to null.
+
+inputs:
+  - id: default_business_id
+    type: string or null
+    source: Business context or caller
+    required: false
+    validation:
+      default: "null"
+
+outputs:
+  - id: modal_state
+    type: "isOpen boolean and defaultBusinessId"
+    destination: Create report modal component
+    lifespan: in-memory until closed
+
+evidence_refs:
+  - path: src/features/reports/store/useCreateReportStore.ts
+    snippet: |
+      export const useCreateReportStore = create<CreateReportState>((set) => ({
+        isOpen: false,
+        defaultBusinessId: null,
+        open: (defaultBusinessId) => set({ isOpen: true, defaultBusinessId: defaultBusinessId || null }),
+        close: () => set({ isOpen: false, defaultBusinessId: null }),
+      }));
+    covers:
+      - "condition:modal_open_with_default"
+      - "condition:modal_close_cleanup"
+      - "input:default_business_id"
+      - "output:modal_state"
+
+confidence: 0.98
+confidence_rationale: >
+  Store structure, open/close logic, and defaultBusinessId handling are
+  directly evidenced in useCreateReportStore.ts. The simple state
+  management pattern is confirmed by the code.
+unresolved_questions:
+  - Whether modal state persists across page navigation.
+  - How defaultBusinessId is used in the form component.
+status: complete

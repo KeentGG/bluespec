@@ -1,0 +1,22 @@
+run_id: run-0008
+mutator: run_mutator
+status: complete
+provider: local
+confidence: 0.71
+proposed_change:
+  type: prompt_tweak
+  target_step: draft
+  current_prompt_section: Document state transitions and conditional flows explicitly
+  proposed_addition: "For each stateful component, enumerate: (1) all possible
+    states, (2) transition triggers, (3) guard conditions, (4) side effects. Do
+    not collapse states into a single description."
+  expected_improvement: recall on state_machine_boundary criterion
+  risk: low
+  rationale: This is a targeted prompt addition that expands what the draft step
+    asks for without changing the formula structure
+insanity_check:
+  method_already_failed: false
+  failed_runs: []
+  justification: No prior attempt used prompt_tweak on draft phase for recognition_failure
+tokens_used: 872
+mutator_timestamp: 2026-04-21T11:57:30.791Z

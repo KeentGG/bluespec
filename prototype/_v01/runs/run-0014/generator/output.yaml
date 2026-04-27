@@ -1,0 +1,23 @@
+status: complete
+specs_written: 3
+specs:
+  - id: auth.conditional-redirect.yaml
+    golden_behaviors_covered: 1
+    coverage: partial
+    confidence: 0.75
+    unresolved_questions: 4
+  - id: download.button-visibility.yaml
+    golden_behaviors_covered: 1
+    coverage: partial
+    confidence: 0.85
+    unresolved_questions: 3
+  - id: toa.gated-first-report-creation.yaml
+    golden_behaviors_covered: 1
+    coverage: full
+    confidence: 0.95
+    unresolved_questions: 2
+overall_confidence: 0.85
+flags_for_analyzer:
+  - "auth-conditional-redirect: evidence_ref stale (src/routes/project-edit.tsx missing); agreement-state gate absent from edit flow"
+  - "download-button-visibility: evidence_ref stale (src/components/ReportActions.tsx missing); actual behavior is disabled-not-hidden"
+  - "toa-gated-first-report-creation: all evidence refs verified and behavior fully matched"

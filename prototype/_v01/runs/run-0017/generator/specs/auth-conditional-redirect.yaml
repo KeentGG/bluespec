@@ -1,0 +1,594 @@
+id: auth-conditional-redirect
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth-conditional-redirect
+    coverage: partial
+    notes: >
+      The listed source files implement generic auth-based conditional redirects:
+      anonymous sessions are redirected from protected routes to /login, and
+      authenticated sessions are redirected away from /login to /companies.
+      The manifest's claimed edit-flow/agreement-state gate is not present in
+      these files; no agreement-state check or edit-route-specific redirect was
+      found.
+
+description: >
+  The auth subsystem normalizes the requested pathname and the current auth
+  session, then decides whether to allow the route or redirect. Anonymous users
+  are redirected from protected paths to /login, while authenticated users who
+  request /login are redirected to /companies. Outside that guard decision,
+  auth-error handling clears cached auth state and forces a browser redirect to
+  /login?reason=<reason>, so expired or invalid sessions fall back to the login
+  entry point. The analyzed files do not show any agreement-state gate or any
+  edit-route-specific redirect logic.
+
+state_machine:
+  initial: route_request_received
+  states:
+    - id: route_request_received
+      description: A pathname and optional auth session are being evaluated for access
+    - id: anonymous_session
+      description: No valid session remains after normalization
+    - id: authenticated_session
+      description: A valid session with user id and access token is available
+    - id: redirect_login
+      description: The user is directed to the login page
+    - id: redirect_companies
+      description: The user is directed away from the login page to /companies
+    - id: route_allowed
+      description: The requested route is allowed without redirect
+  transitions:
+    - id: session_missing_or_invalid
+      from: route_request_received
+      to: anonymous_session
+      trigger: authGuard receives null, a non-object, or a session without a non-empty _id
+    - id: session_valid
+      from: route_request_received
+      to: authenticated_session
+      trigger: authGuard receives a session object with a non-empty _id
+      effects:
+        - use the normalized session for route decisions
+    - id: anonymous_protected_redirect
+      from: anonymous_session
+      to: redirect_login
+      trigger: Anonymous user requests a protected pathname
+      guards:
+        - field: protectedRoute
+          condition: equals true after matching the normalized pathname against protectedPaths
+      effects:
+        - return a redirect decision whose destination is routes.login
+        - set reason to anonymous_redirect_login
+    - id: anonymous_public_allow
+      from: anonymous_session
+      to: route_allowed
+      trigger: Anonymous user requests a non-protected pathname
+      guards:
+        - field: protectedRoute
+          condition: equals false
+      effects:
+        - return an allow decision with reason anonymous_allow_public
+    - id: authenticated_login_redirect
+      from: authenticated_session
+      to: redirect_companies
+      trigger: Authenticated user requests the login route
+      guards:
+        - field: resolvedPath
+          condition: equals routes.login
+      effects:
+        - return a redirect decision whose destination is routes.companies
+        - set reason to authenticated_redirect_companies
+    - id: authenticated_route_allow
+      from: authenticated_session
+      to: route_allowed
+      trigger: Authenticated user requests any route other than routes.login
+      effects:
+        - return an allow decision with reason authenticated_allow_route
+    - id: auth_error_forced_login
+      from: authenticated_session
+      to: redirect_login
+      trigger: API response is classified as an auth error and handleAuthError executes
+      effects:
+        - clear client cache, auth session, browser user cookie, and known auth localStorage keys
+        - replace browser location with /login?reason=<reason>
+
+conditions:
+  - id: protected_route_gate
+    description: Anonymous users are redirected only when the requested route matches a protected path
+    trigger: authGuard evaluates a pathname without a valid normalized session
+    guards:
+      - field: pathname
+        condition: normalized to start with /
+      - field: protectedPaths
+        condition: at least one candidate equals pathname or is a pathname prefix followed by /
+    then:
+      - "return { action: redirect, destination: routes.login, reason: anonymous_redirect_login, clearSessionCookie: false }"
+    else:
+      - "return { action: allow, destination: null, reason: anonymous_allow_public, clearSessionCookie: false }"
+
+  - id: authenticated_login_gate
+    description: Authenticated users are redirected away from the login page to the post-login companies route
+    trigger: authGuard evaluates a pathname with a valid normalized session
+    guards:
+      - field: resolvedPath
+        condition: exactly equals routes.login
+    then:
+      - "return { action: redirect, destination: routes.companies, reason: authenticated_redirect_companies, clearSessionCookie: false }"
+    else:
+      - "return { action: allow, destination: null, reason: authenticated_allow_route, clearSessionCookie: false }"
+
+  - id: auth_error_redirect_to_login
+    description: Responses identified as auth failures clear client auth state and force a login redirect
+    trigger: handleAuthErrorIfNeeded receives a response matching auth-error criteria
+    guards:
+      - field: response.statusCode
+        condition: equals 401 or 403, or the response message/taxonomy indicates auth/session failure
+      - field: skipRedirect
+        condition: equals false
+    then:
+      - clear token/session state and known auth localStorage keys
+      - redirect browser to /login with a reason query parameter
+    else:
+      - return null when the response is not an auth error, or clear state without redirect when skipRedirect is true
+
+inputs:
+  - id: pathname
+    type: string
+    source: authGuard options.pathname
+    required: false
+    validation:
+      normalization: defaults to / and is coerced to start with /
+  - id: session
+    type: object|null
+    source: authGuard options.session or in-memory auth session supplied by caller
+    required: false
+    validation:
+      valid_session: must be a plain object with non-empty _id; accessToken is preserved when present
+  - id: routes
+    type: object { login, companies }
+    source: authGuard options.routes or DEFAULT_ROUTES
+    required: false
+    validation:
+      default_login: /login
+      default_companies: /companies
+  - id: protected_paths
+    type: string[]
+    source: authGuard options.protectedPaths or DEFAULT_PROTECTED_PATHS
+    required: false
+    validation:
+      default: includes /companies
+  - id: auth_error_response
+    type: object
+    source: API response passed to handleAuthErrorIfNeeded
+    required: false
+    validation:
+      recognized_as_auth_error: statusCode is 401/403, taxonomyBucket is auth/session, or message contains auth-related keywords
+  - id: refresh_cookie
+    type: HTTP-only cookie
+    source: browser credential included in POST /auth/refresh
+    required: false
+    validation:
+      access: readable only by the backend
+
+outputs:
+  - id: guard_decision
+    type: object { action, destination, reason, clearSessionCookie }
+    destination: return value from authGuard to its caller
+    lifespan: immediate
+  - id: login_redirect
+    type: string URL
+    destination: authGuard redirect destination or browser location.replace target during auth error handling
+    lifespan: immediate
+  - id: companies_redirect
+    type: string URL
+    destination: authGuard redirect destination when an authenticated user requests /login
+    lifespan: immediate
+  - id: auth_state_cleared
+    type: side effect clearing in-memory session, browser user cookie, and known auth localStorage keys
+    destination: authMemorySession store, browser cookie jar, and window.localStorage
+    lifespan: immediate
+
+evidence_refs:
+  - path: src/features/auth/api/authGuard.js
+    snippet: |
+      function normalizeSession(session) {
+        if (!isPlainObject(session)) {
+          return null;
+        }
+
+        if (typeof session._id !== "string" || session._id.length === 0) {
+          return null;
+        }
+
+        return {
+          _id: session._id,
+          email: typeof session.email === "string" ? session.email : "",
+          accessToken: typeof session.accessToken === "string" ? session.accessToken : "",
+        };
+      }
+
+      export async function authGuard(options = {}) {
+        const {
+          pathname = "/",
+          session = null,
+          routes = DEFAULT_ROUTES,
+          protectedPaths = DEFAULT_PROTECTED_PATHS,
+        } = options;
+
+        const resolvedPath = normalizePathname(pathname);
+        const resolvedSession = normalizeSession(session);
+        const protectedRoute = isProtectedRoute(resolvedPath, protectedPaths);
+        const clearSessionCookie = false;
+
+        if (!resolvedSession) {
+          if (protectedRoute) {
+            return redirect(routes.login, "anonymous_redirect_login", clearSessionCookie);
+          }
+
+          return allow("anonymous_allow_public", clearSessionCookie);
+        }
+
+        if (resolvedPath === routes.login) {
+          return redirect(routes.companies, "authenticated_redirect_companies", clearSessionCookie);
+        }
+
+        return allow("authenticated_allow_route", clearSessionCookie);
+      }
+    covers:
+      - "input: pathname"
+      - "input: session"
+      - "input: routes"
+      - "input: protected_paths"
+      - "state: route_request_received"
+      - "transition: session_missing_or_invalid"
+      - "transition: session_valid"
+      - "transition: anonymous_protected_redirect"
+      - "transition: anonymous_public_allow"
+      - "transition: authenticated_login_redirect"
+      - "transition: authenticated_route_allow"
+      - "condition: protected_route_gate"
+      - "condition: authenticated_login_gate"
+      - "output: guard_decision"
+      - "output: login_redirect"
+      - "output: companies_redirect"
+    line_range:
+      start: 30
+      end: 95
+
+  - path: src/features/auth/api/authMemorySession.js
+    snippet: |
+      function normalizeSessionPayload(candidate) {
+        if (!isPlainObject(candidate)) {
+          return null;
+        }
+
+        const userId = normalizeOptionalString(candidate._id).trim();
+        const accessToken = normalizeOptionalString(candidate.accessToken).trim();
+
+        if (!userId || !accessToken) {
+          return null;
+        }
+
+        const email = normalizeOptionalString(candidate.email);
+
+        return {
+          _id: userId,
+          email,
+          accessToken,
+          user: {
+            ...candidate,
+            _id: userId,
+            email,
+            accessToken,
+          },
+        };
+      }
+
+      export function setAuthSession(candidate) {
+        const normalized = normalizeSessionPayload(candidate);
+        authSession = normalized;
+        return authSession;
+      }
+
+      export function getAuthSession() {
+        return authSession;
+      }
+
+      export function clearAuthSession() {
+        authSession = null;
+      }
+    covers:
+      - "state: anonymous_session"
+      - "state: authenticated_session"
+      - "input: session"
+      - "output: auth_state_cleared"
+    line_range:
+      start: 62
+      end: 105
+
+  - path: src/features/auth/api/tokenService.js
+    snippet: |
+      export function getToken() {
+        return getAuthSession();
+      }
+
+      export function setToken(tokenPayload) {
+        log("setToken() called");
+
+        const normalized = setAuthSession(tokenPayload);
+        log("Auth session set:", normalized ? "success" : "failed");
+
+        if (!normalized) {
+          log("No normalized token - skipping cookie and broadcast");
+          return;
+        }
+
+        log("Writing user cookie...");
+        setBrowserUserCookie(normalized);
+
+        // Broadcast login to other tabs (client-side only)
+        broadcastAuthChange("login");
+      }
+
+      export function clearToken() {
+        log("clearToken() called");
+
+        broadcastAuthChange("logout");
+        clearAuthSession();
+        clearBrowserUserCookie();
+        log("clearToken() completed");
+      }
+    covers:
+      - "input: session"
+      - "transition: session_valid"
+      - "output: auth_state_cleared"
+    line_range:
+      start: 164
+      end: 236
+
+  - path: src/features/auth/api/authErrorHandler.js
+    snippet: |
+      export function isAuthError(response) {
+        if (!response || typeof response !== "object") {
+          return false;
+        }
+
+        if (response.statusCode === 401 || response.statusCode === 403) {
+          return true;
+        }
+
+        if (response.taxonomyBucket === "auth/session") {
+          return true;
+        }
+
+        const message = typeof response.message === "string"
+          ? response.message.toLowerCase()
+          : "";
+
+        const authKeywords = [
+          "unauthorized",
+          "unauthenticated",
+          "invalid token",
+          "token expired",
+          "jwt expired",
+          "session expired",
+          "not authenticated",
+          "auth required",
+          "forbidden",
+        ];
+
+        if (response.statusCode === 500 || !response.statusCode) {
+          return authKeywords.some(keyword => message.includes(keyword));
+        }
+
+        return authKeywords.some(keyword => message.includes(keyword));
+      }
+
+      export async function handleAuthError(options = {}) {
+        const {
+          redirectUrl = "/login",
+          reason = "session_expired",
+          skipRedirect = false
+        } = options;
+
+        try {
+          await clearClientDataCache();
+          clearToken();
+
+          if (typeof window !== "undefined") {
+            try {
+              for (const key of EOYT_AUTH_KEYS) {
+                try {
+                  window.localStorage.removeItem(key);
+                } catch (_e) {
+                }
+              }
+            } catch (_e) {
+            }
+          }
+
+          if (!skipRedirect && typeof window !== "undefined") {
+            const separator = redirectUrl.includes("?") ? "&" : "?";
+            const fullUrl = `${withBasePath(redirectUrl)}${separator}reason=${encodeURIComponent(reason)}`;
+            window.location.replace(fullUrl);
+          }
+
+          return {
+            handled: true,
+            redirectUrl: skipRedirect ? null : redirectUrl,
+            reason,
+          };
+        } catch (error) {
+          return {
+            handled: false,
+            error: error.message,
+            reason: "handler_error",
+          };
+        }
+      }
+    covers:
+      - "input: auth_error_response"
+      - "transition: auth_error_forced_login"
+      - "condition: auth_error_redirect_to_login"
+      - "output: login_redirect"
+      - "output: auth_state_cleared"
+    line_range:
+      start: 32
+      end: 144
+
+  - path: src/features/auth/api/auth-service.js
+    snippet: |
+      export async function refreshToken(paramsOrOptions = {}, maybeOptions = {}) {
+        const hasLegacyParams =
+          paramsOrOptions &&
+          typeof paramsOrOptions === "object" &&
+          Object.prototype.hasOwnProperty.call(paramsOrOptions, "accessToken");
+        const options = hasLegacyParams ? maybeOptions : paramsOrOptions;
+        const client = getClient(options);
+        return client.post({
+          path: "/auth/refresh",
+          body: null,
+          headers: applyCsrfHeaders(),
+          skipTokenRefresh: true,
+          skipAuthErrorHandling: true,
+        });
+      }
+    covers:
+      - "input: refresh_cookie"
+      - "state: authenticated_session"
+    line_range:
+      start: 92
+      end: 107
+
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      export async function refreshAccessToken(options = {}) {
+        if (isRefreshing || refreshPromise) {
+          log("Refresh already in progress in this tab, waiting...");
+          return (
+            refreshPromise ||
+            Promise.resolve({ success: false, error: "Refresh in progress", token: null })
+          );
+        }
+
+        const { apiClient } = options;
+
+        isRefreshing = true;
+
+        refreshPromise = performCoordinatedRefresh(apiClient).finally(() => {
+          isRefreshing = false;
+          refreshPromise = null;
+        });
+
+        return refreshPromise;
+      }
+
+      async function performRefresh(apiClient) {
+        try {
+          const timeoutPromise = new Promise((resolve) => {
+            setTimeout(() => resolve({ __timeout: true }), REFRESH_TIMEOUT_MS);
+          });
+
+          const result = await Promise.race([
+            refreshToken({}, apiClient ? { client: apiClient } : {}),
+            timeoutPromise,
+          ]);
+
+          if (result && result.__timeout) {
+            log(`REFRESH TIMEOUT: No response after ${REFRESH_TIMEOUT_MS}ms`);
+            return {
+              success: false,
+              error: `Token refresh timed out after ${REFRESH_TIMEOUT_MS}ms`,
+              token: null,
+            };
+          }
+
+          const actualResponse = result;
+          const raw = actualResponse?.raw;
+          const rawStatusCode = raw?.statusCode ?? actualResponse?.statusCode;
+
+          if (actualResponse?.error || (typeof rawStatusCode === "number" && rawStatusCode >= 400)) {
+            return {
+              success: false,
+              error: raw?.message || actualResponse?.message || "Token refresh failed",
+              statusCode: rawStatusCode,
+              token: null,
+            };
+          }
+
+          const userData = raw?.user ?? raw?.data?.user;
+
+          if (!userData || typeof userData.accessToken !== "string" || typeof userData._id !== "string") {
+            return {
+              success: false,
+              error: "No access token in refresh response",
+              token: null,
+            };
+          }
+
+          const newTokenPayload = {
+            _id: userData._id,
+            email: typeof userData.email === "string" ? userData.email : "",
+            accessToken: userData.accessToken,
+          };
+
+          const csrfToken = raw?.csrfToken ?? raw?.data?.csrfToken ?? null;
+
+          setToken(newTokenPayload);
+
+          return {
+            success: true,
+            token: newTokenPayload,
+            csrfToken,
+            message: raw?.message || "Token refreshed successfully",
+          };
+        } catch (error) {
+          return {
+            success: false,
+            error: error?.message || "Token refresh error",
+            token: null,
+          };
+        }
+      }
+    covers:
+      - "transition: session_valid"
+      - "input: refresh_cookie"
+    line_range:
+      start: 139
+      end: 295
+
+  - path: src/shared/components/AuthSyncBootstrap.tsx
+    snippet: |
+      export function AuthSyncBootstrap() {
+        useEffect(() => {
+          initAuthSessionListeners({
+            onLogout: () => clearBrowserUserCookie(),
+          });
+        }, []);
+
+        return null;
+      }
+    covers:
+      - "output: auth_state_cleared"
+    line_range:
+      start: 7
+      end: 14
+
+confidence: 0.74
+confidence_rationale: >
+  The core conditional redirect behavior is directly confirmed in authGuard and
+  authErrorHandler, and the supporting session lifecycle is confirmed in the
+  authMemorySession, tokenService, auth-service, tokenRefresher, and
+  AuthSyncBootstrap files. Confidence is reduced because the manifest's stated
+  edit-flow/agreement-state behavior is not present in the analyzed files, and
+  no listed caller shows which additional protected paths or redirect targets
+  may be supplied at runtime.
+
+unresolved_questions:
+  - Where is the edit-route-specific flow referenced by the manifest description? None of the listed files contain edit-route redirects or resume-flow logic.
+  - Where is the agreement-state or TOA check that is supposed to gate this behavior? No listed file reads agreement state or performs that branch.
+  - Which runtime caller, if any, overrides authGuard protectedPaths beyond the default /companies path?
+  - "Why does authGuard return clearSessionCookie: false for every branch, and is any caller expected to act on that flag?"
+
+status: partial

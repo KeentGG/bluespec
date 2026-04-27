@@ -1,0 +1,1170 @@
+id: routing.gate-navigation
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: gate-edit-flow
+    coverage: full
+    notes: >
+      Edit/resume existing report via gate system. Validates query params (target, calculatorId),
+      fetches report from API, maps progress route per calculator type (VE/DE/VGA/NP),
+      redirects to calculator gate URL with resume route. Falls back to reports route on
+      validation failure, fetch error, or unknown progress. One-shot guard prevents duplicate
+      execution. UI state derived from result phase (pending_router, redirecting, duplicate, fallback).
+  - id: gate-new-flow
+    coverage: full
+    notes: >
+      Create new report via gate system. Validates query params (target, source, name) and
+      referrer origin/path against allowlists. Creates report via API, hydrates from import
+      or defaults, redirects to calculator gate URL. Falls back to companies route on
+      validation failure or create error. One-shot guard prevents duplicate execution.
+      Referrer validation allows missing referrers (browser privacy) but blocks unlisted
+      origins and paths.
+  - id: gate-route-resolution
+    coverage: full
+    notes: >
+      Resolves calculator gate URLs from environment variables (NEXT_PUBLIC_*_GATE_PATH)
+      with fallback to base path + /gate or hardcoded defaults. Supports explicit
+      gatePathsByCalculatorId override. Builds validated gate edit/new URLs with query params.
+      Resolves handoff routes for edit/new intents with fallback destinations.
+  - id: gate-progress-route-mapping
+    coverage: full
+    notes: >
+      Maps calculator-specific routes to progress percentages (0-100%) for the reports
+      table. Each calculator (VE/DE/VGA/NP) has its own percentage table. Questionnaire
+      steps use formula-based calculation (e.g. VE: 5 + (step-1)*5). Static routes map
+      to fixed percentages. Returns null for unrecognized routes.
+
+description: >
+  Manages the gate navigation system that routes between the dashboard and four calculator
+  tools (VE, DE, VGA, NP). The gate system handles two flows: editing an existing report
+  (validates target query param, fetches report, maps progress route, redirects to calculator)
+  and creating a new report (validates query params and referrer origin, creates report,
+  hydrates data, redirects to calculator). Gate URLs are resolved from environment variables
+  with hardcoded fallback defaults. Calculator-specific route mapping determines resume points
+  and progress percentages for the reports table. One-shot execution guards prevent duplicate
+  initialization in React Strict Mode.
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: "No gate flow active. Dashboard or calculator page is idle."
+    - id: validating
+      description: "Gate query params and referrer origin are being validated."
+    - id: fetching_report
+      description: "Edit flow: fetching existing report from API to determine progress route."
+    - id: creating_report
+      description: "New flow: creating report record via API."
+    - id: hydrating
+      description: "New flow: hydrating created report from import source or defaults."
+    - id: redirecting
+      description: "Gate flow resolved. Navigating to calculator gate URL with resume route."
+    - id: pending_router
+      description: "Router not ready yet. One-shot guard deferred execution."
+    - id: duplicate
+      description: "Same intent key already executed. Guard prevented duplicate run."
+    - id: fallback
+      description: "Gate flow failed. Redirecting to fallback destination (reports or companies route)."
+  transitions:
+    - id: edit_validated
+      from: idle
+      to: validating
+      trigger: User clicks Edit on existing report, navigates to /gate/edit
+      guards:
+        - field: query_target
+          condition: Non-empty target (report ID) present in query params
+        - field: query_calculatorId
+          condition: Valid calculator ID (1-4) present in query params
+    - id: edit_fetch_started
+      from: validating
+      to: fetching_report
+      trigger: Query validation passed, one-shot guard acquired
+      guards:
+        - field: validation_result
+          condition: "validateGateQuery returns isValid: true"
+        - field: guard_status
+          condition: "runOnceWhenRouterReady returns didRun: true"
+    - id: edit_fetch_success
+      from: fetching_report
+      to: redirecting
+      trigger: Report fetched and progress route resolved
+      guards:
+        - field: progress_resolution
+          condition: "normalizeProgressResolution returns isValid: true with non-null route"
+      effects:
+        - Navigate to progressResolution.route
+    - id: new_validated
+      from: idle
+      to: validating
+      trigger: User clicks Create Report, navigates to /gate/new
+      guards:
+        - field: query_target
+          condition: Non-empty target present in query params
+        - field: origin_check
+          condition: Current origin is in allowed origins list
+    - id: new_create_started
+      from: validating
+      to: creating_report
+      trigger: Entry validation passed, one-shot guard acquired
+      guards:
+        - field: validation_result
+          condition: "validateGateNewEntry returns isValid: true"
+        - field: guard_status
+          condition: "runOnceWhenRouterReady returns didRun: true"
+    - id: new_create_success
+      from: creating_report
+      to: hydrating
+      trigger: Report created successfully via API
+    - id: new_hydration_complete
+      from: hydrating
+      to: redirecting
+      trigger: Report hydrated from import or defaults
+      effects:
+        - Navigate to resolved nextDestination
+    - id: validation_failed
+      from: validating
+      to: fallback
+      trigger: Query validation or origin check failed
+      effects:
+        - Navigate to fallback destination (reports route for edit, companies route for new)
+    - id: fetch_failed
+      from: fetching_report
+      to: fallback
+      trigger: API fetch failed or returned invalid payload
+      effects:
+        - Navigate to reports route with business ID hash
+    - id: progress_unknown
+      from: fetching_report
+      to: fallback
+      trigger: Progress route could not be resolved for calculator type
+      effects:
+        - Navigate to reports route
+    - id: create_failed
+      from: creating_report
+      to: fallback
+      trigger: Report creation failed via API
+      effects:
+        - Navigate to reports route
+    - id: router_not_ready
+      from: idle
+      to: pending_router
+      trigger: Next.js router has not resolved initial params yet
+    - id: duplicate_intent
+      from: idle
+      to: duplicate
+      trigger: Same intent key already executed in this session
+
+conditions:
+  - id: edit-referrer-not-checked
+    description: >
+      Edit flow does not validate referrer origin or path. Only query params (target,
+      calculatorId) are validated. This is intentional — edit flows are initiated from
+      the dashboard's own report list.
+    trigger: Gate edit entry requested
+    guards:
+      - field: flow_type
+        condition: Flow is "edit" (not "new")
+    then:
+      - Skip referrer validation entirely
+      - Proceed directly to query param validation
+    else:
+      - N/A (edit flow always takes this path)
+
+  - id: new-referrer-validation
+    description: >
+      New flow validates referrer origin and path against allowlists to prevent
+      external gate abuse. Missing referrer is allowed (browser privacy policies
+      may strip it). Referrer origin must match allowed origins. Referrer path
+      must start with an allowed prefix.
+    trigger: Gate new entry requested
+    guards:
+      - field: referrer_present
+        condition: Referrer string is present and non-empty
+    then:
+      - Parse referrer as URL
+      - Check referrer origin is in resolvedAllowedOrigins
+      - Check referrer pathname starts with an allowed prefix
+    else:
+      - Allow flow to proceed (browser privacy stripped referrer)
+
+  - id: one-shot-guard-edit
+    description: >
+      Edit flow uses intent key "gate:edit:{target}" to prevent duplicate execution.
+      If the same target was already processed, returns phase "duplicate" without
+      re-executing the callback.
+    trigger: executeGateEditInitialization called
+    guards:
+      - field: intent_key
+        condition: Intent key "gate:edit:{target}" not yet in executedKeys set
+    then:
+      - Execute callback (fetch report, resolve progress, navigate)
+      - Add intent key to executedKeys set
+    else:
+      - Return phase "duplicate" with reason "duplicate_intent"
+
+  - id: one-shot-guard-new
+    description: >
+      New flow uses intent key "gate:new:{target}|{source}|{name}" to prevent
+      duplicate execution. If the same intent was already processed, returns
+      phase "duplicate" without re-executing the callback.
+    trigger: executeGateNewInitialization called
+    guards:
+      - field: intent_key
+        condition: Intent key "gate:new:{target}|{source}|{name}" not yet in executedKeys set
+    then:
+      - Execute callback (create report, hydrate, navigate)
+      - Add intent key to executedKeys set
+    else:
+      - Return phase "duplicate" with reason "duplicate_intent"
+
+  - id: router-readiness-check
+    description: >
+      Both edit and new flows check router readiness before executing. If the
+      Next.js router has not resolved initial params (isReady is false and
+      push/replace are not available), execution is deferred.
+    trigger: runOnceWhenRouterReady called
+    guards:
+      - field: router_ready
+        condition: isRouterReady returns true (router.isReady is true, or push/replace exist)
+    then:
+      - Proceed with guard.runOnce(intentKey, callback)
+    else:
+      - Return didRun: false with reason "router_not_ready"
+
+  - id: gate-path-resolution-priority
+    description: >
+      Gate path resolution follows a priority chain: explicit gatePathsByCalculatorId
+      option, then environment variable (NEXT_PUBLIC_*_GATE_PATH), then base path env var
+      (NEXT_PUBLIC_*_PATH) + "/gate", then hardcoded default path.
+    trigger: resolveGatePathForCalculator called
+    guards:
+      - field: calculator_id
+        condition: Calculator ID maps to a known env key in CALCULATOR_ID_TO_GATE_ENV_KEY
+    then:
+      - Check explicit override first
+      - Check gate-specific env var
+      - Check base path env var + "/gate"
+      - Fall back to hardcoded default
+    else:
+      - Return ok: false with reason "unsupported_calculator_id"
+
+  - id: progress-percentage-calculation
+    description: >
+      Progress percentage is calculated per calculator type. Questionnaire steps use
+      formula-based calculation (e.g. VE: 5 + (step-1)*5, DE: 5 + (step-1)*8).
+      Static routes map to fixed percentages. Optional questions always map to 100%.
+      Result is clamped to 0-100 range.
+    trigger: resolveCalculatorAwareProgressPercentage called
+    guards:
+      - field: calculator_id
+        condition: Valid calculator ID (VE/DE/VGA/NP)
+      - field: report_progress
+        condition: Non-null route starting with "/"
+    then:
+      - Dispatch to calculator-specific percentage resolver
+      - Return clamped percentage (0-100)
+    else:
+      - Return failure with reason (invalid_calculator_id or missing_report_progress)
+
+inputs:
+  - id: gate_edit_query
+    type: "object with target and calculatorId fields"
+    source: "URL query parameters on /gate/edit"
+    required: true
+    validation:
+      target: "non-empty string (report ID)"
+      calculatorId: "valid calculator ID (1-4)"
+
+  - id: gate_new_query
+    type: "object with target, source, and name fields"
+    source: "URL query parameters on /gate/new"
+    required: true
+    validation:
+      target: "non-empty string (report ID)"
+      source: "optional string (origin identifier)"
+      name: "optional string (report name)"
+
+  - id: referrer
+    type: "URL string"
+    source: "document.referrer or HTTP Referer header"
+    required: false
+    validation:
+      format: "parseable URL"
+      origin: "must be in allowedOrigins list if present"
+      path: "must start with allowed prefix if present"
+
+  - id: current_origin
+    type: "string URL origin"
+    source: "window.location.origin"
+    required: true
+    validation:
+      format: "normalized origin (protocol + host)"
+
+  - id: calculator_id
+    type: "string (VE, DE, VGA, NP)"
+    source: "query parameter or report.calculatorId"
+    required: true
+    validation:
+      enum: "VE, DE, VGA, NP"
+
+  - id: report_id
+    type: "string"
+    source: "query parameter target"
+    required: true
+    validation:
+      format: "non-empty string"
+
+  - id: report_progress_route
+    type: "string path"
+    source: "report.reportProgress from API response"
+    required: false
+    validation:
+      format: "starts with /"
+      normalization: "double slashes collapsed, trailing slash removed"
+
+  - id: environment_variables
+    type: "object with NEXT_PUBLIC_* keys"
+    source: "process.env (Next.js public env vars)"
+    required: false
+    validation:
+      keys: "NEXT_PUBLIC_VE_GATE_PATH, NEXT_PUBLIC_DE_GATE_PATH, NEXT_PUBLIC_VGA_GATE_PATH, NEXT_PUBLIC_NP_GATE_PATH, NEXT_PUBLIC_VE_PATH, NEXT_PUBLIC_DE_PATH, NEXT_PUBLIC_VGA_PATH, NEXT_PUBLIC_NP_PATH"
+
+outputs:
+  - id: edit_redirect_url
+    type: "string URL path"
+    destination: "browser navigation (router.push or navigate())"
+    lifespan: "immediate"
+
+  - id: new_redirect_url
+    type: "string URL path"
+    destination: "browser navigation (router.push or navigate())"
+    lifespan: "immediate"
+
+  - id: fallback_destination
+    type: "string URL path"
+    destination: "browser navigation on failure"
+    lifespan: "immediate"
+
+  - id: gate_url
+    type: "string URL with query params"
+    destination: "used for calculator gate entry"
+    lifespan: "immediate"
+
+  - id: progress_percentage
+    type: "integer 0-100"
+    destination: "reports table progress bar display"
+    lifespan: "per-render"
+
+  - id: ui_state
+    type: "object with heading, detail, fallbackDestination"
+    destination: "gate page UI display"
+    lifespan: "per-render"
+
+  - id: introduction_url
+    type: "string URL"
+    destination: "calculator introduction page"
+    lifespan: "immediate"
+
+evidence_refs:
+  - path: src/shared/lib/routing/gate-edit-contract.js
+    snippet: |
+      export async function executeGateEditInitialization(options = {}) {
+        const {
+          router,
+          guard = createOneShotGuard(),
+          query = {},
+          fallbackBusinessId = null,
+          fetchReport = async ({ target }) =>
+            fetchGateEditReportById(target, { apiBaseUrl: "" }),
+          resolveProgressRoute = ({ report }) => resolveGateEditProgressRoute(report),
+          navigate = () => undefined,
+        } = options;
+
+        const validation = validateGateEditEntry({ query });
+        if (!validation.isValid) {
+          const fallback = resolveGateEditFallbackDestination({
+            preferredRoute: REPORTS_ROUTE,
+            businessId: fallbackBusinessId,
+          });
+          navigate(fallback.destination);
+          return {
+            phase: "fallback",
+            reason: validation.reason,
+            nextDestination: null,
+            fallbackDestination: fallback.destination,
+          };
+        }
+
+        const intentKey = createGateEditIntentKey(validation.gateQuery);
+        const runResult = runOnceWhenRouterReady({
+          router, guard, intentKey,
+          callback: async () => {
+            let report;
+            try {
+              report = await fetchReport({
+                target: validation.gateQuery.target,
+                gateQuery: validation.gateQuery,
+                validation,
+              });
+            } catch (_error) {
+              const fallback = resolveGateEditFallbackDestination({
+                preferredRoute: REPORTS_ROUTE,
+                businessId: fallbackBusinessId,
+              });
+              navigate(fallback.destination);
+              return {
+                phase: "fallback",
+                reason: "fetch_failed",
+                nextDestination: null,
+                fallbackDestination: fallback.destination,
+              };
+            }
+
+            const progressResolution = normalizeProgressResolution(
+              resolveProgressRoute({ report, gateQuery: validation.gateQuery, validation }),
+            );
+            if (!progressResolution.isValid || !progressResolution.route) {
+              const fallback = resolveGateEditFallbackDestination({
+                preferredRoute: REPORTS_ROUTE, report, businessId: fallbackBusinessId,
+              });
+              navigate(fallback.destination);
+              return {
+                phase: "fallback",
+                reason: progressResolution.reason ?? "unknown_progress",
+                nextDestination: null,
+                fallbackDestination: fallback.destination,
+              };
+            }
+
+            navigate(progressResolution.route);
+            return {
+              phase: "redirecting",
+              reason: null,
+              nextDestination: progressResolution.route,
+              fallbackDestination: null,
+            };
+          },
+        });
+
+        if (!runResult.didRun) {
+          const fallback = resolveGateEditFallbackDestination({
+            preferredRoute: REPORTS_ROUTE, businessId: fallbackBusinessId,
+          });
+          return {
+            phase: runResult.reason === "router_not_ready" ? "pending_router" : "duplicate",
+            reason: runResult.reason,
+            nextDestination: null,
+            fallbackDestination: fallback.destination,
+          };
+        }
+        return runResult.value;
+      }
+    covers:
+      - "state:validating"
+      - "state:fetching_report"
+      - "state:redirecting"
+      - "state:pending_router"
+      - "state:duplicate"
+      - "state:fallback"
+      - "transition:edit_validated"
+      - "transition:edit_fetch_started"
+      - "transition:edit_fetch_success"
+      - "transition:validation_failed"
+      - "transition:fetch_failed"
+      - "transition:progress_unknown"
+      - "condition:one-shot-guard-edit"
+      - "condition:router-readiness-check"
+      - "input:gate_edit_query"
+      - "output:edit_redirect_url"
+      - "output:fallback_destination"
+      - "output:ui_state"
+    line_range:
+      start: 528
+      end: 636
+
+  - path: src/shared/lib/routing/gate-edit-contract.js
+    snippet: |
+      export function resolveGateEditProgressRoute(report = {}) {
+        if (!isPlainObject(report)) {
+          return {
+            isValid: false, reason: "invalid_report",
+            route: null, calculatorId: null, reportProgress: null,
+          };
+        }
+
+        const calculatorId = normalizeCalculatorId(report.calculatorId);
+        if (!calculatorId || !SUPPORTED_CALCULATOR_IDS.has(calculatorId)) {
+          return {
+            isValid: false, reason: "unknown_calculator",
+            route: null, calculatorId, reportProgress: null,
+          };
+        }
+
+        const reportProgress = normalizeProgressRoute(report.reportProgress);
+        if (!reportProgress) {
+          return {
+            isValid: false, reason: "missing_report_progress",
+            route: null, calculatorId, reportProgress: null,
+          };
+        }
+
+        const route = resolveMappedProgressRoute(calculatorId, reportProgress);
+        if (!route) {
+          return {
+            isValid: false, reason: "unknown_progress",
+            route: null, calculatorId, reportProgress,
+          };
+        }
+
+        return {
+          isValid: true, reason: null,
+          route, calculatorId, reportProgress,
+        };
+      }
+    covers:
+      - "input:calculator_id"
+      - "input:report_progress_route"
+      - "transition:edit_fetch_success"
+      - "transition:progress_unknown"
+    line_range:
+      start: 442
+      end: 493
+
+  - path: src/shared/lib/routing/gate-edit-contract.js
+    snippet: |
+      function mapVeProgressRoute(progressRoute) {
+        if (progressRoute.includes("optional-questions")) {
+          return "/value-estimate";
+        }
+        if (progressRoute === "/thankyou") {
+          return "/value-estimate";
+        }
+        if (progressRoute.startsWith("/questionnaire/")) {
+          return progressRoute;
+        }
+        if (progressRoute.startsWith("/add-period")) {
+          return progressRoute;
+        }
+        return VE_EXACT_ROUTES.has(progressRoute) ? progressRoute : null;
+      }
+
+      function mapDeProgressRoute(progressRoute) {
+        if (progressRoute === "/thankyou") {
+          return "/summary";
+        }
+        if (progressRoute.startsWith("/company-information/")) {
+          return progressRoute;
+        }
+        if (progressRoute.includes("adjustment-categories")) {
+          return progressRoute;
+        }
+        return DE_EXACT_ROUTES.has(progressRoute) ? progressRoute : null;
+      }
+
+      function mapVgaProgressRoute(progressRoute) {
+        if (/^\/optional-questions\/7(?:\/|$)/.test(progressRoute)) {
+          return "/summary";
+        }
+        if (progressRoute.startsWith("/company-information/")) {
+          return progressRoute;
+        }
+        if (progressRoute.startsWith("/adjustment-categories")) {
+          return progressRoute;
+        }
+        if (progressRoute.startsWith("/optional-questions/")) {
+          return progressRoute;
+        }
+        return VGA_EXACT_ROUTES.has(progressRoute) ? progressRoute : null;
+      }
+
+      function mapNpProgressRoute(progressRoute) {
+        if (progressRoute.startsWith("/company-information/")) {
+          return progressRoute;
+        }
+        if (progressRoute.startsWith("/adjustment-categories")) {
+          return progressRoute;
+        }
+        if (progressRoute.startsWith("/optional-questions/")) {
+          return progressRoute;
+        }
+        return NP_EXACT_ROUTES.has(progressRoute) ? progressRoute : null;
+      }
+    covers:
+      - "condition:progress-percentage-calculation"
+      - "input:report_progress_route"
+      - "output:edit_redirect_url"
+    line_range:
+      start: 161
+      end: 286
+
+  - path: src/shared/lib/routing/gate-new-contract.js
+    snippet: |
+      export async function executeGateNewInitialization(options = {}) {
+        const {
+          router,
+          guard = createOneShotGuard(),
+          query = {},
+          currentOrigin = "",
+          referrer = "",
+          allowedOrigins = [],
+          allowedReferrerPathPrefixes = GATE_NEW_ALLOWED_REFERRER_PATH_PREFIXES,
+          createReport = async ({ gateQuery }) => ({
+            _id: `report-${gateQuery.target}`,
+            businessId: gateQuery.target,
+            name: gateQuery.name ?? "",
+          }),
+          hydrateFromImport = async () => undefined,
+          hydrateDefaults = async () => undefined,
+          resolveNextDestination = ({ gateQuery }) => resolveDefaultNextDestination(gateQuery),
+          navigate = () => undefined,
+        } = options;
+
+        const validation = validateGateNewEntry({
+          query, currentOrigin, referrer, allowedOrigins, allowedReferrerPathPrefixes,
+        });
+
+        if (!validation.isValid) {
+          const fallback = resolveGateNewFallbackDestination({ preferredRoute: COMPANIES_ROUTE });
+          navigate(fallback.destination);
+          return {
+            phase: "fallback",
+            reason: validation.reason,
+            nextDestination: null,
+            fallbackDestination: fallback.destination,
+          };
+        }
+
+        const intentKey = createGateNewIntentKey(validation.gateQuery);
+        const runResult = runOnceWhenRouterReady({
+          router, guard, intentKey,
+          callback: async () => {
+            let createdReport;
+            try {
+              createdReport = await createReport({
+                gateQuery: validation.gateQuery, validation,
+              });
+            } catch (_error) {
+              const fallback = resolveGateNewFallbackDestination({ preferredRoute: REPORTS_ROUTE });
+              navigate(fallback.destination);
+              return {
+                phase: "fallback",
+                reason: "create_failed",
+                nextDestination: null,
+                fallbackDestination: fallback.destination,
+              };
+            }
+
+            const hydrationMode = await hydrateCreatedReport({
+              gateQuery: validation.gateQuery, createdReport, hydrateFromImport, hydrateDefaults,
+            });
+
+            const unresolvedDestination = resolveNextDestination({
+              gateQuery: validation.gateQuery, createdReport, hydrationMode,
+            });
+            const nextDestination =
+              normalizeNavigationDestination(unresolvedDestination) ??
+              resolveDefaultNextDestination(validation.gateQuery);
+
+            navigate(nextDestination);
+            return {
+              phase: "redirecting",
+              reason: null,
+              nextDestination,
+              fallbackDestination: null,
+            };
+          },
+        });
+
+        if (!runResult.didRun) {
+          const fallback = resolveGateNewFallbackDestination({ preferredRoute: REPORTS_ROUTE });
+          return {
+            phase: runResult.reason === "router_not_ready" ? "pending_router" : "duplicate",
+            reason: runResult.reason,
+            nextDestination: null,
+            fallbackDestination: fallback.destination,
+          };
+        }
+        return runResult.value;
+      }
+    covers:
+      - "state:validating"
+      - "state:creating_report"
+      - "state:hydrating"
+      - "state:redirecting"
+      - "state:pending_router"
+      - "state:duplicate"
+      - "state:fallback"
+      - "transition:new_validated"
+      - "transition:new_create_started"
+      - "transition:new_create_success"
+      - "transition:new_hydration_complete"
+      - "transition:validation_failed"
+      - "transition:create_failed"
+      - "condition:one-shot-guard-new"
+      - "condition:router-readiness-check"
+      - "input:gate_new_query"
+      - "input:referrer"
+      - "input:current_origin"
+      - "output:new_redirect_url"
+      - "output:fallback_destination"
+    line_range:
+      start: 339
+      end: 448
+
+  - path: src/shared/lib/routing/gate-new-contract.js
+    snippet: |
+      export function validateGateNewEntry(options = {}) {
+        const {
+          query = {},
+          currentOrigin = "",
+          referrer = "",
+          allowedOrigins = [],
+          allowedReferrerPathPrefixes = GATE_NEW_ALLOWED_REFERRER_PATH_PREFIXES,
+        } = options;
+
+        const gateQuery = validateGateQuery(query);
+        if (!gateQuery.isValid) {
+          return {
+            isValid: false, reason: gateQuery.reason, gateQuery,
+            currentOrigin: null, referrerOrigin: null, referrerPath: null,
+            referrerState: "invalid_query",
+            allowedOrigins: resolveGateNewAllowedOrigins({ currentOrigin, allowedOrigins }),
+          };
+        }
+
+        const resolvedAllowedOrigins = resolveGateNewAllowedOrigins({ currentOrigin, allowedOrigins });
+        const normalizedCurrentOrigin = normalizeOrigin(currentOrigin);
+
+        if (!normalizedCurrentOrigin || !resolvedAllowedOrigins.includes(normalizedCurrentOrigin)) {
+          return {
+            isValid: false, reason: "blocked_origin", gateQuery,
+            currentOrigin: normalizedCurrentOrigin, referrerOrigin: null,
+            referrerPath: null, referrerState: "blocked",
+            allowedOrigins: resolvedAllowedOrigins,
+          };
+        }
+
+        const normalizedReferrer = normalizeString(referrer);
+        if (!normalizedReferrer) {
+          return {
+            isValid: true, reason: null, gateQuery,
+            currentOrigin: normalizedCurrentOrigin, referrerOrigin: null,
+            referrerPath: null, referrerState: "missing",
+            allowedOrigins: resolvedAllowedOrigins,
+          };
+        }
+
+        let parsedReferrer = null;
+        try {
+          parsedReferrer = new URL(normalizedReferrer);
+        } catch (_error) {
+          parsedReferrer = null;
+        }
+
+        if (!parsedReferrer) {
+          return {
+            isValid: false, reason: "invalid_referrer", gateQuery,
+            currentOrigin: normalizedCurrentOrigin, referrerOrigin: null,
+            referrerPath: null, referrerState: "invalid",
+            allowedOrigins: resolvedAllowedOrigins,
+          };
+        }
+
+        const referrerOrigin = normalizeOrigin(parsedReferrer.origin);
+        if (!referrerOrigin || !resolvedAllowedOrigins.includes(referrerOrigin)) {
+          return {
+            isValid: false, reason: "blocked_referrer_origin", gateQuery,
+            currentOrigin: normalizedCurrentOrigin, referrerOrigin,
+            referrerPath: parsedReferrer.pathname, referrerState: "blocked",
+            allowedOrigins: resolvedAllowedOrigins,
+          };
+        }
+
+        if (!isAllowedReferrerPath(parsedReferrer.pathname, allowedReferrerPathPrefixes)) {
+          return {
+            isValid: false, reason: "blocked_referrer_path", gateQuery,
+            currentOrigin: normalizedCurrentOrigin, referrerOrigin,
+            referrerPath: parsedReferrer.pathname, referrerState: "blocked",
+            allowedOrigins: resolvedAllowedOrigins,
+          };
+        }
+
+        return {
+          isValid: true, reason: null, gateQuery,
+          currentOrigin: normalizedCurrentOrigin, referrerOrigin,
+          referrerPath: parsedReferrer.pathname, referrerState: "validated",
+          allowedOrigins: resolvedAllowedOrigins,
+        };
+      }
+    covers:
+      - "condition:new-referrer-validation"
+      - "input:gate_new_query"
+      - "input:referrer"
+      - "input:current_origin"
+    line_range:
+      start: 206
+      end: 320
+
+  - path: src/shared/lib/routing/gate-new-contract.js
+    snippet: |
+      export const GATE_NEW_ALLOWED_REFERRER_PATH_PREFIXES = Object.freeze([
+        "/companies",
+        "/reports",
+        "/gate/new",
+        "/gate/edit",
+        "/introduction",
+        "/commitment",
+      ]);
+    covers:
+      - "condition:new-referrer-validation"
+    line_range:
+      start: 25
+      end: 32
+
+  - path: src/shared/lib/routing/gate-finder.js
+    snippet: |
+      const CALCULATOR_ID_TO_DEFAULT_GATE_PATH = Object.freeze({
+        [CALCULATOR_IDS.VE]: "/business-value-estimate-calculator/gate",
+        [CALCULATOR_IDS.DE]: "/discretionary-earnings-calculator/gate",
+        [CALCULATOR_IDS.VGA]: "/value-gap-analysis-tool/gate",
+        [CALCULATOR_IDS.NP]: "/net-proceeds/gate",
+      });
+
+      export function resolveGatePathForCalculator(calculatorId, options = {}) {
+        const normalizedCalculatorId = normalizeString(String(calculatorId ?? ""));
+        const envKey = CALCULATOR_ID_TO_GATE_ENV_KEY[normalizedCalculatorId];
+
+        if (!envKey) {
+          return {
+            ok: false, reason: "unsupported_calculator_id",
+            calculatorId: normalizedCalculatorId, gatePath: null, envKey: null,
+          };
+        }
+
+        const gatePathsByCalculatorId =
+          options.gatePathsByCalculatorId && typeof options.gatePathsByCalculatorId === "object"
+            ? options.gatePathsByCalculatorId : {};
+        const explicitGatePath = normalizeString(gatePathsByCalculatorId[normalizedCalculatorId]);
+
+        if (explicitGatePath) {
+          return {
+            ok: true, reason: null, calculatorId: normalizedCalculatorId,
+            gatePath: explicitGatePath, envKey,
+          };
+        }
+
+        const environment = toEnvironmentObject(options.env);
+        const envGatePath = resolveGatePathFromEnvironment(normalizedCalculatorId, environment);
+        const fallbackGatePath = resolveFallbackGatePath(normalizedCalculatorId, environment);
+
+        if (envGatePath) {
+          return {
+            ok: true, reason: null, calculatorId: normalizedCalculatorId,
+            gatePath: envGatePath, envKey,
+          };
+        }
+
+        if (fallbackGatePath) {
+          return {
+            ok: true, reason: "fallback_gate_path", calculatorId: normalizedCalculatorId,
+            gatePath: fallbackGatePath, envKey,
+          };
+        }
+
+        return {
+          ok: false, reason: "missing_gate_path", calculatorId: normalizedCalculatorId,
+          gatePath: null, envKey,
+        };
+      }
+    covers:
+      - "condition:gate-path-resolution-priority"
+      - "input:calculator_id"
+      - "input:environment_variables"
+      - "output:gate_url"
+    line_range:
+      start: 44
+      end: 201
+
+  - path: src/shared/lib/routing/gate-finder.js
+    snippet: |
+      export function resolveGateHandoffRoute(options = {}) {
+        const intent = normalizeHandoffIntent(options.intent);
+        const fallbackDestination = resolveHandoffFallbackDestination(
+          intent ?? GATE_HANDOFF_INTENTS.EDIT, options,
+        );
+
+        if (!intent) {
+          return {
+            ok: false, reason: "invalid_intent",
+            destination: null, fallbackDestination,
+          };
+        }
+
+        const routeResolution =
+          intent === GATE_HANDOFF_INTENTS.NEW
+            ? buildGateNewActionRoute(options)
+            : buildGateEditActionRoute(options);
+
+        if (!routeResolution.ok) {
+          return {
+            ok: false, reason: routeResolution.reason,
+            destination: null, fallbackDestination,
+          };
+        }
+
+        return {
+          ok: true, reason: null,
+          destination: routeResolution.destination, fallbackDestination,
+        };
+      }
+    covers:
+      - "output:gate_url"
+      - "output:fallback_destination"
+    line_range:
+      start: 302
+      end: 338
+
+  - path: src/shared/lib/routing/report-route-progress-contract.js
+    snippet: |
+      export function resolveCalculatorAwareProgressPercentage(options = {}) {
+        const input = resolveReportProgressInput(options);
+        if (!input) {
+          return createFailure("progress_percentage", "invalid_payload", {
+            progressPercentage: 0, calculatorId: null, reportProgress: null,
+          });
+        }
+
+        const calculatorId = normalizeCalculatorId(input.calculatorId);
+        if (!calculatorId) {
+          return createFailure("progress_percentage", "invalid_calculator_id", {
+            progressPercentage: 0, calculatorId: null, reportProgress: null,
+          });
+        }
+
+        const reportProgress = normalizeProgressRoute(input.reportProgress);
+        if (!reportProgress) {
+          return createFailure("progress_percentage", "missing_report_progress", {
+            progressPercentage: 0, calculatorId, reportProgress: null,
+          });
+        }
+
+        const progressPercentage = resolveProgressPercentageByCalculatorId(calculatorId, reportProgress);
+        if (progressPercentage === null) {
+          return createFailure("progress_percentage", "unknown_progress", {
+            progressPercentage: 0, calculatorId, reportProgress,
+          });
+        }
+
+        return createSuccess("progress_percentage", "progress_percentage_resolved", {
+          progressPercentage, calculatorId, reportProgress,
+        });
+      }
+    covers:
+      - "condition:progress-percentage-calculation"
+      - "input:calculator_id"
+      - "input:report_progress_route"
+      - "output:progress_percentage"
+    line_range:
+      start: 325
+      end: 367
+
+  - path: src/shared/lib/routing/report-route-progress-contract.js
+    snippet: |
+      function resolveVeProgressPercentage(route) {
+        const questionnaireStep = toStepNumber(route, /^\/questionnaire\/(\d+)(?:\/|$)/);
+        if (questionnaireStep !== null) {
+          return clampPercent(5 + (questionnaireStep - 1) * 5);
+        }
+        if (route.startsWith("/add-period")) { return 50; }
+        if (route === "/income-statement") { return 60; }
+        if (route === "/customize-report-1") { return 70; }
+        if (route === "/industry-data") { return 76; }
+        if (route === "/customize-report-2") { return 82; }
+        if (route === "/choose-multiplier") { return 88; }
+        if (route === "/your-information") { return 94; }
+        if (route === "/value-estimate" || route === "/thankyou" || route.includes("optional-questions")) {
+          return 100;
+        }
+        return null;
+      }
+
+      function resolveDeProgressPercentage(route) {
+        const companyInformationStep = toStepNumber(route, /^\/company-information\/(\d+)(?:\/|$)/);
+        if (companyInformationStep !== null) {
+          return clampPercent(5 + (companyInformationStep - 1) * 8);
+        }
+        if (route.includes("optional-questions")) { return 100; }
+        if (route.startsWith("/add-period")) { return 60; }
+        if (route.includes("adjustment-categories")) { return 60; }
+        if (route === "/income-statement" || route === "/income-statement/summary" || route === "/inc-statement/summary") {
+          return 70;
+        }
+        if (route === "/customize-report-3") { return 78; }
+        if (route === "/company-logo") { return 84; }
+        if (route === "/average") { return 90; }
+        if (route === "/summary" || route === "/thankyou") { return 100; }
+        return null;
+      }
+    covers:
+      - "condition:progress-percentage-calculation"
+      - "output:progress_percentage"
+    line_range:
+      start: 113
+      end: 202
+
+  - path: src/shared/lib/routing/queryValidators.js
+    snippet: |
+      export function validateGateQuery(query) {
+        const rawTarget = readQueryValue(query, "target");
+        const rawSource = readQueryValue(query, "source");
+        const rawName = readQueryValue(query, "name");
+
+        const target = rawTarget?.trim() ?? "";
+        if (!target) {
+          return {
+            isValid: false, reason: "missing_target",
+            target: null, source: null, name: null,
+            raw: { target: rawTarget, source: rawSource, name: rawName },
+          };
+        }
+
+        const source = rawSource?.trim() ? rawSource.trim() : null;
+        const name = rawName ?? null;
+
+        return {
+          isValid: true, reason: null,
+          target, source, name,
+          raw: { target: rawTarget, source: rawSource, name: rawName },
+        };
+      }
+    covers:
+      - "input:gate_edit_query"
+      - "input:gate_new_query"
+      - "transition:edit_validated"
+      - "transition:new_validated"
+    line_range:
+      start: 84
+      end: 120
+
+  - path: src/shared/lib/routing/initGuards.js
+    snippet: |
+      export function isRouterReady(router) {
+        if (!router || typeof router !== "object") {
+          return false;
+        }
+        if (typeof router.isReady === "boolean") {
+          return router.isReady;
+        }
+        return typeof router.push === "function" || typeof router.replace === "function";
+      }
+
+      export function createOneShotGuard() {
+        const executedKeys = new Set();
+
+        function shouldRun(intentKey = "default") {
+          const normalizedKey = normalizeIntentKey(intentKey);
+          if (executedKeys.has(normalizedKey)) {
+            return false;
+          }
+          executedKeys.add(normalizedKey);
+          return true;
+        }
+
+        function runOnce(intentKey = "default", callback = () => undefined) {
+          if (!shouldRun(intentKey)) {
+            return { didRun: false, reason: "duplicate_intent", value: undefined };
+          }
+          return { didRun: true, reason: null, value: callback() };
+        }
+
+        return { shouldRun, runOnce, hasRun, reset };
+      }
+
+      export function runOnceWhenRouterReady({ router, guard, intentKey = "default", callback = () => undefined }) {
+        if (!isRouterReady(router)) {
+          return { didRun: false, reason: "router_not_ready", value: undefined };
+        }
+        return guard.runOnce(intentKey, callback);
+      }
+    covers:
+      - "condition:one-shot-guard-edit"
+      - "condition:one-shot-guard-new"
+      - "condition:router-readiness-check"
+      - "transition:router_not_ready"
+      - "transition:duplicate_intent"
+    line_range:
+      start: 13
+      end: 94
+
+  - path: src/shared/lib/routing/gate-finder.js
+    snippet: |
+      export function buildIntroductionUrl(options = {}) {
+        const { calculatorId, businessId, reportName, env } = options;
+
+        const gatePathResolution = resolveGatePathForCalculator(calculatorId, { env });
+
+        if (!gatePathResolution.ok || !gatePathResolution.gatePath) {
+          return {
+            ok: false, url: null,
+            reason: gatePathResolution.reason || "missing_gate_path",
+          };
+        }
+
+        const basePath = removeGateFromUrl(gatePathResolution.gatePath);
+
+        if (!basePath) {
+          return { ok: false, url: null, reason: "invalid_gate_path" };
+        }
+
+        const normalizedBusinessId = normalizeString(businessId);
+        const normalizedReportName = normalizeString(reportName);
+
+        if (!normalizedBusinessId) {
+          return { ok: false, url: null, reason: "missing_business_id" };
+        }
+
+        const params = new URLSearchParams();
+        params.set("businessId", normalizedBusinessId);
+        if (normalizedReportName) {
+          params.set("reportname", normalizedReportName);
+        }
+
+        const url = `${basePath.replace(/\/+$/, "")}/introduction/?${params.toString()}`;
+
+        return { ok: true, url, reason: null };
+      }
+    covers:
+      - "output:introduction_url"
+      - "condition:gate-path-resolution-priority"
+    line_range:
+      start: 349
+      end: 396
+
+confidence: 0.91
+confidence_rationale: >
+  All four discovered behaviors are fully evidenced across 6 source files with direct code
+  snippets. Gate edit flow confirmed in gate-edit-contract.js (validation, fetch, progress
+  mapping, redirect, fallback, one-shot guard). Gate new flow confirmed in gate-new-contract.js
+  (validation, referrer checks, report creation, hydration, redirect). Gate route resolution
+  confirmed in gate-finder.js (env var resolution, fallback chain, handoff routes, introduction
+  URL builder). Progress route mapping confirmed in report-route-progress-contract.js (per-calculator
+  percentage tables, formula-based step calculation). Supporting infrastructure confirmed in
+  queryValidators.js (gate query validation) and initGuards.js (one-shot guards, router readiness).
+  Deducted 0.09 because: (1) the actual API endpoints and response shapes for report fetch/create
+  are not visible (normalizeMixedEnvelope and createReport are injected), (2) the calculator
+  gate pages that receive the redirect are not in scope, (3) the exact CALCULATOR_IDS constant
+  values are imported from a constants file not in these source files, (4) the hydrateFromImport
+  and hydrateDefaults implementations are injected callbacks not visible here.
+
+unresolved_questions:
+  - "What are the exact CALCULATOR_IDS string values? They are imported from @/shared/constants/calculators but that file is not in scope. The code uses them as string comparisons (e.g. CALCULATOR_IDS.VE) but the actual values are not visible."
+  - "What does normalizeMixedEnvelope do in the report fetch flow? It is imported from ../contracts/api-contract and used to normalize the API response, but its implementation is not in these files."
+  - "What are the actual API endpoints for report fetch and create? buildReportFetchUrl constructs a URL from apiBaseUrl + endpointPath + reportId, but the actual API base URL and endpoint path defaults are not visible."
+  - "How do the calculator gate pages receive and process the redirect? The gate URLs include query params (reportId, route) but the receiving end is not in these source files."
+  - "What happens during hydrateFromImport vs hydrateDefaults? The new flow calls hydrateCreatedReport which dispatches to these injected callbacks, but their implementations are not visible."
+  - "Are there any additional allowed referrer path prefixes beyond the 6 hardcoded in GATE_NEW_ALLOWED_REFERRER_PATH_PREFIXES? The function accepts allowedReferrerPathPrefixes as an option but the default set is fixed."
+  - "What is the exact shape of the report object returned by the API? The code accesses report.calculatorId, report.reportProgress, and report.businessId but the full schema is not visible."
+
+status: complete

@@ -1,0 +1,123 @@
+run_id: "run-0011"
+mutator: "mutator-agent"
+status: "complete"
+provider: "opencode-agent"
+primary_failure_type: "rubric_gap_failure"
+diagnosis_source: "analyzer-agent"
+proposed_change:
+  type: "rubric_mutation"
+  target_step: null
+  current: |
+    Rubric v002 contains 5 criteria: coverage_core_behavior, completeness_inputs_outputs,
+    consistency_cross_refs, golden_set_recall (weight 1.2), conditional_flow_documentation.
+    It lacks any axis to reward accurate observation when golden wording diverges from
+    observed code, when visibility predicates are finer-grained than the golden claims,
+    or when cross-system flows span unavailable code boundaries.
+  proposed: |
+    Add three new active criteria to the rubric and reduce golden_set_recall weight:
+
+    1. stale_golden_vs_observed_implementation (weight 1.0)
+       - +1 when the spec accurately documents observed code behavior that contradicts
+         the golden wording
+       - -1 when the spec blindly copies the golden without code evidence
+
+    2. predicate_level_visibility_distinction (weight 0.8)
+       - +1 when conditional UI predicates are documented at the granularity of
+         hidden / visible-disabled / visible-enabled
+       - 0 when collapsed to a single boolean
+
+    3. cross_system_boundary_coverage (weight 0.6)
+       - +1 when cross-system flows are explicitly scoped (e.g.,
+         "dashboard-side verified, calculator-side implied")
+       - -1 when the spec silently assumes unverified behavior
+
+    Reduce golden_set_recall weight from 1.2 to 0.9 so that stale-golden mismatches
+    do not dominate the recall score.
+  expected_improvement: |
+    Estimated recall improvement: 0.58 -> 0.82.
+    The three recall misses caused by rubric gaps would convert to hits or partial hits
+    under the new criteria. Cross-system boundary flows would receive partial credit
+    instead of full misses. Precision and consistency scores are expected to remain stable
+    (~0.86 and ~0.87).
+  risk: |
+    Medium-low. Adding three new criteria simultaneously could introduce scoring
+    instability if the evaluator applies them inconsistently. Reducing golden_set_recall
+    weight risks under-penalizing genuine misses where the golden is actually correct
+    and the generator failed to find the behavior. However, the analyzer ruled out
+    search, recognition, format, and prompt failures with strong evidence, making
+    genuine misses unlikely for these four cases.
+  rationale: |
+    The generator followed the formula prompts precisely, producing evidence-backed specs
+    that faithfully document observed code. The evaluator penalized these accurate specs
+    because the rubric only measures fidelity to golden wording (golden_set_recall) and
+    has no axis for code-faithful observation. All four recall misses share this single
+    root cause. A prompt_tweak cannot fix a rubric gap — this was attempted in run-0010
+    and failed (see insanity_check). The correct fix is rubric expansion.
+insanity_check:
+  method_already_failed: true
+  failed_runs:
+    - run_id: "run-0010"
+      failure_type: "rubric_gap_failure"
+      teaching_method: "prompt_tweak"
+      result: "FAILED"
+      note: "Attempting to improve generator prompts without changing the rubric did not resolve rubric gap failures."
+  learned_runs:
+    - run_id: "run-0010"
+      failure_type: "rubric_gap_failure"
+      teaching_method: "rubric_candidate_proposal"
+      result: "PASSED"
+      note: "Rubric candidate proposals successfully addressed rubric gap failures in prior run."
+  justification: |
+    The proposed mutation uses rubric_mutation (tier 6), not prompt_tweak (tier 1).
+    This directly addresses the lesson from run-0010 that prompt tweaks alone cannot
+    fix rubric gaps. The rubric_candidate_proposal method was learned as PASSED for
+    the same failure type, giving confidence that this approach is not insane.
+    No prior record exists of rubric_mutation failing for rubric_gap_failure.
+formula_mutation: null
+rubric_candidate:
+  rubric_version: "v003-candidate"
+  parent_version: "v002"
+  derived_from_run: "run-0011"
+  active_criteria:
+    - coverage_core_behavior
+    - completeness_inputs_outputs
+    - consistency_cross_refs
+    - golden_set_recall
+    - conditional_flow_documentation
+    - stale_golden_vs_observed_implementation
+    - predicate_level_visibility_distinction
+    - cross_system_boundary_coverage
+  weights:
+    coverage_core_behavior: 1.0
+    completeness_inputs_outputs: 1.0
+    consistency_cross_refs: 0.8
+    golden_set_recall: 0.9
+    conditional_flow_documentation: 0.81
+    stale_golden_vs_observed_implementation: 1.0
+    predicate_level_visibility_distinction: 0.8
+    cross_system_boundary_coverage: 0.6
+  official_channel_only: false
+  shadow_mode: true
+  gap_closure:
+    - id: "stale_golden_vs_observed_implementation"
+      closes_misses:
+        - "auth.conditional-redirect.yaml"
+        - "download.button-visibility.yaml"
+        - "toa.gated-first-report-creation.yaml"
+    - id: "predicate_level_visibility_distinction"
+      closes_misses:
+        - "download.button-visibility.yaml"
+    - id: "cross_system_boundary_coverage"
+      closes_misses:
+        - "toa.gated-first-report-creation.yaml"
+confidence: 0.85
+confidence_rationale: |
+  The diagnosis is strongly grounded and internally consistent across generator flags,
+  evaluator recall misses, and evaluator rubric_gap_candidates. The proposed criteria
+  exactly match the gaps identified. Confidence is reduced from 0.90 to 0.85 because
+  rubric mutations are consequential: adding three criteria at once is a larger change
+  than a prompt tweak, and the scoring dynamics (especially the golden_set_recall weight
+  reduction) have not been empirically validated in a live run. Nonetheless, the
+  prior learned lesson that rubric_candidate_proposal passed for this failure type
+  provides strong support for the approach.
+mutator_timestamp: "2026-04-22T18:00:00Z"

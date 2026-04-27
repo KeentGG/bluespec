@@ -1,0 +1,36 @@
+spec_id: auth.route-protection
+output_path: runs/run-0015/generator/specs/auth.route-protection.yaml
+discovered_behaviors:
+  - id: auth-guard-route-protection
+    description: Anonymous users redirected from protected routes to /login, authenticated users redirected away from /login to /companies
+    priority: high
+    evidence_refs:
+      - src/features/auth/api/authGuard.js
+      - src/features/auth/components/AuthGuard.tsx
+  - id: auth-redirect-hook
+    description: useAuthRedirect hook checks token validity, attempts refresh, and redirects to /login on failure
+    priority: high
+    evidence_refs:
+      - src/features/auth/hooks/useAuthRedirect.ts
+  - id: auth-dashboard-layout-protection
+    description: Dashboard layout wraps all authenticated routes with AuthGuard component
+    priority: medium
+    evidence_refs:
+      - src/app/(dashboard)/layout.tsx
+source_files:
+  - src/features/auth/api/authGuard.js
+  - src/features/auth/components/AuthGuard.tsx
+  - src/features/auth/hooks/useAuthRedirect.ts
+  - src/app/(dashboard)/layout.tsx
+  - src/shared/lib/routing/entryContracts.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - authGuard.js is a pure function: given session + route, allow or redirect
+  - AuthGuard.tsx component uses useAuthRedirect hook to check session
+  - useAuthRedirect checks token in memory, attempts refresh if missing
+  - Dashboard layout wraps all routes with AuthGuard
+  - Protected routes: /companies, /reports (and sub-routes)
+  - Anonymous users on protected routes → redirect to /login
+  - Authenticated users on /login → redirect to /companies
+  - Root / page redirects based on auth state (authenticated → /companies, anonymous → external tools URL)

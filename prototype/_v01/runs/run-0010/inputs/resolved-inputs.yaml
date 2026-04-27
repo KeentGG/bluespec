@@ -1,0 +1,9 @@
+run_id: run-0010
+frozen_at: 2026-04-22T07:42:41.592Z
+sources:
+  formula_ref: formulas/candidates/frontend-derived-v002-predicate-inventory.yaml
+  formula_extends_chain:
+    - formulas/candidates/frontend-derived-v002-predicate-inventory.yaml
+  rubric_snapshot_ref: rubrics/snapshots/v002/rubric.yaml
+  golden_set_ref: goldens/projects/sample-project/behaviors.yaml
+  project_ref: config/projects/sample-project.yaml

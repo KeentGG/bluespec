@@ -1,0 +1,583 @@
+id: auth.conditional-redirect
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth-conditional-redirect
+    coverage: partial
+    notes: >
+      The spec documents the gated edit flow (query param validation, report fetching,
+      progress route mapping, and redirect) fully. However, the golden behavior states
+      "only when agreement state is satisfied" — there is NO agreement state (TOA) check
+      in the edit flow. The TOA check only exists in the CREATE flow (useReportCreation.ts).
+      Therefore the conditional-gate aspect of the golden behavior is NOT evidenced.
+
+description: >
+  When a user clicks "Edit" on an existing report, the dashboard navigates to
+  `/gate/edit?target=<reportId>&calculatorId=<1-4>`. The system validates the query
+  parameters, fetches the report from the API to determine the last saved progress route,
+  maps that route to a calculator-specific resume point, and redirects the user to the
+  calculator's gate URL with the report ID. If validation fails, the report cannot be
+  fetched, or the progress route is unmapped, the user is redirected to a fallback
+  destination (typically `/reports`). There is no terms-of-agreement (TOA) gate in the
+  edit flow.
+
+state_machine:
+  initial: pending_router
+  states:
+    - id: pending_router
+      description: Waiting for Next.js router to be ready before beginning gate validation.
+    - id: initializing
+      description: Router is ready; query params are being validated and the report is being fetched.
+    - id: ready
+      description: Report progress resolved successfully; user is being redirected to the calculator resume point.
+    - id: fallback
+      description: Validation failed, report fetch failed, or progress unmapped; user is being redirected to the fallback destination.
+    - id: error
+      description: An unrecoverable exception occurred during initialization.
+  transitions:
+    - id: router_ready
+      from: pending_router
+      to: initializing
+      trigger: Next.js router becomes ready and no rollback gate is active
+      guards: []
+      effects:
+        - begin query param validation
+        - initiate report fetch
+    - id: init_success
+      from: initializing
+      to: ready
+      trigger: executeGateEditInitialization resolves with phase "ready"
+      guards:
+        - field: query_params
+          condition: target and calculatorId are valid
+        - field: report_fetch
+          condition: API returns a valid report document
+        - field: progress_resolution
+          condition: report progress maps to a known calculator route
+      effects:
+        - redirect browser to calculator gate URL with resume route
+    - id: init_fallback
+      from: initializing
+      to: fallback
+      trigger: executeGateEditInitialization resolves with phase "fallback"
+      guards: []
+      effects:
+        - redirect browser to fallback destination (typically /reports)
+    - id: init_error
+      from: initializing
+      to: error
+      trigger: executeGateEditInitialization throws an unhandled exception
+      guards: []
+      effects:
+        - redirect browser to fallback destination
+    - id: rollback_gate
+      from: pending_router
+      to: fallback
+      trigger: Rollback route contract indicates v1 dashboard redirect is active
+      guards: []
+      effects:
+        - replace window.location with rollback destination
+
+conditions:
+  - id: query_param_validation
+    description: Query parameters target and calculatorId must be present and valid.
+    trigger: Page load or router ready
+    guards:
+      - field: target
+        condition: non-empty string (report ID)
+      - field: calculatorId
+        condition: "1, 2, 3, or 4"
+    then:
+      - proceed to report fetch
+    else:
+      - redirect to fallback destination
+  - id: report_fetch_success
+    description: The report must be successfully retrieved from the API.
+    trigger: After query param validation passes
+    guards:
+      - field: api_response
+        condition: HTTP 200 with a valid report document in the envelope
+    then:
+      - proceed to progress route resolution
+    else:
+      - redirect to fallback destination with reason "fetch_failed"
+  - id: progress_route_mapped
+    description: The report's saved progress route must map to a known route for the calculator.
+    trigger: After successful report fetch
+    guards:
+      - field: reportProgress
+        condition: matches a known route pattern for the given calculatorId
+    then:
+      - redirect to calculator gate URL with mapped route
+    else:
+      - redirect to fallback destination with reason "unknown_progress"
+  - id: rollback_gate_active
+    description: If the rollback-to-v1-dashboard flag is active, redirect immediately.
+    trigger: Page load before any initialization
+    guards:
+      - field: rollbackRouteContract
+        condition: shouldRedirect is true and destination is set
+    then:
+      - replace location with rollback destination
+    else:
+      - continue normal gate initialization
+
+inputs:
+  - id: target
+    type: string (report ID)
+    source: URL query parameter
+    required: true
+    validation:
+      non_empty: "must be a non-empty string"
+  - id: calculatorId
+    type: string ("1" | "2" | "3" | "4")
+    source: URL query parameter
+    required: true
+    validation:
+      one_of: "1, 2, 3, or 4"
+  - id: source
+    type: string
+    source: URL query parameter
+    required: false
+    validation: {}
+  - id: auth_token
+    type: JWT access token + userId
+    source: tokenService (localStorage / memory)
+    required: true
+    validation:
+      bearer: "Authorization: Bearer <accessToken> header"
+      userId: "userId header from token._id"
+  - id: persisted_business_id
+    type: string
+    source: localStorage (REPORTS_PERSISTED_BUSINESS_KEY)
+    required: false
+    validation: {}
+  - id: api_base_url
+    type: string URL
+    source: process.env.NEXT_PUBLIC_APP_API_URL
+    required: true
+    validation: {}
+  - id: calculator_gate_paths
+    type: string URLs
+    source: process.env.NEXT_PUBLIC_VE_GATE_PATH, NEXT_PUBLIC_DE_GATE_PATH, NEXT_PUBLIC_VGA_GATE_PATH, NEXT_PUBLIC_NP_GATE_PATH
+    required: true
+    validation: {}
+
+outputs:
+  - id: redirect_to_calculator
+    type: HTTP redirect (client-side router.replace or window.location.replace)
+    destination: calculator gate URL with edit query parameter, e.g. `/business-value-estimate-calculator/gate/edit?target=<reportId>`
+    lifespan: immediate
+  - id: redirect_to_fallback
+    type: HTTP redirect (client-side)
+    destination: /reports or /reports#<businessId>
+    lifespan: immediate
+  - id: ui_state
+    type: object { heading, detail, fallbackDestination }
+    destination: GateStatusView component
+    lifespan: session
+
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-edit-contract.js
+    snippet: |
+      export function validateGateEditEntry(options = {}) {
+        const { query = {} } = options;
+        const gateQuery = validateGateQuery(query);
+
+        if (!gateQuery.isValid) {
+          return {
+            isValid: false,
+            reason: gateQuery.reason,
+            gateQuery,
+          };
+        }
+
+        return {
+          isValid: true,
+          reason: null,
+          gateQuery,
+        };
+      }
+    covers:
+      - condition: query_param_validation
+      - transition: router_ready
+    line_range:
+      start: 404
+      end: 421
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-edit-contract.js
+    snippet: |
+      export async function fetchGateEditReportById(target, options = {}) {
+        const reportId = normalizeString(target);
+        if (!reportId) {
+          throw new TypeError("target must be a non-empty string.");
+        }
+
+        const fetchImplementation = options.fetchImplementation ?? fetch;
+        if (typeof fetchImplementation !== "function") {
+          throw new TypeError("fetchImplementation must be a function.");
+        }
+
+        const requestUrl = buildReportFetchUrl(reportId, options);
+        const response = await fetchImplementation(requestUrl, {
+          method: "GET",
+          credentials: "include",
+        });
+        const payload = await readResponsePayload(response);
+        const envelope = normalizeMixedEnvelope(payload, {
+          transportStatus: typeof response?.status === "number" ? response.status : 500,
+        });
+
+        if (!envelope.ok) {
+          throw new Error("fetch_failed");
+        }
+
+        const reportDocument = normalizeReportDocument(envelope.data);
+        if (!reportDocument) {
+          throw new Error("invalid_report_payload");
+        }
+
+        return reportDocument;
+      }
+    covers:
+      - condition: report_fetch_success
+      - input: auth_token
+    line_range:
+      start: 495
+      end: 526
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-edit-contract.js
+    snippet: |
+      export function resolveGateEditProgressRoute(report = {}) {
+        if (!isPlainObject(report)) {
+          return {
+            isValid: false,
+            reason: "invalid_report",
+            route: null,
+            calculatorId: null,
+            reportProgress: null,
+          };
+        }
+
+        const calculatorId = normalizeCalculatorId(report.calculatorId);
+        if (!calculatorId || !SUPPORTED_CALCULATOR_IDS.has(calculatorId)) {
+          return {
+            isValid: false,
+            reason: "unknown_calculator",
+            route: null,
+            calculatorId,
+            reportProgress: null,
+          };
+        }
+
+        const reportProgress = normalizeProgressRoute(report.reportProgress);
+        if (!reportProgress) {
+          return {
+            isValid: false,
+            reason: "missing_report_progress",
+            route: null,
+            calculatorId,
+            reportProgress: null,
+          };
+        }
+
+        const route = resolveMappedProgressRoute(calculatorId, reportProgress);
+        if (!route) {
+          return {
+            isValid: false,
+            reason: "unknown_progress",
+            route: null,
+            calculatorId,
+            reportProgress,
+          };
+        }
+
+        return {
+          isValid: true,
+          reason: null,
+          route,
+          calculatorId,
+          reportProgress,
+        };
+      }
+    covers:
+      - condition: progress_route_mapped
+      - transition: init_success
+    line_range:
+      start: 442
+      end: 493
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-edit-contract.js
+    snippet: |
+      export async function executeGateEditInitialization(options = {}) {
+        const {
+          router,
+          guard = createOneShotGuard(),
+          query = {},
+          fallbackBusinessId = null,
+          fetchReport = async ({ target }) =>
+            fetchGateEditReportById(target, {
+              apiBaseUrl: "",
+            }),
+          resolveProgressRoute = ({ report }) => resolveGateEditProgressRoute(report),
+          navigate = () => undefined,
+        } = options;
+
+        const validation = validateGateEditEntry({ query });
+        if (!validation.isValid) {
+          const fallback = resolveGateEditFallbackDestination({
+            preferredRoute: REPORTS_ROUTE,
+            businessId: fallbackBusinessId,
+          });
+          navigate(fallback.destination);
+
+          return {
+            phase: "fallback",
+            reason: validation.reason,
+            nextDestination: null,
+            fallbackDestination: fallback.destination,
+          };
+        }
+        ...
+        const runResult = runOnceWhenRouterReady({
+          router,
+          guard,
+          intentKey,
+          callback: async () => {
+            let report;
+
+            try {
+              report = await fetchReport({
+                target: validation.gateQuery.target,
+                gateQuery: validation.gateQuery,
+                validation,
+              });
+            } catch (_error) {
+              const fallback = resolveGateEditFallbackDestination({ ... });
+              navigate(fallback.destination);
+              return { phase: "fallback", reason: "fetch_failed", ... };
+            }
+
+            const progressResolution = normalizeProgressResolution(
+              resolveProgressRoute({ report, gateQuery: validation.gateQuery, validation }),
+            );
+            if (!progressResolution.isValid || !progressResolution.route) {
+              const fallback = resolveGateEditFallbackDestination({ ... });
+              navigate(fallback.destination);
+              return { phase: "fallback", reason: progressResolution.reason ?? "unknown_progress", ... };
+            }
+
+            navigate(progressResolution.route);
+            return { phase: "redirecting", reason: null, nextDestination: progressResolution.route, ... };
+          },
+        });
+        ...
+      }
+    covers:
+      - state_machine
+      - transition: init_success
+      - transition: init_fallback
+    line_range:
+      start: 528
+      end: 636
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/routing/hooks/useGateEditEntryState.ts
+    snippet: |
+      type GatePhase = "pending_router" | "initializing" | "ready" | "fallback" | "error";
+
+      const INITIAL_RESULT = Object.freeze({
+        phase: "pending_router",
+        reason: "router_not_ready",
+        nextDestination: null,
+        fallbackDestination: null,
+      });
+
+      export function useGateEditEntryState() {
+        const router = useRouter();
+        const searchParams = useSearchParams();
+        const guardRef = useRef(createOneShotGuard());
+        const [phase, setPhase] = useState<GatePhase>("pending_router");
+        const [result, setResult] = useState<any>(INITIAL_RESULT);
+        ...
+        const rollbackRoute = resolveRollbackRouteContract({
+          env: process.env,
+          storage: resolveBrowserStorage(),
+          path: "/gate/edit",
+        });
+        if (rollbackRoute.shouldRedirect && rollbackRoute.destination) {
+          setPhase("fallback");
+          const rollbackDestination = withBasePath(rollbackRoute.destination);
+          if (window.location.pathname !== rollbackDestination) {
+            window.location.replace(rollbackDestination);
+          }
+          return undefined;
+        }
+        ...
+        setPhase("initializing");
+
+        executeGateEditInitialization({
+          router,
+          guard: guardRef.current,
+          query: searchParams,
+          fallbackBusinessId,
+          fetchReport: async ({ target }) => {
+            const token = getToken();
+            return fetchGateEditReportById(target, {
+              apiBaseUrl: process.env.NEXT_PUBLIC_APP_API_URL ?? "",
+              endpointPath: "/calculator-reports/report",
+              fetchImplementation: async (url, fetchOptions) => {
+                const headers = new Headers(fetchOptions?.headers || {});
+                if (token?.accessToken) headers.set("Authorization", `Bearer ${token.accessToken}`);
+                if (token?._id) headers.set("userId", token._id);
+                ...
+                return fetch(url, { ...restOptions, headers, credentials: "omit" });
+              },
+            });
+          },
+          resolveProgressRoute: ({ report }) => {
+            const resolution = resolveGateEditProgressRoute(report);
+            let baseUrl = "";
+            if (resolution.calculatorId) {
+              switch (resolution.calculatorId) {
+                case "1":
+                  baseUrl = process.env.NEXT_PUBLIC_VE_GATE_PATH || "";
+                  break;
+                case "2":
+                  baseUrl = process.env.NEXT_PUBLIC_DE_GATE_PATH || "";
+                  break;
+                case "3":
+                  baseUrl = process.env.NEXT_PUBLIC_VGA_GATE_PATH || "";
+                  break;
+                case "4":
+                  baseUrl = process.env.NEXT_PUBLIC_NP_GATE_PATH || "";
+                  break;
+              }
+            }
+            if (baseUrl) {
+              const cleanBase = baseUrl.replace(/\/+$/, "");
+              resolution.isValid = true;
+              resolution.route = `${cleanBase}/edit?target=${report._id}`;
+            }
+            return resolution;
+          },
+          navigate: (destination) => {
+            if (destination.startsWith("http")) {
+              window.location.replace(destination);
+            } else {
+              router.replace(destination);
+            }
+          },
+        })
+          .then((nextResult) => {
+            if (!isMounted) return;
+            setResult(nextResult);
+            if (nextResult.phase === "ready") {
+              setPhase("ready");
+            } else if (nextResult.phase === "fallback") {
+              setPhase("fallback");
+            } else if (nextResult.phase === "error") {
+              setPhase("error");
+            }
+          })
+          .catch((_error) => {
+            if (!isMounted) return;
+            setPhase("error");
+            const fallback = resolveGateEditFallbackDestination({ businessId: fallbackBusinessId });
+            router.replace(fallback.destination);
+            setResult({
+              phase: "fallback",
+              reason: "init_exception",
+              nextDestination: null,
+              fallbackDestination: fallback.destination,
+            });
+          });
+        ...
+      }
+    covers:
+      - state_machine
+      - transition: router_ready
+      - transition: rollback_gate
+      - transition: init_success
+      - transition: init_fallback
+      - transition: init_error
+      - input: auth_token
+      - input: calculator_gate_paths
+      - input: persisted_business_id
+      - output: redirect_to_calculator
+      - output: redirect_to_fallback
+    line_range:
+      start: 72
+      end: 209
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/routing/components/GateEditRouteEntryClient.tsx
+    snippet: |
+      "use client";
+
+      import { GateStatusView } from "@/features/routing/components/GateStatusView";
+      import { useGateEditEntryState } from "@/features/routing/hooks/useGateEditEntryState";
+
+      export function GateEditRouteEntryClient() {
+        const uiState = useGateEditEntryState();
+        return (
+          <GateStatusView
+            heading={uiState.heading}
+            detail={uiState.detail}
+            fallbackDestination={uiState.fallbackDestination}
+          />
+        );
+      }
+    covers:
+      - output: ui_state
+    line_range:
+      start: 1
+      end: 15
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/app/gate/edit/page.tsx
+    snippet: |
+      import { Suspense } from "react";
+
+      import { GateEditRouteEntryClient } from "@/features/routing/components/GateEditRouteEntryClient";
+
+      function GateEditFallback() {
+        return (
+          <main className="layout-gutter-x layout-section-y">
+            <section className="layout-container layout-card">
+              <h1 className="text-2xl font-semibold">Preparing report resume</h1>
+              <p className="mt-3 text-base">Loading report target context.</p>
+            </section>
+          </main>
+        );
+      }
+
+      export default function GateEditPage() {
+        return (
+          <Suspense fallback={<GateEditFallback />}>
+            <GateEditRouteEntryClient />
+          </Suspense>
+        );
+      }
+    covers:
+      - output: ui_state
+    line_range:
+      start: 1
+      end: 22
+
+confidence: 0.85
+confidence_rationale: >
+  State transitions and query param validation are fully confirmed in 4 source files.
+  The report-fetch flow, progress route mapping for all 4 calculators, and fallback
+  behavior are explicitly implemented. However, the "agreement state satisfied" guard
+  from the golden behavior is NOT present in the edit flow — it only exists in the
+  create flow (useReportCreation.ts). The spec therefore has partial coverage of the
+  golden behavior. Additionally, the exact shape of the rollback route contract is
+  imported but not fully inspected here.
+
+unresolved_questions:
+  - "Does the rollback route contract ever trigger for /gate/edit in production?"
+  - "Is there any server-side TOA check before the client ever reaches /gate/edit?"
+  - "What happens if the calculator gate path env var is missing — is there a secondary fallback?"
+  - "Are there analytics or logging hooks in the gate flow that are not visible in these files?"
+
+status: partial

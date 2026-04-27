@@ -1,0 +1,30 @@
+spec_id: download.button-visibility
+output_path: /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0012/generator/specs/download.button-visibility.yaml
+golden_behaviors:
+  - id: download-button-visibility
+    description: download button becomes visible only after report progress reaches the download stage
+    priority: high
+    category: state_dependent_visibility
+    evidence_refs:
+      - src/components/ReportActions.tsx
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportSplitActions.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportActions.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/store/useReportActionStore.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/report-route-progress-contract.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - The evidence_ref `src/components/ReportActions.tsx` does NOT exist in this codebase.
+  - The actual download button visibility behavior is in ReportSplitActions.tsx.
+  - ReportSplitActions.tsx receives `progressPercentage` as a prop.
+  - It computes `canDownload = progressPercentage === 100`.
+  - The Download button is disabled (gray bg, cursor-not-allowed) when `!canDownload`.
+  - The button title shows "Report must be 100% complete to download" when disabled.
+  - useReportActions.ts provides the `handleDownloadReport` callback which calls
+    `startDownload` from the PDF download store.
+  - useReportActionStore.ts tracks per-report download loading states.
+  - report-route-progress-contract.js maps calculator routes to progress percentages.
+  - For all calculators, the `/report` route (or equivalent final routes like `/summary`,
+    `/value-estimate`, `/thankyou`) map to 100% progress.
+  - The download stage is implicitly defined as progressPercentage === 100.

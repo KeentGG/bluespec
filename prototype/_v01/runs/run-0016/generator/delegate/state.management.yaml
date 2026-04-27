@@ -1,0 +1,40 @@
+spec_id: state.management.yaml
+output_path: runs/run-0016/generator/specs/state.management.yaml
+discovered_behaviors:
+  - id: zustand-stores
+    description: Zustand stores for global state (reports list, PDF download, modals)
+    priority: high
+    evidence_refs:
+      - src/features/reports/store/useReportsListStore.ts
+      - src/features/pdf/store/useDownloadStore.ts
+      - src/features/reports/store/useReportModalsStore.ts
+  - id: swr-data-fetching
+    description: SWR for data fetching with caching and revalidation
+    priority: high
+    evidence_refs:
+      - src/features/company/hooks/useCompanyListQuery.ts
+      - src/features/reports/hooks/useReportsListQuery.ts
+  - id: local-component-state
+    description: React useState/useEffect for local component state
+    priority: medium
+    evidence_refs:
+      - src/features/company/hooks/useCompaniesPage.ts
+      - src/features/auth/components/LoginPageContent.tsx
+source_files:
+  - src/features/reports/store/useReportsListStore.ts
+  - src/features/pdf/store/useDownloadStore.ts
+  - src/features/reports/store/useReportModalsStore.ts
+  - src/features/reports/store/useCreateReportStore.ts
+  - src/features/reports/store/useReportActionStore.ts
+  - src/features/company/hooks/useCompanyListQuery.ts
+  - src/features/reports/hooks/useReportsListQuery.ts
+  - src/features/company/hooks/useCompaniesPage.ts
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - Mixed state management approach
+  - Zustand for global state (reports list filters, PDF download state, modals)
+  - SWR for server state with automatic caching and revalidation
+  - React useState/useEffect for local component state
+  - localStorage persistence for PDF download state
+  - In-memory session store for auth state

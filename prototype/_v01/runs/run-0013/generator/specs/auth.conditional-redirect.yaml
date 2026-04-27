@@ -1,0 +1,45 @@
+id: auth.conditional-redirect
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: auth-conditional-redirect
+    coverage: partial
+    notes: Documents redirect mechanics but not the agreement-state guard.
+description: Redirects authenticated users into the edit flow and fallback routing when resuming a project edit session.
+conditions:
+  - id: edit-entry-routing
+    description: Determines whether edit entry can proceed based on route and fetched report data.
+    trigger: user opens an edit route
+    guards:
+      - field: route_params
+        condition: edit route contains a report identifier
+    then:
+      - fetch report context
+      - resolve edit destination
+    else:
+      - redirect to fallback route
+inputs:
+  - id: report_id
+    type: string
+    source: route parameter
+    required: true
+outputs:
+  - id: edit_redirect
+    type: route transition
+    destination: browser navigation
+state_machine: null
+evidence_refs:
+  - path: src/features/reports/hooks/useGateEditEntryState.ts
+    snippet: |
+      export function useGateEditEntryState() {
+        return { status: 'pending_router' };
+      }
+    covers:
+      - condition: edit-entry-routing
+      - output: edit_redirect
+confidence: 0.78
+confidence_rationale: Core redirect mechanics are represented, but the agreement-state gate is not evidenced in this fixture.
+unresolved_questions:
+  - Where the agreement-state guard should apply in the edit path.
+status: partial

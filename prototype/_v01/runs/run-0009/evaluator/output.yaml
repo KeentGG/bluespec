@@ -1,0 +1,73 @@
+run_id: "run-0009"
+evaluator: "run_evaluator"
+status: "complete"
+provider: "opencode-agent"
+scored_specs:
+  - "auth.conditional-redirect.yaml"
+  - "reports.download-button-visibility.yaml"
+recall_hits:
+  - spec_id: "auth.conditional-redirect.yaml"
+    golden_behavior_id: "auth-conditional-redirect"
+    coverage: "partial"
+    matched_behavior:
+      - "Captures the gate-edit handoff into a calculator-specific edit flow."
+      - "Documents query validation, report fetch, resume-route mapping, and fallback paths."
+      - "Documents rollback short-circuit behavior before initialization continues."
+    evidence_basis:
+      - "Spec description and state_machine describe the redirect/fallback flow in detail."
+      - "golden_behaviors[0].notes explicitly limits coverage because no agreement-state gate was found."
+  - spec_id: "reports.download-button-visibility.yaml"
+    golden_behavior_id: "download-button-visibility"
+    coverage: "partial"
+    matched_behavior:
+      - "Captures that download eligibility is gated by progress reaching 100."
+      - "Documents enabled, disabled, and in-flight download states."
+      - "Connects the button state to terminal progress-route mapping and PDF generation kickoff."
+    evidence_basis:
+      - "Spec conditions and transitions capture the 100%-threshold behavior and download lifecycle."
+      - "golden_behaviors[0].notes explicitly limits coverage because the button is always rendered in current code."
+recall_misses:
+  - spec_id: "auth.conditional-redirect.yaml"
+    golden_behavior_id: "auth-conditional-redirect"
+    missed_behavior: "The golden set requires editing to route through a gated edit flow only when agreement state is satisfied, but the generated spec found no agreement-state predicate in the inspected evidence."
+    severity: "high"
+  - spec_id: "reports.download-button-visibility.yaml"
+    golden_behavior_id: "download-button-visibility"
+    missed_behavior: "The golden set requires the Download button to become visible only at the download stage, but the generated spec describes a button that is always rendered and only toggles disabled/enabled state."
+    severity: "high"
+precision_findings:
+  - spec_id: "auth.conditional-redirect.yaml"
+    severity: "medium"
+    finding: "One evidence mapping over-claims support: the query-validator snippet is cited as covering auth_session and public_env even though that snippet only validates query fields."
+  - spec_id: "reports.download-button-visibility.yaml"
+    severity: "low"
+    finding: "The spec stays mostly grounded, but the click-path input is described at a slightly more unified level than the evidence proves because report.reportId and report._id are not reconciled in the inspected snippets."
+consistency_findings:
+  - spec_id: "auth.conditional-redirect.yaml"
+    severity: "medium"
+    finding: "The spec correctly notes a live-code inconsistency: the initialization contract returns redirecting on success while the hook layer still checks for ready. This leaves a cross-layer state-label mismatch in the documented flow."
+  - spec_id: "reports.download-button-visibility.yaml"
+    severity: "none"
+    finding: "No material internal contradiction found in the generated spec."
+rubric_gap_candidates:
+  - id: "golden_drift_vs_observed_behavior"
+    proposed_only: true
+    suspicion: "The rubric may need a way to distinguish stale-golden drift from generator omission."
+    rationale: "Both specs honestly document observed behavior that diverges from the golden wording, so current scoring records recall loss even when the generator is being faithful to evidence."
+  - id: "claim_to_evidence_alignment"
+    proposed_only: true
+    suspicion: "The rubric may need an explicit claim-to-evidence traceability check."
+    rationale: "Auth includes a mostly correct spec with at least one covers-list mapping that is broader than the cited snippet actually proves."
+overall_score: 0.77
+overall_score_breakdown:
+  recall: 0.76
+  precision: 0.82
+  consistency: 0.83
+confidence: 0.88
+confidence_rationale: >
+  Confidence is high because the scoring used the frozen rubric, golden set,
+  generator output, and both generated spec files directly. It is not maximal
+  because the evaluator can only score the generated artifacts against the
+  provided evidence and cannot independently reopen the underlying product code
+  to resolve golden drift or the auth flow's ready-versus-redirecting mismatch.
+scoring_timestamp: "2026-04-22T06:42:40Z"

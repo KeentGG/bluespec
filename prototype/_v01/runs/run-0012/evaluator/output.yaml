@@ -1,0 +1,128 @@
+run_id: run-0012
+evaluator: evaluator-agent
+status: completed
+provider: local
+
+spec_scores:
+  - spec_id: toa.gated-first-report-creation
+    recall: 1.0
+    precision: 0.90
+    consistency: 0.95
+    notes: >
+      Full recall of golden behavior toa-gated-first-report-creation.
+      Minor precision deduction for inferred calculator-side wiring,
+      but the inference is honestly disclosed.
+
+  - spec_id: download.button-visibility
+    recall: 0.90
+    precision: 0.95
+    consistency: 0.95
+    notes: >
+      Functional intent is fully covered, but the golden behavior
+      describes conditional visibility while the implementation uses
+      disablement. The spec documents this semantic gap honestly.
+
+  - spec_id: auth.conditional-redirect
+    recall: 0.50
+    precision: 0.90
+    consistency: 0.90
+    notes: >
+      Partial recall only. The golden behavior requires an agreement
+      state (TOA) gate, which is absent from the edit flow. The spec
+      correctly notes this gap, so precision remains high for the
+      subset that is covered.
+
+recall_hits:
+  - behavior_id: toa-gated-first-report-creation
+    coverage: full
+    spec_id: toa.gated-first-report-creation
+    severity: none
+  - behavior_id: download-button-visibility
+    coverage: mostly full
+    spec_id: download.button-visibility
+    severity: low
+
+recall_misses:
+  - behavior_id: auth-conditional-redirect
+    spec_id: auth.conditional-redirect
+    missing: agreement state (TOA) guard is not present in the edit flow
+    severity: high
+    detail: >
+      The golden behavior states "editing project routes through a
+      gated edit flow only when agreement state is satisfied." The
+      spec correctly observes that the TOA check exists only in the
+      CREATE flow, not the EDIT flow. This means the core conditional
+      gate described by the golden behavior is unevidenced.
+
+precision_findings:
+  - spec_id: toa.gated-first-report-creation
+    issue: inferred wiring
+    severity: low
+    detail: >
+      The transition from deferred_to_introduction to report_created
+      relies on an inferred connection between the introduction page
+      redirect and gate-new-contract.js. The spec flags this as an
+      unresolved question, mitigating the precision impact.
+  - spec_id: download.button-visibility
+    issue: none
+    severity: none
+    detail: No precision issues identified.
+  - spec_id: auth.conditional-redirect
+    issue: none
+    severity: none
+    detail: >
+      No fabricated claims. The spec honestly notes the missing TOA
+      gate and avoids inventing behavior not present in the source.
+
+consistency_findings:
+  - scope: internal
+    result: pass
+    detail: >
+      Each spec's evidence refs, state machine transitions, conditions,
+      inputs, and outputs are internally consistent.
+  - scope: cross-spec
+    result: partial
+    detail: >
+      The three specs do not contradict each other, but they do not
+      explicitly cross-reference shared concepts (e.g., TOA agreement
+      state appears in toa.gated-first-report-creation and is noted
+      as absent in auth.conditional-redirect, yet no explicit link
+      is provided between the two specs).
+
+rubric_gap_candidates:
+  proposed_only: true
+  gaps:
+    - criterion: consistency_cross_refs
+      severity: medium
+      rationale: >
+        Specs that touch shared concepts (e.g., TOA, report creation,
+        calculator gate paths) should explicitly cross-reference each
+        other to strengthen set-level consistency.
+    - criterion: conditional_flow_documentation
+      severity: high
+      rationale: >
+        The auth.conditional-redirect golden behavior is categorized
+        as conditional_flow, yet the generator failed to surface the
+        agreement-state guard because it does not exist in the edit
+        flow source. The generator needs stronger detection of whether
+        a golden behavior's stated condition is actually evidenced
+        in the mapped source files.
+
+overall_score: 0.85
+overall_score_breakdown:
+  recall: 0.80
+  precision: 0.92
+  consistency: 0.93
+
+confidence: 0.90
+confidence_rationale: >
+  The generator provided explicit self-assessed coverage labels
+  (full / partial), exact evidence snippets with line ranges, and
+  honest notes about inferred versus confirmed behavior. This makes
+  scoring straightforward. The main uncertainty is whether the
+  semantic gap in download.button-visibility (disablement versus
+  conditional rendering) constitutes a recall miss or a faithful
+  documentation of an implementation that diverges from the stated
+  behavior.
+
+scoring_timestamp: "2026-04-22T00:00:00Z"

@@ -1,0 +1,188 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.route-protection
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth_flow.route_protection
+    coverage: full
+    notes: >
+      Route protection uses authGuard function that redirects anonymous users
+      from protected routes to /login and authenticated users from /login to
+      /companies. Middleware attempts silent refresh before enforcing redirects
+      on guarded routes.
+
+description: >
+  Protects routes by evaluating authentication state against route requirements.
+  The authGuard function determines redirect decisions based on whether the
+  user has a valid session and whether the requested route is protected.
+  Middleware performs silent token refresh attempts before enforcing redirects
+  to maximize session continuity.
+
+state_machine:
+  initial: evaluating
+  states:
+    - id: evaluating
+      description: AuthGuard is evaluating route protection requirements.
+    - id: allowed
+      description: Route access is permitted based on auth state.
+    - id: redirecting
+      description: Browser is navigating to redirect destination.
+  transitions:
+    - id: anonymous_protected_route
+      from: evaluating
+      to: redirecting
+      trigger: AuthGuard evaluates a protected route without valid session.
+      guards:
+        - field: session
+          condition: No valid staged session available.
+        - field: route_protection
+          condition: Route is in protectedPaths list.
+      effects:
+        - Return redirect decision targeting /login.
+    - id: authenticated_login_route
+      from: evaluating
+      to: redirecting
+      trigger: AuthGuard evaluates /login route with valid session.
+      guards:
+        - field: session
+          condition: Valid session with _id and accessToken exists.
+        - field: current_path
+          condition: Path matches /login route.
+      effects:
+        - Return redirect decision targeting /companies.
+    - id: route_allowed
+      from: evaluating
+      to: allowed
+      trigger: Route access is permitted based on auth state.
+      effects:
+        - Return allow decision for the route.
+
+conditions:
+  - id: protected_route_match
+    description: >
+      Route protection uses prefix matching so nested routes under a protected
+      path inherit the same guard behavior.
+    trigger: authGuard evaluates pathname against protectedPaths.
+    guards:
+      - field: pathname
+        condition: pathname equals a protected path or starts with protectedPath + '/'.
+    then:
+      - Treat the route as protected for redirect decisions.
+    else:
+      - Treat the route as public.
+
+  - id: middleware_silent_refresh
+    description: >
+      Middleware attempts silent token refresh before enforcing route redirects.
+      This maximizes session continuity by trying to recover expired sessions.
+    trigger: Middleware handles a request to a protected route.
+    guards:
+      - field: refresh_cookie
+        condition: cookieHeader includes refreshToken=.
+      - field: is_protected_route
+        condition: shouldResolveSession(pathname) is true.
+    then:
+      - Call /auth/refresh with cookie header.
+      - If refresh succeeds, set session and continue.
+      - If refresh fails, enforce redirect to /login.
+    else:
+      - Enforce redirect to /login without refresh attempt.
+
+inputs:
+  - id: pathname
+    type: string URL path
+    source: Next.js router or window.location.pathname
+    required: true
+    validation:
+      normalization: empty or missing path normalizes to /
+
+  - id: session
+    type: "session object with _id, accessToken"
+    source: In-memory authSession
+    required: false
+    validation:
+      presence: null for anonymous, object for authenticated
+
+  - id: protected_paths
+    type: "array of route prefixes"
+    source: Route configuration
+    required: true
+    validation:
+      default: "/companies, /reports"
+
+outputs:
+  - id: guard_decision
+    type: "object with action, destination, reason"
+    destination: Middleware or client-side guard caller
+    lifespan: per authGuard invocation
+
+  - id: redirect_to_login
+    type: browser navigation to /login
+    destination: window.location.href or NextResponse.redirect
+    lifespan: immediate
+
+  - id: redirect_to_companies
+    type: browser navigation to /companies
+    destination: router.replace or NextResponse.redirect
+    lifespan: immediate
+
+evidence_refs:
+  - path: src/features/auth/api/authGuard.js
+    snippet: |
+      export async function authGuard(options = {}) {
+        const {
+          pathname = "/",
+          session = null,
+          routes = DEFAULT_ROUTES,
+          protectedPaths = DEFAULT_PROTECTED_PATHS,
+        } = options;
+        const resolvedPath = normalizePathname(pathname);
+        const resolvedSession = normalizeSession(session);
+        const protectedRoute = isProtectedRoute(resolvedPath, protectedPaths);
+        if (!resolvedSession) {
+          if (protectedRoute) {
+            return redirect(routes.login, "anonymous_redirect_login", false);
+          }
+          return allow("anonymous_allow_public", false);
+        }
+        if (resolvedPath === routes.login) {
+          return redirect(routes.companies, "authenticated_redirect_companies", false);
+        }
+        return allow("authenticated_allow_route", false);
+      }
+    covers:
+      - "transition:anonymous_protected_route"
+      - "transition:authenticated_login_route"
+      - "transition:route_allowed"
+      - "condition:protected_route_match"
+      - "input:pathname"
+      - "input:session"
+      - "output:guard_decision"
+
+  - path: middleware.js
+    snippet: |
+      if (!session && shouldResolveSession(pathname)) {
+        const hasRefreshToken = cookieHeader.includes(`${REFRESH_TOKEN_COOKIE}=`);
+        if (hasRefreshToken) {
+          const refreshResult = await attemptSilentRefresh({ cookieHeader, requestOrigin, fetchImpl: fetch });
+          if (refreshResult?.session) {
+            session = refreshResult.session;
+            // ... set cookies and re-run authGuard
+          }
+        }
+      }
+    covers:
+      - "condition:middleware_silent_refresh"
+      - "output:redirect_to_login"
+
+confidence: 0.96
+confidence_rationale: >
+  Route protection logic, authGuard function, and middleware silent refresh
+  are directly evidenced in authGuard.js and middleware.js. The prefix
+  matching behavior and redirect decisions are confirmed by the code.
+unresolved_questions:
+  - Exact list of protected paths beyond /companies and /reports.
+  - Whether middleware refresh has retry logic beyond single attempt.
+status: complete

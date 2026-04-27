@@ -1,0 +1,111 @@
+run_id: "run-0013"
+evaluator: "run_evaluator"
+status: "complete"
+provider: "opencode-agent"
+recall_hits:
+  - spec_id: auth.conditional-redirect
+    golden_behavior_id: auth-conditional-redirect
+    covered_aspects:
+      - edit route parameter extraction
+      - fallback redirect logic
+      - edit destination resolution
+
+  - spec_id: download.button-visibility
+    golden_behavior_id: download-button-visibility
+    covered_aspects:
+      - progress percentage threshold check (>= 100)
+      - conditional UI state transition
+
+  - spec_id: toa.gated-first-report-creation
+    golden_behavior_id: toa-gated-first-report-creation
+    covered_aspects:
+      - TOA boolean guard condition
+      - dashboard-to-introduction redirect
+      - query parameter passing (businessId, reportName)
+
+recall_misses:
+  - golden_behavior_id: auth-conditional-redirect
+    missed_aspects:
+      - agreement-state guard condition
+      - "only when agreement state is satisfied gating logic"
+
+  - golden_behavior_id: download-button-visibility
+    missed_aspects:
+      - visibility-versus-enablement semantics
+      - hidden-until-ready rendering behavior
+      - "reaches the download stage specificity vs generic progress percentage"
+
+  - golden_behavior_id: toa-gated-first-report-creation
+    missed_aspects:
+      - calculator-side report creation post-TOA acceptance
+      - report persistence behavior on the dashboard
+      - end-to-end flow completion after introduction flow
+
+precision_findings:
+  - spec_id: download.button-visibility
+    issue: >
+      Conflates "visible" with "enabled". Golden set specifies that the button
+      becomes visible only after report progress reaches the download stage;
+      the spec documents an enable/disable state transition instead.
+
+  - spec_id: auth.conditional-redirect
+    issue: >
+      Evidence ref points to useGateEditEntryState.ts, which does not match the
+      golden set evidence ref (project-edit.tsx). This suggests the spec was
+      grounded in a synthetic or split fixture rather than the canonical source.
+
+  - spec_id: download.button-visibility
+    issue: >
+      Evidence ref points to ReportSplitActions.tsx, which does not match the
+      golden set evidence ref (ReportActions.tsx). Possible fixture-splitting
+      artifact.
+
+  - scope: all_specs
+    issue: >
+      All three specs carry generator self-assessed "partial" coverage,
+      indicating that generated claims are knowingly incomplete rather than
+      fully grounded.
+
+consistency_findings:
+  - spec_id: download.button-visibility
+    issue: >
+      Semantic tension between description ("shows a download action", implying
+      visibility) and conditions (only model enable/disable state). This creates
+      an implicit assumption that the button is always rendered, which
+      contradicts the "hidden-until-ready" golden behavior.
+
+  - scope: cross_spec
+    issue: >
+      No cross-spec contradictions detected. All specs use consistent
+      structural patterns (conditions, guards, inputs, outputs).
+
+  - spec_id: toa.gated-first-report-creation
+    issue: >
+      State machine is internally consistent. No contradictions between
+      transitions, guards, and state definitions.
+
+rubric_gap_candidates:
+  - id: semantic_fidelity
+    description: >
+      No active criterion evaluates whether the spec captures the correct
+      semantic dimension (e.g., "visible" vs "enabled", "redirect" vs "block").
+    status: PROPOSED_ONLY
+
+  - id: evidence_grounding
+    description: >
+      No active criterion verifies that evidence_refs match or are plausible
+      substitutes for golden set evidence_refs.
+    status: PROPOSED_ONLY
+
+  - id: state_machine_completeness
+    description: >
+      conditional_flow_documentation checks presence of flow documentation but
+      does not assess whether state machines cover all known states or terminal
+      behaviors.
+    status: PROPOSED_ONLY
+
+  - id: golden_set_priority_weighting
+    description: >
+      All behaviors in this golden set are high priority, but the rubric does
+      not weight criteria or scores by behavior priority.
+    status: PROPOSED_ONLY

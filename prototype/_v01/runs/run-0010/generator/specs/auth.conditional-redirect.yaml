@@ -1,0 +1,552 @@
+id: auth.conditional-redirect.yaml
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: auth-conditional-redirect
+    coverage: partial
+    notes: >
+      The live code implements TOA agreement gating in the report-creation flow and
+      an ordinary report-edit handoff separately. The stale golden wording points at
+      an edit route, but the agreement check actually lives in create-report logic.
+description: >
+  Report actions route through two separate branches. Create-report submits check
+  whether the user has agreed to TOA: if not, the flow builds an introduction/
+  commitment URL and redirects there; if yes, it creates the report and then hands
+  off to the calculator gate. Edit actions resolve a gate handoff and resume route
+  from saved report progress, but they do not consult the agreement flag.
+state_machine:
+  initial: awaiting_action
+  states:
+    - id: awaiting_action
+      description: The user has not yet submitted a create or edit report action.
+    - id: toa_redirect
+      description: The create action is being redirected to the introduction page because agreement is missing.
+    - id: creating_report
+      description: The create action has passed agreement gating and is creating the report.
+    - id: gate_handoff
+      description: A successfully created report is being handed off to the calculator gate.
+    - id: resume_redirect
+      description: An edit action is resuming an existing report from saved progress.
+    - id: fallback
+      description: The flow cannot continue safely and returns to a fallback route.
+  transitions:
+    - id: create_without_agreement
+      from: awaiting_action
+      to: toa_redirect
+      trigger: User submits Create Report and agreedToa is false
+      guards:
+        - field: agreed_toa
+          condition: userData.agreedToa is false
+      effects:
+        - Build an introduction URL for the selected calculator
+        - Redirect to the introduction / commitment page after the TOA notice
+    - id: create_with_agreement
+      from: awaiting_action
+      to: creating_report
+      trigger: User submits Create Report and agreedToa is true
+      guards:
+        - field: agreed_toa
+          condition: userData.agreedToa is true
+      effects:
+        - Create the report with default progress
+        - Preserve the selected calculator and business context
+    - id: create_succeeds
+      from: creating_report
+      to: gate_handoff
+      trigger: Report creation succeeds
+      effects:
+        - Navigate to the calculator gate or questionnaire handoff
+    - id: edit_action_valid
+      from: awaiting_action
+      to: resume_redirect
+      trigger: Report row Edit action resolves a valid handoff
+      guards:
+        - field: target
+          condition: report._id is present
+        - field: calculator_id
+          condition: calculatorId resolves to a supported gate path
+        - field: report_progress
+          condition: saved progress route maps to a valid resume route
+      effects:
+        - Redirect into the calculator gate / resume route
+    - id: validation_failure
+      from: creating_report
+      to: fallback
+      trigger: Validation, fetch, or route resolution fails
+      effects:
+        - Navigate to the fallback destination
+        - Show an error toast when handoff resolution fails
+conditions:
+  - id: create_requires_agreement
+    description: Report creation redirects to the introduction page when TOA agreement is missing.
+    trigger: Create Report submit
+    guards:
+      - field: agreed_toa
+        condition: userData.agreedToa is false
+    then:
+      - Build an introduction URL from the calculator gate path
+      - Redirect to the introduction / commitment page
+    else:
+      - Continue to report creation
+  - id: edit_handoff_is_ordinary_route_resolution
+    description: Existing report edit resolves a gate handoff and resume route without checking TOA agreement.
+    trigger: Edit report action
+    guards:
+      - field: target
+        condition: report._id is present
+      - field: calculator_id
+        condition: calculatorId resolves to a supported gate path
+    then:
+      - Resolve the edit handoff route
+      - Navigate to the calculator gate URL
+    else:
+      - Show an error toast
+      - Push the fallback destination if available
+  - id: edit_resume_uses_saved_progress
+    description: The edit resume path uses saved report progress to choose the continuation route.
+    trigger: Gate-edit initialization after report fetch
+    guards:
+      - field: report_progress
+        condition: saved progress route is recognized for the report's calculator
+    then:
+      - Redirect to the mapped resume route
+    else:
+      - Redirect to the reports fallback
+inputs:
+  - id: agreement_state
+    type: boolean from user profile
+    source: auth user data (`agreedToa`)
+    required: true
+  - id: create_form
+    type: report creation input object
+    source: Create Report modal submit
+    required: true
+    validation:
+      report_name: non-empty trimmed string
+      business_id: non-empty selected company id
+      calculator_id: one of 1,2,3,4
+  - id: report_record
+    type: report object with _id, calculatorId, reportProgress
+    source: report row or fetched report payload
+    required: true
+  - id: auth_token
+    type: access token + user id
+    source: token service
+    required: false
+  - id: gate_path_map
+    type: calculatorId→gate path map
+    source: environment configuration
+    required: false
+  - id: persisted_business_id
+    type: business id string
+    source: browser localStorage
+    required: false
+outputs:
+  - id: introduction_redirect_url
+    type: URL
+    destination: browser location.replace
+    lifespan: immediate
+  - id: created_report
+    type: report object
+    destination: reports API / follow-up gate handoff
+    lifespan: persistent
+  - id: gate_handoff_destination
+    type: URL or in-app route
+    destination: router.push or window.location.replace
+    lifespan: immediate
+  - id: resume_route
+    type: calculator-specific resume path
+    destination: calculator gate URL
+    lifespan: immediate
+  - id: fallback_destination
+    type: in-app route or rollback URL
+    destination: router.push or window.location.replace
+    lifespan: immediate
+  - id: error_toast
+    type: toast notification
+    destination: react-toastify UI
+    lifespan: ephemeral
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportCreation.ts
+    snippet: |
+      const userResult = await fetchUserData({ userId: token?._id });
+      if (!userResult.ok) {
+        throw new Error(userResult.message || "Failed to verify user status.");
+      }
+
+      const hasAgreedToa = userResult.data?.agreedToa === true;
+
+      if (!hasAgreedToa) {
+        toast.success(
+          "Create page in progress. We will be redirecting you to our Introduction and Our Commitment page",
+        );
+
+        const introUrlResult = buildIntroductionUrl({
+          calculatorId,
+          businessId,
+          reportName: name.trim(),
+          env: process.env,
+        });
+
+        if (introUrlResult.ok && introUrlResult.url) {
+          setTimeout(() => {
+            window.location.replace(introUrlResult.url);
+          }, 2000);
+          return { success: true, redirected: true, reason: "toa_redirect" };
+        }
+      }
+    line_range:
+      start: 48
+      end: 85
+    covers:
+      - condition:create_requires_agreement
+      - state:toa_redirect
+      - state:creating_report
+      - output:introduction_redirect_url
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/user-service.js
+    snippet: |
+      return {
+        _id: normalizeOptionalString(data._id ?? data.id),
+        email: normalizeOptionalString(data.email),
+        agreedToa: data.agreedToa === true,
+        firstName: normalizeOptionalString(data.firstName ?? data.first_name),
+        lastName: normalizeOptionalString(data.lastName ?? data.last_name),
+      };
+
+      export async function checkUserToaStatus(options = {}) {
+        const result = await fetchUserData(options);
+
+        if (!result.ok) {
+          return {
+            ok: false,
+            hasAgreed: false,
+            message: result.message,
+          };
+        }
+
+        return {
+          ok: true,
+          hasAgreed: result.data?.agreedToa === true,
+          data: result.data,
+          message: "TOA status checked successfully.",
+        };
+      }
+    line_range:
+      start: 24
+      end: 125
+    covers:
+      - input:agreement_state
+      - condition:create_requires_agreement
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/contracts/toa-contract.js
+    snippet: |
+      export function resolveToaStatus(userData) {
+        if (!isPlainObject(userData)) {
+          return {
+            hasAgreedToa: false,
+            isValid: false,
+            reason: "invalid_user_data",
+          };
+        }
+
+        return {
+          hasAgreedToa: userData.agreedToa === true,
+          isValid: true,
+          reason: null,
+        };
+      }
+
+      export function resolveToaRedirectRoute(options = {}) {
+        const { userData, calculatorId, businessId, reportName, env } = options;
+
+        const toaStatus = resolveToaStatus(userData);
+
+        if (!toaStatus.isValid) {
+          return {
+            ok: false,
+            shouldRedirect: false,
+            url: null,
+            reason: toaStatus.reason,
+          };
+        }
+
+        if (toaStatus.hasAgreedToa) {
+          return {
+            ok: true,
+            shouldRedirect: false,
+            url: null,
+            reason: null,
+          };
+        }
+
+        const introUrl = buildIntroductionUrl({
+          calculatorId,
+          businessId,
+          reportName,
+          env,
+        });
+
+        return {
+          ok: true,
+          shouldRedirect: true,
+          url: introUrl.url,
+          reason: "toa_not_agreed",
+        };
+      }
+    line_range:
+      start: 38
+      end: 173
+    covers:
+      - condition:create_requires_agreement
+      - output:introduction_redirect_url
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportNavigation.ts
+    snippet: |
+      export function useReportNavigation() {
+        const router = useRouter();
+
+        function navigateToReportGate(
+          report: Report,
+          options: NavigateToReportOptions = {},
+        ) {
+          const handoff = resolveGateHandoffRoute({
+            intent: "edit",
+            target: report?._id,
+            calculatorId: report?.calculatorId,
+            env: process.env,
+            gatePathsByCalculatorId: GATE_PATHS_BY_CALCULATOR_ID,
+          });
+
+          if (!handoff.ok || !handoff.destination) {
+            toast.error("Unable to open the selected report.");
+            if (handoff.fallbackDestination) {
+              router.push(handoff.fallbackDestination);
+            }
+            return;
+          }
+
+          if (handoff.destination.startsWith("http")) {
+            window.location.replace(handoff.destination);
+            return;
+          }
+
+          router.push(handoff.destination);
+        }
+      }
+    line_range:
+      start: 24
+      end: 53
+    covers:
+      - condition:edit_handoff_is_ordinary_route_resolution
+      - output:gate_handoff_destination
+      - output:fallback_destination
+      - output:error_toast
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-finder.js
+    snippet: |
+      function buildValidatedActionRoute(options, mode) {
+        const producerQueryPayload = resolveProducerQueryPayload(options);
+        const producerQueryValidation = validateGateQuery(producerQueryPayload);
+
+        if (!producerQueryValidation.isValid) {
+          return createBaseFailure(producerQueryValidation.reason);
+        }
+
+        const target = producerQueryValidation.target;
+
+        if (!target) {
+          return createBaseFailure("missing_target");
+        }
+
+        const gatePathResolution = resolveGatePathForCalculator(options.calculatorId, options);
+        if (!gatePathResolution.ok) {
+          return {
+            ok: false,
+            reason: gatePathResolution.reason,
+            destination: null,
+          };
+        }
+
+        try {
+          const destination =
+            mode === "new"
+              ? buildGateNewUrl(gatePathResolution.gatePath, {
+                  target,
+                  source: producerQueryValidation.source,
+                  name: producerQueryValidation.name,
+                })
+              : buildGateEditUrl(gatePathResolution.gatePath, { target });
+
+          return {
+            ok: true,
+            reason: null,
+            destination,
+          };
+        } catch (_error) {
+          return {
+            ok: false,
+            reason: "build_failed",
+            destination: null,
+          };
+        }
+      }
+
+      export function resolveGateHandoffRoute(options = {}) {
+        const intent = normalizeHandoffIntent(options.intent);
+        const fallbackDestination = resolveHandoffFallbackDestination(
+          intent ?? GATE_HANDOFF_INTENTS.EDIT,
+          options,
+        );
+    line_range:
+      start: 236
+      end: 335
+    covers:
+      - condition:edit_handoff_is_ordinary_route_resolution
+      - output:gate_handoff_destination
+      - output:fallback_destination
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-edit-contract.js
+    snippet: |
+      export function resolveGateEditProgressRoute(report = {}) {
+        if (!isPlainObject(report)) {
+          return {
+            isValid: false,
+            reason: "invalid_report",
+            route: null,
+            calculatorId: null,
+            reportProgress: null,
+          };
+        }
+
+        const calculatorId = normalizeCalculatorId(report.calculatorId);
+        if (!calculatorId || !SUPPORTED_CALCULATOR_IDS.has(calculatorId)) {
+          return {
+            isValid: false,
+            reason: "unknown_calculator",
+            route: null,
+            calculatorId,
+            reportProgress: null,
+          };
+        }
+
+        const reportProgress = normalizeProgressRoute(report.reportProgress);
+        if (!reportProgress) {
+          return {
+            isValid: false,
+            reason: "missing_report_progress",
+            route: null,
+            calculatorId,
+            reportProgress: null,
+          };
+        }
+
+        const route = resolveMappedProgressRoute(calculatorId, reportProgress);
+        if (!route) {
+          return {
+            isValid: false,
+            reason: "unknown_progress",
+            route: null,
+            calculatorId,
+            reportProgress,
+          };
+        }
+
+        return {
+          isValid: true,
+          reason: null,
+          route,
+          calculatorId,
+          reportProgress,
+        };
+      }
+
+      export async function executeGateEditInitialization(options = {}) {
+        const {
+          router,
+          guard = createOneShotGuard(),
+          query = {},
+          fallbackBusinessId = null,
+          fetchReport = async ({ target }) =>
+            fetchGateEditReportById(target, {
+              apiBaseUrl: "",
+            }),
+          resolveProgressRoute = ({ report }) => resolveGateEditProgressRoute(report),
+          navigate = () => undefined,
+        } = options;
+
+        const validation = validateGateEditEntry({ query });
+        if (!validation.isValid) {
+          const fallback = resolveGateEditFallbackDestination({
+            preferredRoute: REPORTS_ROUTE,
+            businessId: fallbackBusinessId,
+          });
+          navigate(fallback.destination);
+          return {
+            phase: "fallback",
+            reason: validation.reason,
+            nextDestination: null,
+            fallbackDestination: fallback.destination,
+          };
+        }
+    line_range:
+      start: 442
+      end: 635
+    covers:
+      - condition:edit_resume_uses_saved_progress
+      - state:fallback
+      - output:resume_route
+      - output:fallback_destination
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-edit-contract.js
+    snippet: |
+      export function resolveGateEditUiState(result, options = {}) {
+        const fallback = resolveGateEditFallbackDestination({
+          preferredRoute: options.preferredRoute ?? REPORTS_ROUTE,
+          businessId: options.businessId ?? null,
+        });
+        const fallbackDestination = normalizeString(result?.fallbackDestination) ?? fallback.destination;
+
+        if (!result || result.phase === "pending_router") {
+          return {
+            heading: "Preparing report resume",
+            detail: "Validating route target before loading report progress.",
+            fallbackDestination,
+          };
+        }
+
+        if (result.phase === "redirecting") {
+          return {
+            heading: "Redirecting",
+            detail: `Continuing to ${result.nextDestination}.`,
+            fallbackDestination: normalizeString(result.nextDestination) ?? fallbackDestination,
+          };
+        }
+
+        if (result.phase === "duplicate") {
+          return {
+            heading: "Resume already processed",
+            detail: `This resume intent already ran. Continue to ${fallbackDestination} if needed.`,
+            fallbackDestination,
+          };
+        }
+
+        return {
+          heading: "Unable to resume report",
+          detail: `Redirecting to ${fallbackDestination} due to ${result.reason ?? "resume failure"}.`,
+          fallbackDestination,
+        };
+      }
+    line_range:
+      start: 638
+      end: 674
+    covers:
+      - condition:edit_resume_uses_saved_progress
+      - state:fallback
+      - output:fallback_destination
+confidence: 0.84
+confidence_rationale: >
+  The TOA agreement check, introduction redirect, edit handoff validation, and
+  resume redirect are all confirmed in the explored files. The stale golden
+  wording names an edit route and agreement state together, but the current code
+  splits those concerns across create-report TOA gating and ordinary edit handoff
+  logic.
+unresolved_questions:
+  - Whether the stale golden should be remapped to the create-flow TOA gate or split from the edit resume flow in downstream specs.
+  - Whether the introduction / commitment redirect should be treated as part of the primary auth behavior or as a related precondition flow.
+status: partial

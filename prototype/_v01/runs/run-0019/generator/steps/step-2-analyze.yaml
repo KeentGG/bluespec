@@ -1,0 +1,234 @@
+predicate_inventory:
+  - behavior_id: auth_flow.route_protection
+    predicates:
+      - isProtectedRoute(path)
+      - hasInMemoryToken()
+      - canRefresh()
+      - isAuthenticated()
+    render_mode: hidden
+  - behavior_id: auth_flow.error_handling
+    predicates:
+      - isAuthError(statusCode, qfmBucket, keywords)
+      - isAlreadyHandling()
+      - hasAuthLocalStorageKeys()
+    render_mode: hidden
+  - behavior_id: auth_flow.cross_tab_sync
+    predicates:
+      - isBroadcastChannelAvailable()
+      - isSafari()
+      - isInDebounceWindow(timestamp, 1000)
+    render_mode: hidden
+  - behavior_id: auth_flow.csrf_protection
+    predicates:
+      - isCsrfTokenAvailable()
+      - isStateChangingRequest(method)
+      - isRetryLimitReached(retryCount, 1)
+    render_mode: hidden
+  - behavior_id: auth_flow.middleware_silent_refresh
+    predicates:
+      - isProtectedRoute(path)
+      - hasRefreshToken()
+      - isCsrfTokenAvailable()
+      - isFirstAttempt()
+    render_mode: hidden
+  - behavior_id: auth_flow.toa_guard
+    predicates:
+      - hasAgreedToa(userId)
+      - calculatorType()
+    render_mode: hidden
+  - behavior_id: stateful_ui.gate_entry_state_machines
+    predicates:
+      - phase == 'pending_router'
+      - phase == 'initializing'
+      - phase == 'ready'
+      - phase == 'fallback'
+      - phase == 'error'
+      - isOneShotGuardPassed()
+      - hasRollbackGate()
+      - isValidReferrer(origin)
+    render_mode: hidden
+  - behavior_id: stateful_ui.reports_list_filter_state
+    predicates:
+      - searchQuery.length > 0
+      - sortId != 'updatedAt:desc'
+      - calcTypeFilter != 'all'
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui.company_page_state
+    predicates:
+      - searchQuery.length > 0
+      - sortBy / sortOrder
+      - logoLoadFailuresByBusinessId
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui.pdf_download_state
+    predicates:
+      - dlStatus == 'waiting'
+      - dlStatus == 'finished'
+      - dlStatus == 'failed'
+      - dlStatus == 'completed'
+      - isGenerating()
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui.auth_redirect_state
+    predicates:
+      - isChecking()
+      - isAuthenticated()
+      - attemptTokenRefresh()
+      - minLoadingDelay()
+    render_mode: hidden
+  - behavior_id: auth_flow.login
+    predicates:
+      - isEmailValid(email)
+      - isPasswordValid(pass)
+      - isSubmitting()
+      - hasSessionExpiredDebugInfo(searchParams)
+    render_mode: visible-enabled
+  - behavior_id: auth_flow.signup
+    predicates:
+      - isEmailValid(email)
+      - isPasswordValid(pass)
+      - isSubmitting()
+    render_mode: visible-enabled
+  - behavior_id: auth_flow.logout
+    predicates:
+      - isExecuting()
+      - apiFailed()
+    render_mode: visible-enabled
+  - behavior_id: auth_flow.token_refresh
+    predicates:
+      - hasRefreshToken()
+      - isLockAcquired(localStorage)
+      - lockExpired(10000)
+      - isPromiseLockActive()
+    render_mode: hidden
+  - behavior_id: auth_flow.password_reset
+    predicates:
+      - hasResetToken(authorization)
+      - isTokenValid(token)
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui.report_action_loading_state
+    predicates:
+      - isDownloading(reportId)
+      - isRenaming(reportId)
+      - isDeleting(reportId)
+      - isEmailing(reportId)
+      - anyActionInProgress(reportId)
+    render_mode: visible-disabled
+  - behavior_id: stateful_ui.report_row_controller
+    predicates:
+      - editingReportId == reportId
+      - hasEditTimeElapsed(500)
+      - hasFocused()
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui.report_modals
+    predicates:
+      - useReportEmailModal.isOpen
+      - useReportDeleteDialog.isOpen
+      - useCreateReportModal.isOpen
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui.create_report_modal_state
+    predicates:
+      - isOpen()
+      - defaultBusinessId
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui.company_modals
+    predicates:
+      - addEdit.isOpen
+      - delete.isOpen
+      - createReport.isOpen
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui.company_form_state
+    predicates:
+      - isSubmitting()
+      - hasLogoChanges()
+      - isDragging()
+      - logoError
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui.dashboard_shell_state
+    predicates:
+      - isSidebarOpen()
+      - userEmail
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui.user_data_query
+    predicates:
+      - hasUserId()
+      - isLoading()
+      - isError()
+    render_mode: hidden
+  - behavior_id: stateful_ui.business_selection_persistence
+    predicates:
+      - hasHashSelection()
+      - hasPersistedSelection()
+    render_mode: hidden
+  - behavior_id: stateful_ui.swr_query_layer
+    predicates:
+      - hasToken()
+      - isLoading()
+      - isError()
+      - isValidating()
+    render_mode: hidden
+  - behavior_id: auth_flow.session_persistence
+    predicates:
+      - hasToken()
+      - hasCookie()
+    render_mode: hidden
+behaviors_to_spec:
+  - auth_flow.login
+  - auth_flow.signup
+  - auth_flow.session_persistence
+  - auth_flow.token_refresh
+  - auth_flow.route_protection
+  - auth_flow.error_handling
+  - auth_flow.cross_tab_sync
+  - auth_flow.csrf_protection
+  - auth_flow.logout
+  - auth_flow.password_reset
+  - auth_flow.middleware_silent_refresh
+  - auth_flow.toa_guard
+  - stateful_ui.reports_list_filter_state
+  - stateful_ui.report_action_loading_state
+  - stateful_ui.create_report_modal_state
+  - stateful_ui.pdf_download_state
+  - stateful_ui.company_page_state
+  - stateful_ui.company_modals
+  - stateful_ui.company_form_state
+  - stateful_ui.reports_page_controller
+  - stateful_ui.report_row_controller
+  - stateful_ui.report_modals
+  - stateful_ui.dashboard_shell_state
+  - stateful_ui.auth_redirect_state
+  - stateful_ui.user_data_query
+  - stateful_ui.business_selection_persistence
+  - stateful_ui.gate_entry_state_machines
+  - stateful_ui.swr_query_layer
+needs_deeper_exploration:
+  - behavior_id: auth_flow.error_handling
+    reason: Integration with apiClient interceptor chain unclear. Need to verify
+      exact interceptor registration order, whether multiple interceptors can
+      conflict, and how QFM taxonomy buckets are defined.
+  - behavior_id: auth_flow.cross_tab_sync
+    reason: BroadcastChannel + localStorage fallback complexity. Need to verify
+      Safari detection method, debounce implementation details, and
+      AuthSyncBootstrap component mounting strategy.
+  - behavior_id: auth_flow.middleware_silent_refresh
+    reason: Two-attempt CSRF strategy needs verification. Unclear how apiClient
+      behaves in Edge runtime (no Node.js APIs), and whether the 3s timeout is
+      enforced at fetch level or middleware level.
+  - behavior_id: auth_flow.csrf_protection
+    reason: Proactive refresh retry logic may have edge cases. Need to verify how
+      csrfHelper distinguishes between 'no token' and 'invalid token', and
+      whether the retry limit interacts with token refresh lock.
+  - behavior_id: stateful_ui.gate_entry_state_machines
+    reason: Phase-based state machine complexity. Need to verify oneShotGuard
+      implementation, rollback gate contract resolution, and how
+      gate-edit-contract vs gate-new-contract differ.
+  - behavior_id: stateful_ui.reports_page_controller
+    reason: Append-mode pagination with accumulatedReportsRef. Need to verify how
+      userPage interacts with SWR pagination, and whether the ref correctly
+      accumulates across page changes.
+  - behavior_id: stateful_ui.swr_query_layer
+    reason: "clearClientDataCache() uses SWR mutate with undefined key. Need to
+      verify this actually clears all cache entries, and whether revalidate:
+      false prevents re-fetching."
+  - behavior_id: stateful_ui.business_selection_persistence
+    reason: sanitizeDashboardPersistedKey abstraction. Need to verify what mutations
+      it prevents and how rollback route checks interact with selection
+      persistence.

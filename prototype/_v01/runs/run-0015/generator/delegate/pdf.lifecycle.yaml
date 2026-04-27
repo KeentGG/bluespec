@@ -1,0 +1,33 @@
+spec_id: pdf.lifecycle
+output_path: runs/run-0015/generator/specs/pdf.lifecycle.yaml
+discovered_behaviors:
+  - id: pdf-state-machine
+    description: PDF generation state machine: IDLE → WAITING → FINISHED/FAILED with polling mechanism
+    priority: high
+    evidence_refs:
+      - src/shared/lib/qfm/pdfLifecycle.js
+  - id: pdf-polling-mechanism
+    description: Frontend polls backend every 3 seconds for PDF generation status with max 60 attempts
+    priority: high
+    evidence_refs:
+      - src/features/pdf/components/PdfGenerationOverlay.tsx
+  - id: pdf-user-feedback
+    description: Celebration animation on completion, retry button on failure, download button when ready
+    priority: medium
+    evidence_refs:
+      - src/features/pdf/components/PdfGenerationOverlay.tsx
+source_files:
+  - src/shared/lib/qfm/pdfLifecycle.js
+  - src/features/pdf/components/PdfGenerationOverlay.tsx
+  - src/features/pdf/store/useDownloadStore.ts
+  - src/features/pdf/api/pdf-service.ts
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - PDF lifecycle state machine: IDLE, WAITING, FINISHED, FAILED
+  - Backend status aliases normalized to canonical states
+  - Polling interval: 3 seconds, max attempts: 60
+  - Storage keys: downloadingpdf (boolean), downloadPdfKey (job ID)
+  - PdfGenerationOverlay shows different UI for each state
+  - Celebration animation for 5 seconds on completion
+  - Retry button on failure, download button when finished

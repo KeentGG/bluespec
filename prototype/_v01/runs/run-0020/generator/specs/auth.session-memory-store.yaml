@@ -1,0 +1,150 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.session-memory-store
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth_session_memory_store
+    coverage: full
+    notes: >
+      Session tokens are stored in a JavaScript variable (NOT localStorage) to
+      prevent XSS attacks. The refresh token is stored in an HTTP-only cookie
+      set by the backend. Cross-tab sync via BroadcastChannel ensures logout
+      propagation.
+
+description: >
+  Provides in-memory session storage for the current user's auth state. Tokens
+  are stored in a JavaScript variable rather than localStorage to prevent XSS
+  attacks from accessing them. The refresh token is stored in an HTTP-only cookie
+  set by the backend, which JavaScript cannot read. Cross-tab synchronization
+  ensures logout events propagate to all open tabs.
+
+state_machine: null
+
+conditions:
+  - id: session_storage_location
+    description: >
+      Tokens are stored in a JavaScript variable (authSession) rather than
+      localStorage or sessionStorage. This prevents XSS attacks from accessing
+      tokens via browser storage APIs.
+    trigger: Session is set via setAuthSession().
+    guards:
+      - field: storage_type
+        condition: authSession is a module-level variable, not browser storage.
+    then:
+      - Store token and user data in memory.
+    else:
+      - N/A
+
+  - id: session_shape
+    description: >
+      Session object contains _id, email, accessToken, and full user object.
+      This shape is normalized from the backend response before storage.
+    trigger: setAuthSession() is called with backend response.
+    guards:
+      - field: has_user_id
+        condition: candidate._id is non-empty string after trimming.
+      - field: has_access_token
+        condition: candidate.accessToken is non-empty string after trimming.
+    then:
+      - Normalize and store session with full user object.
+    else:
+      - Reject invalid session payload, store null.
+
+  - id: cross_tab_logout_sync
+    description: >
+      When a user logs out in one tab, all other tabs clear their session
+      and redirect to /login. This is handled via the authBroadcast module
+      using BroadcastChannel with localStorage fallback.
+    trigger: Logout broadcast received from another tab.
+    guards:
+      - field: broadcast_received
+        condition: BroadcastChannel or localStorage event received.
+    then:
+      - Clear local authSession.
+      - Redirect to /login if on protected route.
+    else:
+      - No action.
+
+inputs:
+  - id: session_payload
+    type: "object with _id, email, accessToken"
+    source: Backend login/refresh response
+    required: true
+    validation:
+      presence: _id and accessToken must be non-empty strings
+
+outputs:
+  - id: auth_session
+    type: "session object in memory"
+    destination: Module-level authSession variable
+    lifespan: until logout or page refresh
+
+evidence_refs:
+  - path: src/features/auth/api/authMemorySession.js
+    snippet: |
+      let authSession = null;
+      let logoutListenerInitialized = false;
+      let loginListenerInitialized = false;
+    covers:
+      - "condition:session_storage_location"
+
+  - path: src/features/auth/api/authMemorySession.js
+    snippet: |
+      export function setAuthSession(candidate) {
+        const normalized = normalizeSessionPayload(candidate);
+        authSession = normalized;
+        return authSession;
+      }
+      
+      export function getAuthSession() {
+        return authSession;
+      }
+      
+      export function clearAuthSession() {
+        authSession = null;
+      }
+    covers:
+      - "condition:session_shape"
+      - "output:auth_session"
+
+  - path: src/features/auth/api/authMemorySession.js
+    snippet: |
+      function normalizeSessionPayload(candidate) {
+        if (!isPlainObject(candidate)) {
+          return null;
+        }
+        const userId = normalizeOptionalString(candidate._id).trim();
+        const accessToken = normalizeOptionalString(candidate.accessToken).trim();
+        if (!userId || !accessToken) {
+          return null;
+        }
+        // ... normalize and return session object
+      }
+    covers:
+      - "condition:session_shape"
+
+  - path: src/features/auth/api/authMemorySession.js
+    snippet: |
+      import("../lib/authBroadcast")
+        .then(({ initLogoutListener }) => {
+          initLogoutListener(() => {
+            clearAuthSession();
+            if (typeof callbacks.onLogout === "function") {
+              callbacks.onLogout();
+            }
+          });
+        })
+    covers:
+      - "condition:cross_tab_logout_sync"
+
+confidence: 0.95
+confidence_rationale: >
+  In-memory session storage, session shape normalization, and cross-tab logout
+  sync are directly evidenced in authMemorySession.js. The security rationale
+  for in-memory storage is documented in the module header.
+unresolved_questions:
+  - Exact fields in the user object beyond _id, email, accessToken.
+  - Whether session persists across page refreshes (it does not by design).
+status: complete

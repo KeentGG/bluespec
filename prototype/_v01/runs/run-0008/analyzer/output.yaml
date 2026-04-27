@@ -1,0 +1,22 @@
+run_id: run-0008
+analyzer: run_analyzer
+status: complete
+provider: local
+confidence: 0.76
+primary_failure_type: recognition_failure
+diagnosis: The formula explored the right files but failed to interpret
+  state-machine boundary patterns as spec-worthy behavior. The explore phase
+  identified the files but the draft phase collapsed state transitions into a
+  single monolithic state block.
+failure_tier: prompt_tweak
+suggested_mutation: Add explicit state-machine boundary detection to the explore
+  phase instructions; refine draft phase prompt to list state transitions as a
+  required spec section
+expected_effect: Improve recall on stateful UI behaviors without affecting other coverage areas
+evidence_refs:
+  - generator/steps/step-1-explore.yaml
+  - generator/steps/step-3-draft.yaml
+rubric_gap_proposed: false
+rubric_gap_proposal: null
+analyzer_timestamp: 2026-04-21T11:57:30.703Z
+tokens_used: 974

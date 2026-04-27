@@ -1,0 +1,174 @@
+run_id: run-0015
+evaluator: evaluator
+status: complete
+provider: sample-project
+
+scored_specs:
+  - id: auth.route-protection
+    recall: 0.0
+    precision: 0.88
+    consistency: 0.90
+    notes: >
+      No golden behaviors covered. Well-evidenced route protection spec with
+      10 code snippets across 5 source files. AuthGuard, useAuthRedirect, and
+      root page routing all confirmed. Confidence 0.88.
+
+  - id: auth.session-management
+    recall: 0.0
+    precision: 0.92
+    consistency: 0.90
+    notes: >
+      No golden behaviors covered. Comprehensive session lifecycle spec with
+      12 code snippets across 8 source files. Memory storage, cookie contract,
+      cross-tab coordination, CSRF protection all confirmed. Confidence 0.92.
+
+  - id: auth.error-handling
+    recall: 0.0
+    precision: 0.91
+    consistency: 0.90
+    notes: >
+      No golden behaviors covered. Thorough error handling spec with 8 code
+      snippets across 4 source files. isAuthError multi-signal detection,
+      handleAuthError cleanup flow, API client retry logic confirmed.
+      Confidence 0.91.
+
+  - id: auth.toa-gated-report-creation
+    recall: 1.0
+    precision: 0.92
+    consistency: 0.92
+    notes: >
+      Golden behavior #3 (toa-gated-first-report-creation) FULLY COVERED.
+      All 3 golden set evidence refs present: toa-contract.js, useReportCreation.ts,
+      gate-finder.js. TOA status check, redirect flow, and deferred report creation
+      all confirmed with direct code snippets. Calculator-side report creation
+      documented from prior_context (gate-new-contract.js not in this manifest).
+      Confidence 0.92.
+
+  - id: routing.base-path
+    recall: 0.0
+    precision: 0.95
+    consistency: 0.95
+    notes: >
+      No golden behaviors covered. Pure function module (61 lines) fully evidenced.
+      Every code path visible: normalizeBasePath, isExternalDestination, withBasePath,
+      getBasePath. Highest confidence spec at 0.95.
+
+  - id: routing.gate-navigation
+    recall: 0.2
+    precision: 0.91
+    consistency: 0.88
+    notes: >
+      Partial coverage of golden behavior #1 (auth-conditional-redirect) via
+      gate-edit-flow. Gate edit validates query params and redirects to calculator,
+      but does not document agreement state checking. Gate new flow creates reports
+      but createReport API is injected (not visible). Evidence ref project-edit.tsx
+      from golden behavior #1 is NOT covered. Confidence 0.91.
+
+  - id: reports.data-fetching
+    recall: 0.0
+    precision: 0.88
+    consistency: 0.88
+    notes: >
+      No golden behaviors covered. SWR-based data fetching with business selection
+      priority chain. 10 code snippets across 4 source files. Rollback redirect
+      and abort error suppression confirmed. Confidence 0.88.
+
+  - id: reports.progress-tracking
+    recall: 0.15
+    precision: 0.92
+    consistency: 0.92
+    notes: >
+      Indirect coverage of golden behavior #2 (download-button-visibility) via
+      progress percentage calculation. Four calculator-specific resolvers with
+      step-based formulas documented. But does not cover the UI visibility
+      gating from ReportActions.tsx. Evidence ref ReportActions.tsx NOT covered.
+      Confidence 0.92.
+
+  - id: company.list-management
+    recall: 0.0
+    precision: 0.88
+    consistency: 0.88
+    notes: >
+      No golden behaviors covered. Company list management with SWR fetching,
+      300ms debounce, logo error tracking. 10 code snippets across 6 source
+      files. Confidence 0.88.
+
+  - id: qfm.in-flight-mutation-guard
+    recall: 0.0
+    precision: 0.95
+    consistency: 0.95
+    notes: >
+      No golden behaviors covered. Pure function module (120 lines) fully evidenced.
+      Set-based begin/end pattern, key normalization, guard result schema confirmed.
+      Highest confidence at 0.95. No consumer usage sites found in repo.
+
+  - id: qfm.storage-sanitizer
+    recall: 0.0
+    precision: 0.91
+    consistency: 0.88
+    notes: >
+      No golden behaviors covered. Storage validation for 7 dashboard keys with
+      type-specific validators. Recovery events with QFM taxonomy integration.
+      Different default values for questionnaireSteps between sanitizer and
+      contract noted as unresolved. Confidence 0.91.
+
+  - id: qfm.rollback-gate
+    recall: 0.0
+    precision: 0.93
+    consistency: 0.90
+    notes: >
+      No golden behaviors covered. Rollback threshold monitor with 4 channels,
+      sustained breach detection, automatic and manual activation. 10 code
+      snippets across 2 source files. Confidence 0.93.
+
+  - id: qfm.error-classification
+    recall: 0.0
+    precision: 0.93
+    consistency: 0.92
+    notes: >
+      No golden behaviors covered. 7-bucket failure taxonomy with keyword
+      priority ordering. Response normalization with contract violation detection.
+      8 code snippets across 3 source files. Confidence 0.93.
+
+  - id: pdf.lifecycle
+    recall: 0.2
+    precision: 0.91
+    consistency: 0.88
+    notes: >
+      Partial coverage of golden behavior #2 (download-button-visibility) via
+      PDF download lifecycle. Four-state machine (IDLE/WAITING/FINISHED/FAILED)
+      with polling mechanism documented. But pdfLifecycle.js is NOT imported by
+      PdfGenerationOverlay.tsx — may be parallel implementation. Evidence ref
+      ReportActions.tsx NOT covered. Confidence 0.91.
+
+  - id: shared.request-intent-guard
+    recall: 0.0
+    precision: 0.95
+    consistency: 0.95
+    notes: >
+      No golden behaviors covered. Pure function module (290 lines) fully evidenced.
+      Version+nonce comparison for staleness detection, commit guard, response
+      metadata all confirmed. Highest confidence at 0.95.
+
+overall_score: 0.73
+overall_score_breakdown:
+  recall: 0.42
+  precision: 0.91
+  consistency: 0.90
+
+confidence: 0.85
+confidence_rationale: >
+  High confidence in precision and consistency scores due to thorough code
+  evidence in all 15 specs (120+ code snippets across 40+ source files).
+  Recall score is lower because only 1 of 3 golden behaviors is fully covered
+  (toa-gated-first-report-creation), while the other 2 (auth-conditional-redirect
+  from project-edit.tsx and download-button-visibility from ReportActions.tsx)
+  have no direct spec coverage. The specs are honest about their limitations
+  via unresolved_questions sections. Deducted 0.15 from overall confidence
+  because: (1) 12 of 15 specs have 0.0 recall, indicating the generator
+  produces high-quality infrastructure specs but misses golden-set-prioritized
+  behaviors, (2) the pdfLifecycle.js module may not be actively used by
+  PdfGenerationOverlay.tsx, (3) some cross-spec inconsistencies exist
+  (storage sanitizer defaults vs contract defaults).
+
+scoring_timestamp: "2026-04-23T00:00:00Z"

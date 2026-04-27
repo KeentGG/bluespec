@@ -1,0 +1,33 @@
+spec_id: pdf.lifecycle.yaml
+output_path: runs/run-0016/generator/specs/pdf.lifecycle.yaml
+discovered_behaviors:
+  - id: pdf-generation-state-machine
+    description: PDF generation state machine with states: waiting, generating, polling, completed, failed
+    priority: high
+    evidence_refs:
+      - src/features/pdf/store/useDownloadStore.ts
+      - src/shared/lib/qfm/pdfLifecycle.js
+  - id: pdf-cross-tab-coordination
+    description: Cross-tab coordination for PDF generation via localStorage
+    priority: medium
+    evidence_refs:
+      - src/features/pdf/store/useDownloadStore.ts
+  - id: pdf-persistence
+    description: PDF generation state persisted to localStorage for recovery
+    priority: medium
+    evidence_refs:
+      - src/features/pdf/store/useDownloadStore.ts
+source_files:
+  - src/features/pdf/store/useDownloadStore.ts
+  - src/features/pdf/api/pdf-service.ts
+  - src/features/pdf/components/PdfGenerationOverlay.tsx
+  - src/shared/lib/qfm/pdfLifecycle.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - PDF generation uses state machine pattern
+  - States: waiting → generating → polling → completed/failed
+  - Zustand store with localStorage persistence
+  - Cross-tab coordination via localStorage keys
+  - PDF generation triggered via API call
+  - Overlay component shows generation progress

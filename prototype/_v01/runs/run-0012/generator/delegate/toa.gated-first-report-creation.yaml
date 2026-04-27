@@ -1,0 +1,42 @@
+spec_id: toa.gated-first-report-creation
+output_path: /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0012/generator/specs/toa.gated-first-report-creation.yaml
+golden_behaviors:
+  - id: toa-gated-first-report-creation
+    description: >
+      For newly registered accounts with no TOA (Terms of Agreement) check and no existing reports,
+      any first report creation is deferred -- the dashboard does NOT persist the report until TOA is
+      accepted. Instead, the calculator handles report creation on the specified company and report name
+      after the user completes the TOA introduction/commitment flow. The dashboard redirects to the
+      calculator introduction page with businessId and reportName as query params, and the calculator
+      creates the report post-TOA-acceptance.
+    priority: high
+    category: conditional_flow
+    evidence_refs:
+      - src/features/auth/contracts/toa-contract.js
+      - src/features/reports/hooks/useReportCreation.ts
+      - src/shared/lib/routing/gate-new-contract.js
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/contracts/toa-contract.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportCreation.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-new-contract.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/app/gate/new/page.tsx
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - The evidence_refs for this behavior all exist and are accurate.
+  - toa-contract.js: resolveToaStatus checks userData.agreedToa === true.
+    buildIntroductionUrl constructs the introduction URL with businessId and reportName query params.
+    resolveToaRedirectRoute decides whether to redirect based on TOA status.
+  - useReportCreation.ts: handleCreateReport first fetches user data, checks hasAgreedToa.
+    If !hasAgreedToa, it calls buildIntroductionUrl (imported from gate-finder.js which re-exports
+    from toa-contract.js), shows a toast, and redirects via window.location.replace after 2s delay.
+    It returns { success: true, redirected: true, reason: "toa_redirect" }.
+    If hasAgreedToa, it proceeds to createReport API call.
+  - gate-new-contract.js handles the /gate/new route validation and execution.
+    It validates query params, referrer origin, referrer path, creates the report,
+    hydrates from import or defaults, and redirects to the calculator gate URL.
+  - app/gate/new/page.tsx is the Next.js page component that renders GateNewRouteEntryClient.
+  - The golden behavior describes a flow where report creation is DEFERRED when TOA is not accepted.
+    However, looking at useReportCreation.ts, when TOA is not accepted, the dashboard DOES NOT call
+    createReport. It redirects to the introduction page. The report creation then happens elsewhere
+    (presumably in the calculator after TOA acceptance). This matches the golden behavior description.

@@ -1,0 +1,73 @@
+status: complete
+specs_written: 15
+specs:
+  - id: auth.session-management
+    behaviors_documented: 4
+    confidence: 0.92
+    unresolved_questions: 5
+  - id: auth.route-protection
+    behaviors_documented: 3
+    confidence: 0.88
+    unresolved_questions: 4
+  - id: auth.error-handling
+    behaviors_documented: 3
+    confidence: 0.91
+    unresolved_questions: 5
+  - id: auth.toa-gated-report-creation
+    behaviors_documented: 3
+    confidence: 0.92
+    unresolved_questions: 4
+  - id: routing.gate-navigation
+    behaviors_documented: 4
+    confidence: 0.91
+    unresolved_questions: 7
+  - id: qfm.error-classification
+    behaviors_documented: 3
+    confidence: 0.93
+    unresolved_questions: 5
+  - id: pdf.lifecycle
+    behaviors_documented: 3
+    confidence: 0.91
+    unresolved_questions: 5
+  - id: qfm.rollback-gate
+    behaviors_documented: 3
+    confidence: 0.93
+    unresolved_questions: 6
+  - id: qfm.storage-sanitizer
+    behaviors_documented: 3
+    confidence: 0.91
+    unresolved_questions: 6
+  - id: shared.request-intent-guard
+    behaviors_documented: 2
+    confidence: 0.95
+    unresolved_questions: 4
+  - id: qfm.in-flight-mutation-guard
+    behaviors_documented: 2
+    confidence: 0.95
+    unresolved_questions: 4
+  - id: routing.base-path
+    behaviors_documented: 2
+    confidence: 0.95
+    unresolved_questions: 3
+  - id: reports.progress-tracking
+    behaviors_documented: 2
+    confidence: 0.92
+    unresolved_questions: 5
+  - id: company.list-management
+    behaviors_documented: 3
+    confidence: 0.88
+    unresolved_questions: 5
+  - id: reports.data-fetching
+    behaviors_documented: 2
+    confidence: 0.88
+    unresolved_questions: 5
+overall_confidence: 0.916
+flags_for_analyzer:
+  - auth-session-memory-storage: Tokens stored in JS memory, not localStorage - XSS protection pattern
+  - cross-tab-coordination: BroadcastChannel with localStorage fallback for Safari compatibility
+  - qfm-error-classification: 7-bucket error taxonomy with predefined user behaviors
+  - rollback-gate-system: Error-rate monitor with automatic v1 dashboard rollback
+  - gate-navigation-system: Complex gate system for calculator tool navigation
+  - toa-gated-report-creation: Terms of Agreement gate before report persistence
+  - pdf-lifecycle-state-machine: Async PDF generation with polling and state machine
+  - storage-sanitization: localStorage corruption detection and recovery

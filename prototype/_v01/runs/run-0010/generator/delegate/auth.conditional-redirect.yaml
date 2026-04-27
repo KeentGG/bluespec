@@ -1,0 +1,44 @@
+spec_id: auth.conditional-redirect.yaml
+output_path: /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0010/generator/specs/auth.conditional-redirect.yaml
+golden_behaviors:
+  - id: auth-conditional-redirect
+    description: editing project routes through a gated edit flow only when agreement state is satisfied
+    priority: high
+    evidence_refs:
+      - src/routes/project-edit.tsx
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportCreation.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/user-service.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/contracts/toa-contract.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportNavigation.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-finder.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-edit-contract.js
+ecosystem: frontend
+analysis:
+  behavior_map:
+    - id: report_creation_toa_gate
+      summary: useReportCreation checks fetched userData.agreedToa before report creation. When agreement is missing, it builds an introduction URL and redirects there; when agreement is present, it creates the report and later hands off to the report gate.
+      live_surface:
+        - create-report modal submit path
+        - TOA contract / introduction redirect
+    - id: ordinary_edit_handoff
+      summary: useReportNavigation resolves an edit handoff URL with resolveGateHandoffRoute. gate-finder validates target/calculatorId/gate path, and gate-edit-contract resumes from saved progress or falls back.
+      live_surface:
+        - report row Edit action
+        - /gate/edit initialization
+  predicate_inventory:
+    - predicate: userData.agreedToa === false
+      render_mode: visible-enabled
+      relation_to_golden: partial
+      note: the create action stays visible; the code redirects to the introduction/commitment page instead of hiding or disabling the control.
+    - predicate: userData.agreedToa === true
+      render_mode: visible-enabled
+      relation_to_golden: partial
+      note: agreement-state gating exists, but it guards report creation, not the edit resume flow named in the golden wording.
+    - predicate: "resolveGateHandoffRoute(intent: \"edit\")"
+      render_mode: visible-enabled
+      relation_to_golden: mismatch
+      note: this is an ordinary handoff for edit navigation; it has target/calculator/gate-path validation but no agreement-state predicate.
+staleness_notes:
+  - The golden evidence path src/routes/project-edit.tsx is stale; the live agreement gate lives in useReportCreation.ts and the ordinary edit flow lives in useReportNavigation.ts plus gate-finder.js / gate-edit-contract.js.
+  - The current code splits the concept into two separate paths: TOA agreement gating for create and gate handoff for edit. The spec-generator should not collapse them into one predicate.

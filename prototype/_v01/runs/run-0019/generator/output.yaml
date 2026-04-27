@@ -1,0 +1,45 @@
+run_id: run-0019
+generator: orchestrator
+status: complete
+formula_id: frontend-derived
+formula_version: v004
+steps_completed: 4
+failed_at_step: null
+error_reason: null
+overall_confidence: 0.5
+steps:
+  - step_id: explore
+    step_number: 1
+    status: complete
+    confidence: 0.5
+    summary: ""
+  - step_id: analyze
+    step_number: 2
+    status: complete
+    confidence: 0.5
+    summary: ""
+  - step_id: draft
+    step_number: 3
+    status: complete
+    confidence: 0.5
+    summary: >
+      Drafted 28 behavioral specifications for auth_flow (12) and stateful_ui
+      (16) behaviors. Auth specs cover login, signup, session persistence, token
+      refresh, route protection, error handling, cross-tab sync, CSRF
+      protection, logout, password reset, middleware silent refresh, and TOA
+      guard. Stateful UI specs cover reports list filter state, report action
+      loading, create report modal, PDF download state machine, company page
+      state, company modals, company form, reports page controller, report row
+      controller, report modals, dashboard shell, auth redirect, user data
+      query, business selection persistence, gate entry state machines, and SWR
+      query layer. Each spec includes state machines where applicable,
+      conditions, inputs/outputs, evidence references from the dashboard-v2
+      codebase, and confidence scores. Specs follow the schema at
+      schemas/spec.schema.yaml and are written to
+      runs/run-0019/generator/specs/.
+  - step_id: verify
+    step_number: 4
+    status: complete
+    confidence: 0.5
+    summary: Schema validation placeholder
+generated_at: 2026-04-26T09:08:28.967Z

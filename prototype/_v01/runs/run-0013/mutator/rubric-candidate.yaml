@@ -1,0 +1,38 @@
+id: semantic_fidelity
+status: candidate
+description: >
+  Evaluates whether the spec captures the correct semantic dimension of the
+  behavior (e.g., "visible" vs "enabled", "redirect" vs "block", "hidden"
+  vs "absent").
+source: rubric_gap_failure
+discovered_in_run: run-0013
+rationale: >
+  The current rubric penalizes omissions via golden_set_recall but does not
+  penalize semantic misclassification. A spec that documents "enabled" instead
+  of "visible" scores poorly on recall but receives no explicit penalty for
+  the semantic error itself, masking recognition failures.
+evidence_refs:
+  - runs/run-0013/evaluator/shadow-findings.yaml (precision_findings, consistency_findings)
+  - runs/run-0013/evaluator/output.yaml (score rationale for download.button-visibility)
+source_run: run-0013
+evaluator_score: 0.57
+failure_type: recognition_failure
+analyzer_confidence: 0.85
+recall_misses_triggered:
+  - auth-conditional-redirect
+  - download-button-visibility
+  - toa-gated-first-report-creation
+scored_specs_examined:
+  - auth.conditional-redirect
+  - download.button-visibility
+  - toa.gated-first-report-creation
+evidence_count: 1
+first_observed_run: run-0013
+last_observed_run: run-0013
+precision_concern: >
+  Conflates "visible" with "enabled". Golden set specifies that the button
+  becomes visible only after report progress reaches the download stage; the
+  spec documents an enable/disable state transition instead.
+weight_recommendation: 1.0
+probation_runs_remaining: 3
+created_at: "2026-04-22T15:53:00Z"

@@ -1,0 +1,56 @@
+run_id: "run-0013"
+evaluator: "run_evaluator"
+status: "complete"
+provider: "opencode-agent"
+scored_specs:
+  - spec_id: auth.conditional-redirect
+    scores:
+      coverage_core_behavior: 0.5
+      completeness_inputs_outputs: 0.7
+      consistency_cross_refs: 0.4
+      golden_set_recall: 0.5
+      conditional_flow_documentation: 0.6
+    weighted_score: 0.54
+    score_rationale: >
+      Documents redirect mechanics and route parameter handling but omits the
+      agreement-state guard, which is the central gating condition in the golden
+      behavior. Evidence ref does not match golden set.
+
+  - spec_id: download.button-visibility
+    scores:
+      coverage_core_behavior: 0.4
+      completeness_inputs_outputs: 0.75
+      consistency_cross_refs: 0.6
+      golden_set_recall: 0.4
+      conditional_flow_documentation: 0.7
+    weighted_score: 0.56
+    score_rationale: >
+      Captures progress-based gating logic but conflates "visible" (golden set)
+      with "enabled" (spec). Evidence ref points to a split component variant
+      rather than the canonical source.
+
+  - spec_id: toa.gated-first-report-creation
+    scores:
+      coverage_core_behavior: 0.5
+      completeness_inputs_outputs: 0.6
+      consistency_cross_refs: 0.8
+      golden_set_recall: 0.5
+      conditional_flow_documentation: 0.8
+    weighted_score: 0.62
+    score_rationale: >
+      Accurately models the TOA guard and dashboard redirect but omits the
+      calculator-side report creation that completes the end-to-end golden
+      behavior. Evidence ref matches golden set.
+
+overall_score: 0.57
+overall_score_breakdown:
+  recall: 0.47
+  precision: 0.72
+  consistency: 0.80
+confidence: 0.75
+confidence_rationale: >
+  Generator explicitly flagged synthetic fixtures and partial coverage for all
+  specs. Evaluator scoring is grounded in documented gaps from both generator
+  self-assessment and golden-set comparison. No hallucinated behaviors were
+  introduced beyond the three golden-set items.
+scoring_timestamp: "2026-04-22T12:00:00Z"

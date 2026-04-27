@@ -1,0 +1,218 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.pdf-download-state
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.pdf_download_state
+    coverage: full
+    notes: >
+      PDF download state machine tracks generation lifecycle from idle through
+      waiting, finished, or failed states. State is persisted via localStorage
+      to survive page refreshes. Polling monitors generation progress.
+
+description: >
+  Manages PDF download workflow through an explicit state machine with idle,
+  waiting, finished, and failed states. The state is persisted to localStorage
+  so the workflow survives page refreshes. Polling monitors PDF generation
+  progress and transitions through the state machine.
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: No PDF download workflow is active.
+    - id: waiting
+      description: PDF generation started, polling for completion.
+    - id: finished
+      description: PDF generation succeeded, public URL available.
+    - id: failed
+      description: PDF generation failed or timed out.
+  transitions:
+    - id: begin_download
+      from: idle
+      to: waiting
+      trigger: startDownload() is called from report action.
+      effects:
+        - Set isGenerating to true.
+        - Set dlStatus to "waiting".
+        - Persist pdfKey, cid, reportId to localStorage.
+        - Call startPdfGeneration API.
+    - id: api_rejected
+      from: waiting
+      to: failed
+      trigger: startPdfGeneration returns error.
+      effects:
+        - Set dlStatus to "failed".
+        - Return false to caller.
+    - id: polling_finished
+      from: waiting
+      to: finished
+      trigger: Polling sees status "finished" or publicUrl present.
+      guards:
+        - field: public_url
+          condition: statusData.publicUrl is present.
+      effects:
+        - Set dlStatus to "finished".
+        - Persist publicUrl to store and localStorage.
+    - id: polling_failed
+      from: waiting
+      to: failed
+      trigger: Polling sees failed status or max attempts reached.
+      effects:
+        - Set dlStatus to "failed".
+    - id: reset_from_finished
+      from: finished
+      to: idle
+      trigger: reset() is called.
+      effects:
+        - Clear in-memory state.
+        - Remove all localStorage keys.
+    - id: reset_from_failed
+      from: failed
+      to: idle
+      trigger: reset() is called.
+      effects:
+        - Clear in-memory state.
+        - Remove all localStorage keys.
+
+conditions:
+  - id: is_generating
+    description: >
+      Tracks whether PDF generation is currently in progress. Used to
+      show progress indicators and disable duplicate requests.
+    trigger: PDF download workflow is active.
+    guards:
+      - field: isGenerating
+        condition: isGenerating is true.
+    then:
+      - Show progress overlay.
+      - Disable download button.
+    else:
+      - Hide progress overlay.
+      - Enable download button.
+
+  - id: dl_status_waiting
+    description: >
+      Indicates PDF generation has started and is waiting for completion.
+      Polling is active during this state.
+    trigger: dlStatus is "waiting".
+    effects:
+      - Start polling interval.
+      - Show waiting UI.
+
+  - id: dl_status_finished
+    description: >
+      Indicates PDF generation succeeded and a public URL is available.
+      Download can proceed.
+    trigger: dlStatus is "finished".
+    effects:
+      - Stop polling.
+      - Enable download link.
+
+  - id: dl_status_failed
+    description: >
+      Indicates PDF generation failed. User can retry or cancel.
+    trigger: dlStatus is "failed".
+    effects:
+      - Stop polling.
+      - Show error state.
+      - Allow retry or cancel.
+
+inputs:
+  - id: download_request
+    type: "object with userId, reportId, cid"
+    source: Report action caller
+    required: true
+
+outputs:
+  - id: download_state
+    type: "dlStatus, isGenerating, publicUrl"
+    destination: PDF overlay and report actions
+    lifespan: until reset
+
+  - id: localStorage_state
+    type: "persisted download fields"
+    destination: Browser localStorage
+    lifespan: until reset clears keys
+
+evidence_refs:
+  - path: src/features/pdf/store/useDownloadStore.ts
+    snippet: |
+      export const useDownloadStore = create<DownloadState & DownloadActions>((set, get) => ({
+        dlStatus: getStorageValue(STORAGE_KEY_STATUS) || "",
+        isGenerating: getIsGeneratingFromStorage(),
+        pdfKey: getStorageValue(STORAGE_KEY_PDF_KEY),
+        cid: getStorageValue(STORAGE_KEY_CID),
+        publicUrl: getStorageValue(STORAGE_KEY_PUBLIC_URL),
+        currentReportId: getStorageValue(STORAGE_KEY_REPORT_ID),
+        setDlStatus: (status) => { set({ dlStatus: status }); setStorageValue(STORAGE_KEY_STATUS, status); },
+        setIsGenerating: (value) => { set({ isGenerating: value }); setStorageValue(STORAGE_KEY_IS_GENERATING, value.toString()); },
+      }));
+    covers:
+      - "state:idle"
+      - "state:waiting"
+      - "state:finished"
+      - "state:failed"
+      - "output:download_state"
+      - "output:localStorage_state"
+
+  - path: src/features/pdf/store/useDownloadStore.ts
+    snippet: |
+      startDownload: async ({ userId, reportId, cid, email }) => {
+        get().setIsGenerating(true);
+        get().setDlStatus("waiting");
+        get().setPdfKey(userId);
+        get().setCid(cid);
+        get().setCurrentReportId(reportId);
+        get().setPublicUrl("");
+        const response = await startPdfGeneration({ userId, reportId, email });
+        if (response.ok && response.data?.userId) return true;
+        else { get().setDlStatus("failed"); return false; }
+      },
+    covers:
+      - "transition:begin_download"
+      - "transition:api_rejected"
+      - "input:download_request"
+
+  - path: src/features/pdf/components/PdfGenerationOverlay.tsx
+    snippet: |
+      useEffect(() => {
+        if (!isGenerating || !pdfKey) return;
+        if (dlStatus === "finished" || dlStatus === "failed") return;
+        const poll = async () => {
+          const status = await getPdfStatus({ userId: pdfKey });
+          const statusData = status?.raw?.data;
+          if (statusData?.status === "finished" || statusData?.publicUrl) {
+            setDlStatus("finished");
+            setPublicUrl(statusData.publicUrl || "#");
+            return true;
+          }
+          if (statusData?.status === "failed") { setDlStatus("failed"); return true; }
+          return false;
+        };
+        const intervalId = setInterval(async () => {
+          attempts++;
+          if (attempts >= MAX_ATTEMPTS) { clearInterval(intervalId); setDlStatus("failed"); return; }
+          const shouldStop = await poll();
+          if (shouldStop) clearInterval(intervalId);
+        }, POLL_INTERVAL);
+        return () => clearInterval(intervalId);
+      }, [isGenerating, pdfKey, dlStatus]);
+    covers:
+      - "transition:polling_finished"
+      - "transition:polling_failed"
+      - "condition:dl_status_waiting"
+      - "condition:dl_status_finished"
+      - "condition:dl_status_failed"
+
+confidence: 0.96
+confidence_rationale: >
+  PDF download state machine, localStorage persistence, and polling logic
+  are directly evidenced in useDownloadStore.ts and PdfGenerationOverlay.tsx.
+  The state transitions and persistence mechanism are confirmed by the code.
+unresolved_questions:
+  - Exact POLL_INTERVAL and MAX_ATTEMPTS values.
+  - Whether publicUrl is permanent or expires.
+status: complete

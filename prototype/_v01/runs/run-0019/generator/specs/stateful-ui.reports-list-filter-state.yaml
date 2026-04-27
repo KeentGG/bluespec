@@ -1,0 +1,135 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.reports-list-filter-state
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.reports_list_filter_state
+    coverage: full
+    notes: >
+      Reports list filter state is managed via Zustand store with searchQuery,
+      sortId, and calcTypeFilter. Reset functionality restores defaults.
+      Filter values compose SWR query keys for data fetching.
+
+description: >
+  Manages report list filtering state through a Zustand store. The store
+  holds search query, sort ID, and calculator type filter values. Changes
+  to these values compose SWR query keys that trigger data refetching.
+  A reset function restores all filters to their default values.
+
+state_machine: null
+
+conditions:
+  - id: search_query_active
+    description: >
+      When searchQuery is non-empty, the reports list is filtered by name.
+      The query is debounced to prevent excessive API calls.
+    trigger: User types in search input.
+    guards:
+      - field: searchQuery
+        condition: searchQuery.length > 0.
+    then:
+      - Include search in SWR query key.
+      - Debounce API call.
+    else:
+      - Clear search filter from query.
+
+  - id: sort_id_active
+    description: >
+      When sortId differs from default, reports are sorted by the selected
+      field. Default is "updatedAt:desc".
+    trigger: User changes sort selection.
+    guards:
+      - field: sortId
+        condition: sortId != "updatedAt:desc".
+    then:
+      - Include sort in SWR query key.
+    else:
+      - Use default sort.
+
+  - id: calc_type_filter_active
+    description: >
+      When calcTypeFilter differs from "all", reports are filtered by
+      calculator type.
+    trigger: User changes calculator type filter.
+    guards:
+      - field: calcTypeFilter
+        condition: calcTypeFilter != "all".
+    then:
+      - Include calculator filter in SWR query key.
+    else:
+      - Show all calculator types.
+
+inputs:
+  - id: search_query
+    type: string
+    source: Search input field
+    required: false
+    validation:
+      default: ""
+
+  - id: sort_id
+    type: string
+    source: Sort dropdown
+    required: false
+    validation:
+      default: "updatedAt:desc"
+
+  - id: calc_type_filter
+    type: string
+    source: Calculator type filter
+    required: false
+    validation:
+      default: "all"
+
+outputs:
+  - id: filter_state
+    type: "Zustand state object"
+    destination: Reports list components
+    lifespan: in-memory until reset or page reload
+
+  - id: query_key
+    type: "array query key"
+    destination: SWR query hook
+    lifespan: per render cycle
+
+evidence_refs:
+  - path: src/features/reports/store/useReportsListStore.ts
+    snippet: |
+      export const useReportsListStore = create<ReportsListState>((set) => ({
+        searchQuery: "",
+        sortId: "updatedAt:desc",
+        calcTypeFilter: "all",
+        setSearchQuery: (query) => set({ searchQuery: query }),
+        setSortId: (sortId) => set({ sortId }),
+        setCalcTypeFilter: (filter) => set({ calcTypeFilter: filter }),
+        resetFilters: () => set({ searchQuery: "", sortId: "updatedAt:desc", calcTypeFilter: "all" }),
+      }));
+    covers:
+      - "condition:search_query_active"
+      - "condition:sort_id_active"
+      - "condition:calc_type_filter_active"
+      - "input:search_query"
+      - "input:sort_id"
+      - "input:calc_type_filter"
+      - "output:filter_state"
+
+  - path: src/features/reports/hooks/useReportsListQuery.ts
+    snippet: |
+      const queryKey = useMemo(
+        () => ["reports.list", userId, businessId, page, pageSize, search, sortBy, sortOrder, calculatorId],
+        [businessId, userId, page, pageSize, search, sortBy, sortOrder, calculatorId],
+      );
+    covers:
+      - "output:query_key"
+
+confidence: 0.95
+confidence_rationale: >
+  Filter store structure, default values, and query key composition are
+  directly evidenced in useReportsListStore.ts and useReportsListQuery.ts.
+  The reset functionality and filter activation conditions are confirmed.
+unresolved_questions:
+  - Exact debounce timing for search queries.
+  - Whether filters persist across page navigation.
+status: complete

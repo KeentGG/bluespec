@@ -1,0 +1,40 @@
+spec_id: routing.gate-navigation
+output_path: runs/run-0015/generator/specs/routing.gate-navigation.yaml
+discovered_behaviors:
+  - id: gate-edit-flow
+    description: Edit/resume existing report via gate system, validates query params, fetches report, maps progress route, redirects to calculator
+    priority: high
+    evidence_refs:
+      - src/shared/lib/routing/gate-edit-contract.js
+  - id: gate-new-flow
+    description: Create new report via gate system, validates query params and referrer origin, creates report, redirects to calculator
+    priority: high
+    evidence_refs:
+      - src/shared/lib/routing/gate-new-contract.js
+  - id: gate-route-resolution
+    description: Resolve calculator gate URLs from environment variables with fallback defaults
+    priority: medium
+    evidence_refs:
+      - src/shared/lib/routing/gate-finder.js
+  - id: gate-progress-route-mapping
+    description: Map calculator-specific routes to progress percentages for reports table
+    priority: medium
+    evidence_refs:
+      - src/shared/lib/routing/report-route-progress-contract.js
+source_files:
+  - src/shared/lib/routing/gate-edit-contract.js
+  - src/shared/lib/routing/gate-new-contract.js
+  - src/shared/lib/routing/gate-finder.js
+  - src/shared/lib/routing/report-route-progress-contract.js
+  - src/shared/lib/routing/queryValidators.js
+  - src/shared/lib/routing/initGuards.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - Gate system navigates between dashboard and 4 calculator tools (VE, DE, VGA, NP)
+  - Gate edit flow: validates target query param, fetches report, maps progress route, redirects
+  - Gate new flow: validates query params and referrer origin, creates report, redirects
+  - Calculator-specific route mapping for progress tracking
+  - One-shot execution guards prevent duplicate initialization
+  - Gate URLs resolved from environment variables with hardcoded defaults
+  - Progress percentages mapped per calculator type (VE: 5-100%, DE: 10-100%, etc.)

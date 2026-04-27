@@ -1,0 +1,775 @@
+id: company.list-management
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: company-list-fetching
+    coverage: full
+    notes: >
+      Company list fetched via SWR with query key composed of userId, debounced
+      search query, sortBy, and sortOrder. Endpoint is GET /businesses/user/:userId
+      with searchKey, sortBy, sortOrder as query params. Response normalized through
+      multi-key collection resolution (businesses, businessList, companies, items,
+      rows, results) with recursive data/payload unwrapping. SWR configured with
+      keepPreviousData=false, revalidateOnMount=true, shouldRetryOnError=false.
+      Query disabled when userId is absent.
+  - id: company-search-debounce
+    coverage: full
+    notes: >
+      300ms debounce on search input before sending to API. Debouncer created via
+      createCompanySearchDebouncer with configurable delay (default 300ms). Tracks
+      pending state by comparing trimmed searchQuery vs debouncedSearchQuery. Timer
+      cancelled on component unmount. Debouncer supports cancel, flush, and pending
+      introspection.
+  - id: company-logo-error-handling
+    coverage: full
+    notes: >
+      Per-business logo load failure tracking via logoLoadFailuresByBusinessId state
+      (Record<string, boolean>). On logo error, businessId is marked as failed with
+      idempotent guard (skip if already true). Failures reset on successful data
+      fetch. Failed business IDs passed to CompaniesTable for fallback UI rendering.
+
+description: >
+  Manages the company list page: fetching, searching, sorting, and error handling.
+  Company data is fetched via SWR from GET /businesses/user/:userId with server-side
+  search and sort. Search input is debounced at 300ms before triggering API calls.
+  Sort supports four options (A-Z, Z-A, Last Updated ascending/descending) with
+  updatedAt:desc as default. Logo load failures are tracked per business ID and
+  reset on each successful fetch. The list resolves into four visual states:
+  loading, ready, empty-search, or empty-dataset. A rollback gate check runs on
+  mount to redirect to v1 if a threshold is breached. URL entry parameters can
+  auto-open add or create-report modals.
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: Initial state before any data fetch or user interaction.
+    - id: loading
+      description: >
+        Data fetch in progress or search debounce pending. SWR isLoading=true
+        or searchQuery differs from debouncedSearchQuery.
+    - id: ready
+      description: >
+        Company list loaded with one or more businesses. Table is visible with
+        rows, sort controls, and search input.
+    - id: empty-search
+      description: >
+        Data loaded but no businesses match the current search query.
+        Shows "no results" message.
+    - id: empty-dataset
+      description: >
+        Data loaded but user has zero companies. Shows onboarding/empty state
+        with add company prompt.
+  transitions:
+    - id: fetch_initiated
+      from: idle
+      to: loading
+      trigger: Component mounts or SWR revalidates
+      guards:
+        - field: user_id
+          condition: Token contains valid non-empty _id string
+      effects:
+        - SWR issues GET /businesses/user/:userId with sort params
+    - id: data_received
+      from: loading
+      to: ready
+      trigger: SWR returns successful response with businesses array
+      guards:
+        - field: result_ok
+          condition: result.ok is true AND businesses array length > 0
+      effects:
+        - Set companyList state with normalized businesses
+        - Reset logoLoadFailuresByBusinessId to empty object
+        - Clear runtimeErrorMessage
+    - id: data_received_empty_search
+      from: loading
+      to: empty-search
+      trigger: SWR returns successful response with zero businesses and search active
+      guards:
+        - field: result_ok
+          condition: result.ok is true AND businesses array length === 0
+        - field: has_search
+          condition: debouncedSearchQuery is non-empty
+      effects:
+        - Set companyList to empty array
+        - Clear runtimeErrorMessage
+    - id: data_received_empty_dataset
+      from: loading
+      to: empty-dataset
+      trigger: SWR returns successful response with zero businesses and no search
+      guards:
+        - field: result_ok
+          condition: result.ok is true AND businesses array length === 0
+        - field: has_search
+          condition: debouncedSearchQuery is empty
+      effects:
+        - Set companyList to empty array
+        - Clear runtimeErrorMessage
+    - id: fetch_failed
+      from: loading
+      to: idle
+      trigger: SWR returns error response
+      guards:
+        - field: result_ok
+          condition: result.ok is false AND result.reason is not "aborted"
+      effects:
+        - Set companyList to empty array
+        - Set runtimeErrorMessage to result.message or "Unable to load companies."
+    - id: search_input_changed
+      from: ready
+      to: loading
+      trigger: User types in search input
+      effects:
+        - Update searchQuery state immediately
+        - Schedule debounced search (300ms)
+    - id: debounce_fired
+      from: loading
+      to: loading
+      trigger: 300ms debounce timer expires
+      effects:
+        - Update debouncedSearchQuery state
+        - SWR revalidates with new search key
+    - id: sort_changed
+      from: ready
+      to: loading
+      trigger: User selects different sort option
+      effects:
+        - Update sortBy and sortOrder state
+        - SWR revalidates with new sort params
+    - id: rollback_redirect
+      from: idle
+      to: idle
+      trigger: Rollback gate check on mount
+      guards:
+        - field: should_redirect
+          condition: resolveRollbackRouteContract returns shouldRedirect=true
+      effects:
+        - window.location.replace to rollback destination with base path
+
+conditions:
+  - id: rollback-gate-check
+    description: >
+      On mount, checks rollback gate status via resolveRollbackRouteContract.
+      If threshold is breached, redirects to v1 fallback route using
+      window.location.replace (hard navigation, no history entry).
+    trigger: Component mount (useEffect with empty deps)
+    guards:
+      - field: should_redirect
+        condition: rollbackRoute.shouldRedirect is true
+      - field: destination
+        condition: rollbackRoute.destination is non-empty string
+      - field: not_already_on_destination
+        condition: window.location.pathname !== rollbackDestination
+    then:
+      - Compute rollbackDestination with withBasePath()
+      - Execute window.location.replace(rollbackDestination)
+    else:
+      - No redirect, proceed with normal page load
+
+  - id: search-debounce-tracking
+    description: >
+      Tracks whether a search debounce is pending by comparing trimmed
+      searchQuery against trimmed debouncedSearchQuery. When they differ,
+      isLoading includes the debouncing flag to show loading state.
+    trigger: User types in search input
+    guards:
+      - field: search_query_trimmed
+        condition: searchQuery.trim() !== debouncedSearchQuery.trim()
+    then:
+      - isDebouncingSearch becomes true
+      - isLoading becomes true (shows skeleton/spinner)
+    else:
+      - isDebouncingSearch becomes false
+      - isLoading depends only on SWR isLoading
+
+  - id: logo-error-idempotent
+    description: >
+      Logo load errors are tracked per business ID with idempotent guard.
+      If a business ID is already marked as failed, the state update is skipped
+      to prevent unnecessary re-renders.
+    trigger: onCompanyLogoError callback fires from CompaniesTable
+    guards:
+      - field: business_id
+        condition: businessId is non-empty string after trim
+      - field: already_failed
+        condition: logoLoadFailuresByBusinessId[businessId] is not already true
+    then:
+      - Set logoLoadFailuresByBusinessId[businessId] = true
+    else:
+      - Skip state update (return current state reference)
+
+  - id: logo-failures-reset-on-fetch
+    description: >
+      When a successful data fetch completes, all logo load failures are
+      reset to an empty object. This ensures stale failure tracking from
+      previous fetches does not persist.
+    trigger: companyListQuery.data changes and result.ok is true
+    guards:
+      - field: result_ok
+        condition: result.ok is true
+    then:
+      - setLogoLoadFailuresByBusinessId(Object.create(null))
+    else:
+      - No reset (error or abort case)
+
+  - id: url-entry-auto-open
+    description: >
+      URL entry parameters can trigger auto-opening of modals (add company
+      or create report). Handled by useCompanyUrlEntry hook which receives
+      loading/data state and callback functions.
+    trigger: URL contains query parameters for modal auto-open
+    guards:
+      - field: has_data
+        condition: companyListQuery.data is truthy (data loaded)
+      - field: not_loading
+        condition: isLoading is false
+    then:
+      - Call onAutoOpenAddModal or onAutoOpenCreateReport(calculatorId)
+      - Clear URL params via clearUrlParams()
+    else:
+      - Wait for data to load before processing URL params
+
+inputs:
+  - id: search_input
+    type: string
+    source: user search text input field
+    required: false
+    validation:
+      min_length: "0 (empty string allowed)"
+      normalization: "trimmed before comparison, normalized via normalizeOptionalString"
+
+  - id: sort_selection
+    type: "string in format 'sortBy:sortOrder' (e.g. 'name:asc', 'updatedAt:desc')"
+    source: SelectFilter dropdown component
+    required: false
+    validation:
+      allowed_values: ["name:asc", "name:desc", "updatedAt:asc", "updatedAt:desc"]
+      fallback: "updatedAt:desc (COMPANY_LIST_DEFAULT_SORT)"
+
+  - id: auth_token
+    type: "token object with _id and accessToken fields"
+    source: getToken() from auth tokenService
+    required: true
+    validation:
+      user_id: "token._id must be non-empty string for query to be enabled"
+
+  - id: rollback_env
+    type: "process.env object"
+    source: Next.js environment variables
+    required: false
+    validation:
+      checked_by: "resolveRollbackRouteContract"
+
+  - id: browser_storage
+    type: "localStorage wrapper via resolveBrowserStorage()"
+    source: browser localStorage
+    required: false
+    validation:
+      used_for: "rollback gate state persistence"
+
+outputs:
+  - id: company_list
+    type: "readonly array of CompanyRecord objects"
+    destination: "React state (companyList), passed to CompaniesTable"
+    lifespan: "session (reset on new fetch or component unmount)"
+
+  - id: list_state
+    type: "resolved view model with rows, counts, ui flags"
+    destination: "CompaniesTable component props"
+    lifespan: "derived from companyList + search + sort + loading state"
+    fields:
+      rows: "normalized company rows with businessId, name, reportCount, logoUrl, navigation"
+      counts: "{ total, visible }"
+      ui: "{ showSkeleton, showTable, showNoResults, showOnboardingEmpty }"
+
+  - id: logo_load_failures
+    type: "Record<string, boolean> mapping businessId to failure status"
+    destination: "CompaniesTable component for fallback avatar rendering"
+    lifespan: "per-fetch (reset on successful data load)"
+
+  - id: runtime_error_message
+    type: "string error message"
+    destination: "CompaniesTable component for error display"
+    lifespan: "per-fetch (cleared on successful data load)"
+
+  - id: sort_options
+    type: "frozen array of sort option objects"
+    destination: "SelectFilter component for sort dropdown"
+    lifespan: "static (module-level constant)"
+
+  - id: create_report_cta
+    type: "{ disabled: boolean } contract"
+    destination: "New Report button disabled state"
+    lifespan: "derived from listState.counts.total"
+
+  - id: api_request
+    type: "GET /businesses/user/:userId with query params"
+    destination: "Backend API via apiClient.get()"
+    lifespan: "per-fetch (SWR managed)"
+    params:
+      searchKey: "debounced search query or null"
+      sortBy: "name or updatedAt"
+      sortOrder: "asc or desc"
+
+evidence_refs:
+  - path: src/features/company/hooks/useCompaniesPage.ts
+    snippet: |
+      const companyListQuery = useCompanyListQuery({
+        debouncedSearchQuery,
+        sortBy,
+        sortOrder,
+      });
+
+      const refetchList = useCallback(async () => {
+        await companyListQuery.revalidate();
+      }, [companyListQuery]);
+
+      useEffect(() => {
+        const result = companyListQuery.data;
+        if (!result) {
+          return;
+        }
+
+        if (result.ok) {
+          const businesses = Array.isArray(result.businesses)
+            ? (result.businesses as readonly CompanyRecord[])
+            : EMPTY_COMPANY_LIST;
+
+          setCompanyList(businesses);
+          setLogoLoadFailuresByBusinessId(Object.create(null));
+          setRuntimeErrorMessage("");
+          return;
+        }
+
+        setCompanyList(EMPTY_COMPANY_LIST);
+        if (result.reason !== "aborted") {
+          setRuntimeErrorMessage(result.message || "Unable to load companies.");
+        }
+      }, [companyListQuery.data]);
+    covers:
+      - "transition:data_received"
+      - "transition:fetch_failed"
+      - "condition:logo-failures-reset-on-fetch"
+      - "output:company_list"
+      - "output:runtime_error_message"
+    line_range:
+      start: 128
+      end: 160
+
+  - path: src/features/company/hooks/useCompaniesPage.ts
+    snippet: |
+      const debouncedSearch = useMemo(
+        () =>
+          createCompanySearchDebouncer(
+            (nextSearchQuery) => {
+              setDebouncedSearchQuery(nextSearchQuery);
+            },
+            {
+              delayMs: COMPANY_LIST_DEBOUNCE_MS,
+            },
+          ),
+        [],
+      );
+
+      useEffect(
+        () => () => {
+          debouncedSearch.cancel();
+        },
+        [debouncedSearch],
+      );
+    covers:
+      - "transition:debounce_fired"
+      - "condition:search-debounce-tracking"
+      - "input:search_input"
+    line_range:
+      start: 91
+      end: 110
+
+  - path: src/features/company/hooks/useCompaniesPage.ts
+    snippet: |
+      const handleSearchChange = useCallback(
+        (event: React.ChangeEvent<HTMLInputElement>) => {
+          const nextSearchQuery = event.target.value ?? "";
+          setSearchQuery(nextSearchQuery);
+          debouncedSearch(nextSearchQuery);
+        },
+        [debouncedSearch],
+      );
+
+      const handleSortChange = useCallback((value: string) => {
+        const nextSort = parseSortControlValue(value);
+        setSortBy(nextSort.sortBy);
+        setSortOrder(nextSort.sortOrder);
+      }, []);
+    covers:
+      - "transition:search_input_changed"
+      - "transition:sort_changed"
+      - "input:search_input"
+      - "input:sort_selection"
+    line_range:
+      start: 199
+      end: 213
+
+  - path: src/features/company/hooks/useCompaniesPage.ts
+    snippet: |
+      const handleCompanyLogoError = useCallback((businessId: string) => {
+        if (typeof businessId !== "string" || businessId.trim().length === 0) {
+          return;
+        }
+
+        setLogoLoadFailuresByBusinessId((current) => {
+          if (current[businessId] === true) {
+            return current;
+          }
+          return { ...current, [businessId]: true };
+        });
+      }, []);
+    covers:
+      - "condition:logo-error-idempotent"
+      - "output:logo_load_failures"
+    line_range:
+      start: 225
+      end: 236
+
+  - path: src/features/company/hooks/useCompaniesPage.ts
+    snippet: |
+      useEffect(() => {
+        const rollbackRoute = resolveRollbackRouteContract({
+          env: process.env,
+          storage: resolveBrowserStorage(),
+          path: "/companies",
+        });
+
+        if (rollbackRoute.shouldRedirect && rollbackRoute.destination) {
+          const rollbackDestination = withBasePath(rollbackRoute.destination);
+          if (window.location.pathname !== rollbackDestination) {
+            window.location.replace(rollbackDestination);
+          }
+        }
+      }, []);
+    covers:
+      - "condition:rollback-gate-check"
+      - "transition:rollback_redirect"
+    line_range:
+      start: 112
+      end: 126
+
+  - path: src/features/company/hooks/useCompanyListQuery.ts
+    snippet: |
+      export function useCompanyListQuery(options: any = {}) {
+        const { debouncedSearchQuery = "", sortBy = "updatedAt", sortOrder = "desc", enabled = true } = options;
+        const token = getToken();
+        const userId = typeof token?._id === "string" && token._id.length > 0 ? token._id : null;
+        const isEnabled = enabled && typeof userId === "string" && userId.length > 0;
+
+        const queryKey = useMemo(
+          () => ["companies.list", userId, debouncedSearchQuery, sortBy, sortOrder],
+          [debouncedSearchQuery, sortBy, sortOrder, userId],
+        );
+
+        const swrQuery = useSWR(
+          isEnabled ? queryKey : null,
+          () =>
+            fetchCompanyListRuntime({
+              debouncedSearchQuery,
+              sortBy,
+              sortOrder,
+            }),
+          {
+            keepPreviousData: false,
+            revalidateOnMount: true,
+            shouldRetryOnError: false,
+          },
+        );
+
+        return {
+          ...swrQuery,
+          revalidate: () => swrQuery.mutate(),
+        };
+      }
+    covers:
+      - "transition:fetch_initiated"
+      - "input:auth_token"
+      - "output:api_request"
+    line_range:
+      start: 1
+      end: 39
+
+  - path: src/features/company/api/list-service.js
+    snippet: |
+      export async function fetchCompanyListRuntime(options = {}) {
+        const fetchImpl = typeof options.fetchImpl === "function" ? options.fetchImpl : globalThis.fetch;
+        // ...
+        const token = isPlainObject(options.token) ? options.token : getToken(options.tokenOptions ?? {});
+        const request = resolveCompanyListRequest({
+          searchQuery: options.searchQuery,
+          debouncedSearchQuery: options.debouncedSearchQuery,
+          sortBy: options.sortBy,
+          sortOrder: options.sortOrder,
+        });
+        // ...
+        const response = await apiClient.get({
+          path: endpoint.endpoint,
+          query: {
+            searchKey: request.searchKey ?? undefined,
+            sortBy: request.sortBy,
+            sortOrder: request.sortOrder,
+          },
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+          signal: options.signal,
+        });
+      }
+    covers:
+      - "output:api_request"
+      - "input:auth_token"
+    line_range:
+      start: 239
+      end: 289
+
+  - path: src/features/company/api/list-service.js
+    snippet: |
+      const COMPANY_LIST_COLLECTION_KEYS = Object.freeze([
+        "businesses",
+        "businessList",
+        "companies",
+        "items",
+        "rows",
+        "results",
+      ]);
+
+      function resolveBusinessCollection(candidate, depth = 0) {
+        if (Array.isArray(candidate)) {
+          return candidate;
+        }
+
+        if (!isPlainObject(candidate) || depth > 4) {
+          return null;
+        }
+
+        for (const key of COMPANY_LIST_COLLECTION_KEYS) {
+          if (Array.isArray(candidate[key])) {
+            return candidate[key];
+          }
+        }
+
+        if (Object.prototype.hasOwnProperty.call(candidate, "data")) {
+          const nested = resolveBusinessCollection(candidate.data, depth + 1);
+          if (nested) {
+            return nested;
+          }
+        }
+
+        if (Object.prototype.hasOwnProperty.call(candidate, "payload")) {
+          const nested = resolveBusinessCollection(candidate.payload, depth + 1);
+          if (nested) {
+            return nested;
+          }
+        }
+
+        return null;
+      }
+    covers:
+      - "output:company_list"
+      - "transition:data_received"
+    line_range:
+      start: 27
+      end: 98
+
+  - path: src/features/company/contracts/list-contract.js
+    snippet: |
+      export const COMPANY_LIST_DEBOUNCE_MS = 300;
+
+      export const COMPANY_LIST_SORT_OPTIONS = Object.freeze([
+        Object.freeze({
+          id: "name:asc",
+          label: "A-Z",
+          sortBy: COMPANY_LIST_SORT_BY.NAME,
+          sortOrder: COMPANY_LIST_SORT_ORDER.ASC,
+        }),
+        Object.freeze({
+          id: "name:desc",
+          label: "Z-A",
+          sortBy: COMPANY_LIST_SORT_BY.NAME,
+          sortOrder: COMPANY_LIST_SORT_ORDER.DESC,
+        }),
+        Object.freeze({
+          id: "updatedAt:asc",
+          label: "Last Updated ↑",
+          sortBy: COMPANY_LIST_SORT_BY.UPDATED_AT,
+          sortOrder: COMPANY_LIST_SORT_ORDER.ASC,
+        }),
+        Object.freeze({
+          id: "updatedAt:desc",
+          label: "Last Updated ↓",
+          sortBy: COMPANY_LIST_SORT_BY.UPDATED_AT,
+          sortOrder: COMPANY_LIST_SORT_ORDER.DESC,
+        }),
+      ]);
+    covers:
+      - "input:sort_selection"
+      - "condition:search-debounce-tracking"
+    line_range:
+      start: 17
+      end: 63
+
+  - path: src/features/company/contracts/list-contract.js
+    snippet: |
+      function toListStateId({ isLoading, hasRows, hasSearchQuery }) {
+        if (isLoading) {
+          return "loading";
+        }
+
+        if (hasRows) {
+          return "ready";
+        }
+
+        return hasSearchQuery ? "empty-search" : "empty-dataset";
+      }
+
+      export function resolveCompanyListContract(options = {}) {
+        const isLoading = options.isLoading === true;
+        // ...
+        const state = toListStateId({
+          isLoading,
+          hasRows: visibleRows.length > 0,
+          hasSearchQuery: request.searchKey !== null,
+        });
+
+        return {
+          rows: visibleRows,
+          counts: { total: normalizedRows.length, visible: visibleRows.length },
+          ui: {
+            showSkeleton: state === "loading",
+            showTable: state === "ready",
+            showNoResults: state === "empty-search",
+            showOnboardingEmpty: state === "empty-dataset",
+          },
+        };
+      }
+    covers:
+      - "state:loading"
+      - "state:ready"
+      - "state:empty-search"
+      - "state:empty-dataset"
+      - "output:list_state"
+    line_range:
+      start: 191
+      end: 288
+
+  - path: src/features/company/contracts/list-contract.js
+    snippet: |
+      export function createCompanySearchDebouncer(onDebouncedSearch, options = {}) {
+        if (typeof onDebouncedSearch !== "function") {
+          throw new TypeError("onDebouncedSearch must be a function.");
+        }
+
+        const delayMs = normalizeDebounceDelay(options.delayMs);
+        const schedule =
+          typeof options.schedule === "function"
+            ? options.schedule
+            : (callback, delay) => setTimeout(callback, delay);
+        const cancelSchedule =
+          typeof options.cancelSchedule === "function"
+            ? options.cancelSchedule
+            : (timerId) => clearTimeout(timerId);
+
+        let timerId = null;
+        let latestSearchQuery = "";
+
+        function debounceSearch(nextSearchQuery) {
+          latestSearchQuery = normalizeSearchQuery(nextSearchQuery);
+          clearPendingTimer();
+          timerId = schedule(() => {
+            emitLatestSearchQuery();
+          }, delayMs);
+          return latestSearchQuery;
+        }
+
+        debounceSearch.cancel = () => {
+          clearPendingTimer();
+          return latestSearchQuery;
+        };
+        debounceSearch.flush = () => {
+          if (timerId === null) {
+            return null;
+          }
+          clearPendingTimer();
+          return emitLatestSearchQuery();
+        };
+
+        return debounceSearch;
+      }
+    covers:
+      - "transition:debounce_fired"
+      - "condition:search-debounce-tracking"
+      - "input:search_input"
+    line_range:
+      start: 292
+      end: 350
+
+  - path: src/features/company/components/CompaniesPageClient.tsx
+    snippet: |
+      const page = useCompaniesPage({
+        onAutoOpenAddModal: () => setPendingAction({ type: "open_add" }),
+        onAutoOpenCreateReport: (calculatorId) =>
+          setPendingAction({ type: "open_create_report_from_url", calculatorId }),
+      });
+
+      const [pendingAction, setPendingAction] = useState<PendingAction>(null);
+      const clearPendingAction = useCallback(() => setPendingAction(null), []);
+    covers:
+      - "condition:url-entry-auto-open"
+      - "output:company_list"
+    line_range:
+      start: 22
+      end: 32
+
+  - path: src/features/company/components/CompaniesPageClient.tsx
+    snippet: |
+      <CompaniesTable
+        listState={page.listState}
+        searchQuery={page.searchQuery}
+        runtimeErrorMessage={page.runtimeErrorMessage}
+        logoLoadFailuresByBusinessId={page.logoLoadFailuresByBusinessId}
+        onOpenAddModal={() => setPendingAction({ type: "open_add" })}
+        onRowNavigation={page.handleRowNavigation}
+        onRowActionClick={handleRowActionClick}
+        onCompanyLogoError={page.handleCompanyLogoError}
+      />
+    covers:
+      - "output:list_state"
+      - "output:logo_load_failures"
+      - "output:runtime_error_message"
+    line_range:
+      start: 134
+      end: 143
+
+confidence: 0.88
+confidence_rationale: >
+  All three discovered behaviors are fully evidenced across 5 source files with
+  direct code snippets. SWR-based fetching confirmed in useCompanyListQuery.ts
+  with query key composition and SWR options. Debounce mechanism confirmed in
+  useCompaniesPage.ts and list-contract.js with 300ms delay, timer management,
+  and cancel/flush support. Logo error tracking confirmed with idempotent guard
+  and reset-on-fetch behavior. List state machine (loading/ready/empty-search/
+  empty-dataset) confirmed in list-contract.js toListStateId. Rollback gate
+  check confirmed in useCompaniesPage.ts mount effect. API contract confirmed in
+  list-service.js with multi-key collection resolution and endpoint construction.
+  Deducted 0.12 because: (1) the actual CompaniesTable and CompanyModals
+  component internals are not in scope (only their props), (2) the
+  useCompanyUrlEntry hook implementation is not in these files, (3) the
+  resolveRollbackRouteContract and resolveBrowserStorage implementations are
+  external, (4) the fetchCompanyListRuntime error handling paths reference
+  apiClient internals not fully visible here.
+
+unresolved_questions:
+  - "What are the exact conditions in resolveRollbackRouteContract that trigger a redirect? The implementation is in shared/lib/qfm which is not in scope."
+  - "How does useCompanyUrlEntry determine which modal to auto-open from URL params? The hook implementation is not in these files."
+  - "What is the exact shape of the CompaniesTable component's internal rendering logic for logo fallback? The component receives logoLoadFailuresByBusinessId but its fallback UI is not visible here."
+  - "What happens when SWR revalidation fails silently (shouldRetryOnError=false)? Does the previous data persist or is the list cleared?"
+  - "Is there any client-side sorting, or is sorting exclusively server-side? The list-contract normalizes sort params but the API call includes sortBy/sortOrder as query params suggesting server-side."
+
+status: complete

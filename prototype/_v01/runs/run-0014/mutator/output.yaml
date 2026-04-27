@@ -1,0 +1,101 @@
+run_id: run-0014
+mutator: mutator-agent
+status: completed
+provider: local
+
+proposed_change:
+  type: rubric_mutation
+  target_step: null
+  current: >
+    rubric v002 with 5 active criteria (coverage_core_behavior, completeness_inputs_outputs,
+    consistency_cross_refs, golden_set_recall, conditional_flow_documentation).
+    golden_set_recall weight is 1.2. No criteria exist for UI gate pattern precision,
+    negative condition documentation, evidence ref existence, or backend enforcement.
+  proposed: >
+    rubric v003 adding four new criteria to active_criteria:
+    ui_gate_pattern_precision, negative_condition_documentation,
+    evidence_ref_existence, backend_enforcement_documentation.
+    Reduce golden_set_recall weight from 1.2 to 1.0 to prevent over-penalization
+    when golden behaviors are imprecise or stale.
+  expected_improvement: >
+    download.button-visibility recall rises from 0.65 to ~0.90
+    (interactivity toggle correctly scored instead of penalized for visibility mismatch).
+    auth-conditional-redirect recall rises from 0.55 to ~0.85
+    (absent condition + stale ref correctly handled).
+    Overall score rises from 0.79 to ~0.88.
+  risk: >
+    Adding four new criteria increases rubric complexity and scoring subjectivity.
+    Risk of over-crediting specs that genuinely miss behaviors by attributing them
+    to "accurate negative findings". Weight reduction on golden_set_recall may
+    under-penalize genuine omissions if the new criteria are not applied rigorously.
+  rationale: >
+    All three recall misses are cases where the spec accurately documents actual
+    code behavior, but the rubric penalizes it for not matching imprecise, stale,
+    or non-existent golden behavior. The generator correctly followed formula
+    instructions (analyze step explicitly preserves hidden-vs-disabled differences
+    and flags partial matches). lessons/failed.jsonl records that a prompt_tweak
+    for rubric_gap_failure in run-0010 FAILED, while lessons/learned.jsonl records
+    that a rubric_candidate_proposal for the same failure_type in run-0010 PASSED.
+    Therefore, rubric_mutation is the justified tier rather than repeating a
+    failed lower-tier approach.
+
+insanity_check:
+  method_already_failed: true
+  failed_runs:
+    - run-0010
+  learned_runs:
+    - run-0010
+
+rubric_candidate:
+  id: rubric-v003-enriched
+  parent_version: v002
+  active_criteria:
+    - coverage_core_behavior
+    - completeness_inputs_outputs
+    - consistency_cross_refs
+    - golden_set_recall
+    - conditional_flow_documentation
+    - ui_gate_pattern_precision
+    - negative_condition_documentation
+    - evidence_ref_existence
+    - backend_enforcement_documentation
+  weights:
+    coverage_core_behavior: 1
+    completeness_inputs_outputs: 1
+    consistency_cross_refs: 0.8
+    golden_set_recall: 1.0
+    conditional_flow_documentation: 0.81
+    ui_gate_pattern_precision: 0.9
+    negative_condition_documentation: 0.9
+    evidence_ref_existence: 0.8
+    backend_enforcement_documentation: 0.7
+  new_criteria_descriptions:
+    ui_gate_pattern_precision: >
+      Distinguish between "visibility" (render/unmount) and "interactivity"
+      (disabled/enabled) as separate UI gate patterns. Credit specs that correctly
+      identify the actual gate pattern in code rather than penalizing them for
+      not matching imprecise golden behavior wording.
+    negative_condition_documentation: >
+      Credit specs for explicitly documenting the absence of a claimed condition
+      when the condition does not exist in the evidenced code, rather than
+      penalizing honest negative findings as recall misses.
+    evidence_ref_existence: >
+      Verify golden-set evidence_refs exist in the codebase before scoring recall
+      against them. Discount or flag recall penalties when golden-set refs are stale
+      or missing.
+    backend_enforcement_documentation: >
+      When a frontend gate is purely cosmetic (e.g., disabled button), require
+      documentation of whether server-side enforcement exists. Credit specs that
+      explicitly note the absence or presence of backend validation.
+
+confidence: 0.88
+confidence_rationale: >
+  Lessons from run-0010 clearly show prompt_tweak fails for rubric_gap_failure
+  while rubric_candidate_proposal succeeds. The evaluator's shadow-findings
+  explicitly list four rubric gap candidates. All three recall misses align
+  with these gaps. Minor uncertainty about whether four new criteria at once
+  is too aggressive, and about the optimal weight values for the new criteria.
+  The generator's strong precision (0.92) and consistency (0.92) support that
+  the core issue is scoring, not generation.
+
+mutator_timestamp: 2026-04-23T00:00:00Z

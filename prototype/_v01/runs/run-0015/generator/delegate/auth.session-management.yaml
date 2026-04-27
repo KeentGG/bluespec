@@ -1,0 +1,47 @@
+spec_id: auth.session-management
+output_path: runs/run-0015/generator/specs/auth.session-management.yaml
+discovered_behaviors:
+  - id: auth-session-lifecycle
+    description: JWT access tokens stored in memory (NOT localStorage), refresh token in HTTP-only cookie, user profile in regular cookie for middleware SSR access
+    priority: high
+    evidence_refs:
+      - src/features/auth/api/authMemorySession.js
+      - src/features/auth/api/tokenService.js
+  - id: auth-cross-tab-coordination
+    description: Cross-tab login/logout synchronization via BroadcastChannel with localStorage fallback for Safari compatibility
+    priority: high
+    evidence_refs:
+      - src/features/auth/lib/crossTab.js
+      - src/features/auth/lib/authBroadcast.js
+  - id: auth-token-refresh-coordination
+    description: Cross-tab token refresh coordination using localStorage-based mutex to prevent multiple tabs from refreshing simultaneously
+    priority: high
+    evidence_refs:
+      - src/features/auth/api/tokenRefresher.js
+  - id: auth-csrf-protection
+    description: CSRF token stored in regular cookie, injected as x-csrf-token header for state-changing requests, proactive refresh when missing
+    priority: medium
+    evidence_refs:
+      - src/features/auth/api/csrfHelper.js
+      - src/shared/lib/api/apiClient.ts
+source_files:
+  - src/features/auth/api/authMemorySession.js
+  - src/features/auth/api/tokenService.js
+  - src/features/auth/api/tokenRefresher.js
+  - src/features/auth/api/csrfHelper.js
+  - src/features/auth/lib/crossTab.js
+  - src/features/auth/lib/authBroadcast.js
+  - src/shared/lib/api/apiClient.ts
+  - src/shared/components/AuthSyncBootstrap.tsx
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - JWT access tokens stored in JavaScript memory variable (authMemorySession.js), NOT localStorage
+  - Refresh token stored in HTTP-only cookie set by backend (cannot be read by JS)
+  - User profile stored in regular cookie for middleware SSR access
+  - CSRF token stored in regular cookie, injected as x-csrf-token header
+  - Cross-tab coordination via BroadcastChannel with localStorage fallback
+  - Token refresh uses localStorage-based mutex to prevent multiple tabs from refreshing
+  - AuthSyncBootstrap component initializes cross-tab listeners on mount
+  - Token refresh has 10s timeout and broadcasts result to other tabs
+  - Login broadcasts to other tabs, logout broadcasts and redirects protected routes

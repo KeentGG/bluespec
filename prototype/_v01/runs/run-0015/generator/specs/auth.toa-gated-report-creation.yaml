@@ -1,0 +1,571 @@
+id: auth.toa-gated-report-creation
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: toa-status-check
+    coverage: full
+    notes: >
+      The TOA status check is fully documented. resolveToaStatus in toa-contract.js
+      checks userData.agreedToa === true. fetchUserData in user-service.js normalizes
+      the API response and coerces agreedToa to boolean. checkUserToaStatus wraps
+      fetchUserData and returns a hasAgreed boolean. useReportCreation.ts calls
+      fetchUserData and checks the agreedToa field directly.
+  - id: toa-redirect-flow
+    coverage: full
+    notes: >
+      The redirect flow is fully documented. When TOA is not accepted,
+      useReportCreation shows a toast message, builds an introduction URL via
+      buildIntroductionUrl (from gate-finder.js), and redirects via
+      window.location.replace after a 2-second delay. The introduction URL
+      format is {basePath}/introduction/?businessId=X&reportname=Y.
+  - id: toa-deferred-report-creation
+    coverage: full
+    notes: >
+      Deferred report creation is fully documented. useReportCreation.ts returns
+      early with {success: true, redirected: true, reason: "toa_redirect"} when
+      TOA is not accepted, never calling the createReport API. The calculator
+      handles report creation post-TOA-acceptance, but the calculator-side
+      gate-new flow is not in the manifest's source files.
+
+description: >
+  When a user attempts to create a report on an account that has not yet
+  accepted the Terms of Agreement (TOA), the dashboard checks the user's
+  TOA status from their profile, defers report persistence by not calling
+  the report creation API, and redirects the user to the calculator's
+  introduction page with the selected businessId and reportName as query
+  parameters. The dashboard never persists the report until TOA is accepted;
+  the calculator handles report creation after the user completes the TOA
+  introduction and commitment flow.
+
+state_machine:
+  initial: toa_pending
+  states:
+    - id: toa_pending
+      description: User has not accepted Terms of Agreement; dashboard will redirect to introduction page
+    - id: report_creation_deferred
+      description: Dashboard has shown toast and scheduled redirect to introduction page; no report API call made
+    - id: redirected_to_introduction
+      description: Browser has navigated to calculator introduction page with businessId and reportname query params
+    - id: toa_accepted
+      description: User has completed TOA introduction and commitment flow on the calculator
+    - id: report_created
+      description: Calculator has created the report after TOA acceptance
+  transitions:
+    - id: initiate_report_creation
+      from: toa_pending
+      to: report_creation_deferred
+      trigger: User clicks Create Report with businessId, calculatorId, and reportName filled in
+      guards:
+        - field: userData.agreedToa
+          condition: "equals false (strict equality: userData.agreedToa === true evaluates to false)"
+      effects:
+        - "Toast shown: 'Create page in progress. We will be redirecting you to our Introduction and Our Commitment page'"
+        - "Introduction URL built via buildIntroductionUrl({calculatorId, businessId, reportName, env})"
+        - "window.location.replace scheduled after 2000ms delay"
+        - "No report API call is made"
+    - id: redirect_to_introduction
+      from: report_creation_deferred
+      to: redirected_to_introduction
+      trigger: setTimeout fires after 2000ms
+      guards:
+        - field: introUrlResult.ok
+          condition: "true — buildIntroductionUrl returned ok: true"
+      effects:
+        - "Browser navigates to introduction URL"
+    - id: accept_toa
+      from: redirected_to_introduction
+      to: toa_accepted
+      trigger: User completes TOA introduction and commitment flow on calculator
+      guards: []
+      effects:
+        - "Calculator records TOA acceptance"
+    - id: calculator_creates_report
+      from: toa_accepted
+      to: report_created
+      trigger: Calculator gate-new initialization runs after TOA acceptance
+      guards:
+        - field: gateQuery
+          condition: "valid target, source, name query params present"
+      effects:
+        - "Calculator creates report via createReport callback"
+        - "User redirected to questionnaire or next step"
+
+conditions:
+  - id: toa_gate_check
+    description: Dashboard checks whether the user has agreed to TOA before allowing report creation
+    trigger: User submits Create Report form (handleCreateReport called)
+    guards:
+      - field: userData.agreedToa
+        condition: "userData.agreedToa === true (strict boolean equality)"
+    then:
+      - "Proceed to create report via createReport API"
+      - "Navigate to report gate after 2s delay"
+    else:
+      - "Show toast.success with redirect message"
+      - "Build introduction URL via buildIntroductionUrl"
+      - "Redirect browser via window.location.replace after 2s delay"
+      - "Return {success: true, redirected: true, reason: 'toa_redirect'}"
+
+  - id: introduction_url_construction
+    description: Builds the calculator introduction page URL with businessId and reportname query parameters
+    trigger: TOA gate check fails (hasAgreedToa is false)
+    guards:
+      - field: calculatorId
+        condition: "must map to a known calculator (1=VE, 2=DE, 3=VGA, 4=NP)"
+      - field: businessId
+        condition: "non-empty string after normalization"
+    then:
+      - "Resolve gate path via resolveGatePathForCalculator"
+      - "Strip /gate suffix from gate path"
+      - "Append /introduction/?businessId=X&reportname=Y"
+    else:
+      - "Return {ok: false, url: null, reason: error_code}"
+      - "Show toast.error: 'Unable to redirect to introduction page. Please try again.'"
+
+inputs:
+  - id: businessId
+    type: string
+    source: user company selection in dashboard
+    required: true
+    validation:
+      non_empty: "businessId must be a non-empty string after normalization"
+  - id: reportName
+    type: string
+    source: user input in dashboard form
+    required: true
+    validation:
+      non_empty: "name must be non-empty after trim (checked via !name.trim())"
+  - id: calculatorId
+    type: string
+    source: user calculator selection in dashboard
+    required: true
+    validation:
+      known_calculator: "must map to a supported calculator (1=VE, 2=DE, 3=VGA, 4=NP)"
+  - id: userToaStatus
+    type: boolean
+    source: user profile API via fetchUserData
+    required: true
+    validation:
+      exact_true: "agreedToa must be exactly true (strict === true comparison)"
+
+outputs:
+  - id: introduction_redirect_url
+    type: URL string
+    destination: browser location.replace
+    lifespan: immediate
+  - id: created_report
+    type: report object
+    destination: calculator state / next route
+    lifespan: session
+  - id: toast_notification
+    type: UI message
+    destination: react-toastify
+    lifespan: immediate
+  - id: toa_redirect_result
+    type: "{success: boolean, redirected: boolean, reason: string}"
+    destination: useReportCreation hook return value
+    lifespan: immediate
+
+evidence_refs:
+  - path: src/features/auth/contracts/toa-contract.js
+    snippet: |
+      export function resolveToaStatus(userData) {
+        if (!isPlainObject(userData)) {
+          return {
+            hasAgreedToa: false,
+            isValid: false,
+            reason: "invalid_user_data",
+          };
+        }
+
+        return {
+          hasAgreedToa: userData.agreedToa === true,
+          isValid: true,
+          reason: null,
+        };
+      }
+    covers:
+      - condition: toa_gate_check
+      - input: userToaStatus
+    line_range:
+      start: 38
+      end: 52
+
+  - path: src/features/auth/contracts/toa-contract.js
+    snippet: |
+      export function buildIntroductionUrl(options = {}) {
+        const { calculatorId, businessId, reportName, env } = options;
+
+        const gatePath = resolveGatePathForCalculator(calculatorId, env);
+
+        if (!gatePath) {
+          return {
+            ok: false,
+            url: null,
+            reason: "missing_gate_path",
+          };
+        }
+
+        const basePath = removeGateFromUrl(gatePath);
+
+        if (!basePath) {
+          return {
+            ok: false,
+            url: null,
+            reason: "invalid_gate_path",
+          };
+        }
+
+        const normalizedBusinessId = normalizeOptionalString(businessId);
+        const normalizedReportName = normalizeOptionalString(reportName);
+
+        if (!normalizedBusinessId) {
+          return {
+            ok: false,
+            url: null,
+            reason: "missing_business_id",
+          };
+        }
+
+        const params = new URLSearchParams();
+        params.set("businessId", normalizedBusinessId);
+        if (normalizedReportName) {
+          params.set("reportname", normalizedReportName);
+        }
+
+        const url = `${basePath.replace(/\/+$/, "")}/introduction/?${params.toString()}`;
+
+        return {
+          ok: true,
+          url,
+          reason: null,
+        };
+      }
+    covers:
+      - condition: introduction_url_construction
+      - transition: initiate_report_creation
+      - output: introduction_redirect_url
+    line_range:
+      start: 80
+      end: 127
+
+  - path: src/features/auth/contracts/toa-contract.js
+    snippet: |
+      export function resolveToaRedirectRoute(options = {}) {
+        const { userData, calculatorId, businessId, reportName, env } = options;
+
+        const toaStatus = resolveToaStatus(userData);
+
+        if (!toaStatus.isValid) {
+          return {
+            ok: false,
+            shouldRedirect: false,
+            url: null,
+            reason: toaStatus.reason,
+          };
+        }
+
+        if (toaStatus.hasAgreedToa) {
+          return {
+            ok: true,
+            shouldRedirect: false,
+            url: null,
+            reason: null,
+          };
+        }
+
+        const introUrl = buildIntroductionUrl({
+          calculatorId,
+          businessId,
+          reportName,
+          env,
+        });
+
+        if (!introUrl.ok) {
+          return {
+            ok: false,
+            shouldRedirect: false,
+            url: null,
+            reason: introUrl.reason,
+          };
+        }
+
+        return {
+          ok: true,
+          shouldRedirect: true,
+          url: introUrl.url,
+          reason: "toa_not_agreed",
+        };
+      }
+    covers:
+      - condition: toa_gate_check
+      - transition: initiate_report_creation
+      - transition: redirect_to_introduction
+    line_range:
+      start: 129
+      end: 174
+
+  - path: src/features/auth/api/user-service.js
+    snippet: |
+      function normalizeUserData(payload) {
+        if (!isPlainObject(payload)) {
+          return null;
+        }
+
+        const data = payload.data ?? payload;
+
+        if (!isPlainObject(data)) {
+          return null;
+        }
+
+        return {
+          _id: normalizeOptionalString(data._id ?? data.id),
+          email: normalizeOptionalString(data.email),
+          agreedToa: data.agreedToa === true,
+          firstName: normalizeOptionalString(data.firstName ?? data.first_name),
+          lastName: normalizeOptionalString(data.lastName ?? data.last_name),
+        };
+      }
+    covers:
+      - input: userToaStatus
+      - condition: toa_gate_check
+    line_range:
+      start: 24
+      end: 42
+
+  - path: src/features/auth/api/user-service.js
+    snippet: |
+      export async function checkUserToaStatus(options = {}) {
+        const result = await fetchUserData(options);
+
+        if (!result.ok) {
+          return {
+            ok: false,
+            hasAgreed: false,
+            message: result.message,
+          };
+        }
+
+        return {
+          ok: true,
+          hasAgreed: result.data?.agreedToa === true,
+          data: result.data,
+          message: "TOA status checked successfully.",
+        };
+      }
+    covers:
+      - input: userToaStatus
+      - condition: toa_gate_check
+    line_range:
+      start: 109
+      end: 126
+
+  - path: src/features/reports/hooks/useReportCreation.ts
+    snippet: |
+      const hasAgreedToa = userResult.data?.agreedToa === true;
+
+      if (!hasAgreedToa) {
+        toast.success(
+          "Create page in progress. We will be redirecting you to our Introduction and Our Commitment page",
+        );
+
+        const introUrlResult = buildIntroductionUrl({
+          calculatorId,
+          businessId,
+          reportName: name.trim(),
+          env: process.env,
+        });
+
+        if (introUrlResult.ok && introUrlResult.url) {
+          setTimeout(() => {
+            window.location.replace(introUrlResult.url);
+          }, 2000);
+          return { success: true, redirected: true, reason: "toa_redirect" };
+        }
+
+        toast.error("Unable to redirect to introduction page. Please try again.");
+        return {
+          success: false,
+          reason: "intro_redirect_failed",
+        };
+      }
+    covers:
+      - condition: toa_gate_check
+      - transition: initiate_report_creation
+      - transition: redirect_to_introduction
+      - output: introduction_redirect_url
+      - output: toast_notification
+      - output: toa_redirect_result
+    line_range:
+      start: 56
+      end: 82
+
+  - path: src/shared/lib/routing/gate-finder.js
+    snippet: |
+      export function buildIntroductionUrl(options = {}) {
+        const { calculatorId, businessId, reportName, env } = options;
+
+        const gatePathResolution = resolveGatePathForCalculator(calculatorId, { env });
+
+        if (!gatePathResolution.ok || !gatePathResolution.gatePath) {
+          return {
+            ok: false,
+            url: null,
+            reason: gatePathResolution.reason || "missing_gate_path",
+          };
+        }
+
+        const basePath = removeGateFromUrl(gatePathResolution.gatePath);
+
+        if (!basePath) {
+          return {
+            ok: false,
+            url: null,
+            reason: "invalid_gate_path",
+          };
+        }
+
+        const normalizedBusinessId = normalizeString(businessId);
+        const normalizedReportName = normalizeString(reportName);
+
+        if (!normalizedBusinessId) {
+          return {
+            ok: false,
+            url: null,
+            reason: "missing_business_id",
+          };
+        }
+
+        const params = new URLSearchParams();
+        params.set("businessId", normalizedBusinessId);
+        if (normalizedReportName) {
+          params.set("reportname", normalizedReportName);
+        }
+
+        const url = `${basePath.replace(/\/+$/, "")}/introduction/?${params.toString()}`;
+
+        return {
+          ok: true,
+          url,
+          reason: null,
+        };
+      }
+    covers:
+      - condition: introduction_url_construction
+      - transition: initiate_report_creation
+      - output: introduction_redirect_url
+    line_range:
+      start: 349
+      end: 396
+
+  - path: src/shared/lib/routing/gate-finder.js
+    snippet: |
+      export function resolveGatePathForCalculator(calculatorId, options = {}) {
+        const normalizedCalculatorId = normalizeString(String(calculatorId ?? ""));
+        const envKey = CALCULATOR_ID_TO_GATE_ENV_KEY[normalizedCalculatorId];
+
+        if (!envKey) {
+          return {
+            ok: false,
+            reason: "unsupported_calculator_id",
+            calculatorId: normalizedCalculatorId,
+            gatePath: null,
+            envKey: null,
+          };
+        }
+
+        const gatePathsByCalculatorId =
+          options.gatePathsByCalculatorId && typeof options.gatePathsByCalculatorId === "object"
+            ? options.gatePathsByCalculatorId
+            : {};
+        const explicitGatePath = normalizeString(gatePathsByCalculatorId[normalizedCalculatorId]);
+
+        if (explicitGatePath) {
+          return {
+            ok: true,
+            reason: null,
+            calculatorId: normalizedCalculatorId,
+            gatePath: explicitGatePath,
+            envKey,
+          };
+        }
+
+        const environment = toEnvironmentObject(options.env);
+        const envGatePath = resolveGatePathFromEnvironment(normalizedCalculatorId, environment);
+        const fallbackGatePath = resolveFallbackGatePath(normalizedCalculatorId, environment);
+
+        const hasEnvKeyProperty = Object.prototype.hasOwnProperty.call(environment, envKey);
+
+        if (envGatePath) {
+          return {
+            ok: true,
+            reason: null,
+            calculatorId: normalizedCalculatorId,
+            gatePath: envGatePath,
+            envKey,
+          };
+        }
+
+        if (fallbackGatePath) {
+          return {
+            ok: true,
+            reason: "fallback_gate_path",
+            calculatorId: normalizedCalculatorId,
+            gatePath: fallbackGatePath,
+            envKey,
+          };
+        }
+
+        return {
+          ok: false,
+          reason: "missing_gate_path",
+          calculatorId: normalizedCalculatorId,
+          gatePath: null,
+          envKey,
+        };
+      }
+    covers:
+      - condition: introduction_url_construction
+      - input: calculatorId
+    line_range:
+      start: 138
+      end: 201
+
+  - path: src/shared/lib/routing/gate-finder.js
+    snippet: |
+      export function removeGateFromUrl(url) {
+        const normalizedUrl = normalizeString(url);
+        if (!normalizedUrl) {
+          return null;
+        }
+
+        return normalizedUrl.replace(/\/gate\/?(?=(\?|#|$))/, "");
+      }
+    covers:
+      - condition: introduction_url_construction
+    line_range:
+      start: 340
+      end: 347
+
+confidence: 0.92
+confidence_rationale: >
+  The TOA status check, redirect logic, and introduction URL construction are
+  clearly evidenced across all 4 source files. resolveToaStatus in toa-contract.js
+  and normalizeUserData in user-service.js both confirm the strict === true check
+  on agreedToa. useReportCreation.ts provides the complete orchestration: fetch
+  user data, check TOA, build introduction URL, redirect with 2s delay. gate-finder.js
+  provides the URL construction with calculator-specific gate path resolution.
+  The calculator-side report creation (post-TOA-acceptance) is referenced in the
+  manifest's prior_context but the gate-new-contract.js file is not in this
+  manifest's source files, so that transition is documented from prior context
+  only. All dashboard-side behaviors are fully confirmed by source code.
+
+unresolved_questions:
+  - What exact route or user action on the calculator introduction page triggers the transition to gate-new initialization?
+  - Does the calculator introduction page explicitly pass the businessId and reportname to the gate-new flow, or are they read from persistent query params?
+  - How does the calculator record TOA acceptance — is it a separate API call or part of the introduction page submission?
+  - What happens if the 2s redirect delay is interrupted (e.g., user navigates away)?
+
+status: complete

@@ -1,0 +1,18 @@
+spec_id: download-button-visibility
+output_path: runs/run-0017/generator/specs/download-button-visibility.yaml
+discovered_behaviors:
+  - id: download-button-visibility
+    description: download button becomes visible only after report progress reaches the download stage
+    priority: high
+    category: state_dependent_visibility
+source_files:
+  - src/features/reports/store/useReportsListStore.ts
+  - src/features/reports/store/useReportActionStore.ts
+  - src/features/reports/hooks/useReportActions.ts
+  - src/features/reports/components/ReportsTable.tsx
+  - src/features/pdf/store/useDownloadStore.ts
+  - src/features/pdf/components/PdfGenerationOverlay.tsx
+prior_context: |
+  This is a Next.js frontend application with Zustand state management.
+  The reports feature has multiple stores for managing list state, actions, and PDF generation.
+  The download button visibility is likely controlled by report progress state.

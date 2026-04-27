@@ -1,0 +1,31 @@
+spec_id: auth.conditional-redirect
+output_path: /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0012/generator/specs/auth.conditional-redirect.yaml
+golden_behaviors:
+  - id: auth-conditional-redirect
+    description: editing project routes through a gated edit flow only when agreement state is satisfied
+    priority: high
+    category: conditional_flow
+    evidence_refs:
+      - src/routes/project-edit.tsx
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-edit-contract.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/routing/hooks/useGateEditEntryState.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/app/gate/edit/page.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/routing/components/GateEditRouteEntryClient.tsx
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - The evidence_ref `src/routes/project-edit.tsx` does NOT exist in this codebase.
+  - This is a Next.js app-router project; there is no `src/routes/` directory.
+  - The actual "gated edit flow" behavior is implemented in the `/gate/edit` route.
+  - gate-edit-contract.js validates query params (target, calculatorId), fetches the report,
+    maps report progress to calculator resume routes, and redirects.
+  - useGateEditEntryState.ts manages the state machine: pending_router → initializing → ready/fallback/error.
+  - CRITICAL FINDING: There is NO "agreement state" (TOA) check in the edit flow.
+    The edit flow does not check `agreedToa` or any terms-of-agreement status.
+    The TOA check only exists in the CREATE flow (useReportCreation.ts), not the EDIT flow.
+  - Therefore the "only when agreement state is satisfied" part of the golden behavior
+    is NOT evidenced in the edit flow source files.
+  - The behavior that DOES exist is: "editing/resuming an existing report through a gated
+    edit flow with query param validation, report fetching, progress route mapping, and
+    redirect to the calculator at the correct resume point."

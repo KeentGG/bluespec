@@ -1,0 +1,32 @@
+spec_id: qfm.error-classification
+output_path: runs/run-0015/generator/specs/qfm.error-classification.yaml
+discovered_behaviors:
+  - id: qfm-failure-bucketing
+    description: Classify errors into 7 buckets: auth/session, routing, data contract, import mapping, PDF, storage corruption, stale state
+    priority: high
+    evidence_refs:
+      - src/shared/lib/qfm/failureTaxonomy.js
+  - id: qfm-response-normalization
+    description: Normalize wrapped vs raw API envelopes to consistent shape with contract violation detection
+    priority: high
+    evidence_refs:
+      - src/shared/lib/qfm/responseAdapter.js
+  - id: qfm-user-behavior-mapping
+    description: Each failure bucket maps to predefined user behavior such as redirect, show error, retry
+    priority: medium
+    evidence_refs:
+      - src/shared/lib/qfm/failureTaxonomy.js
+source_files:
+  - src/shared/lib/qfm/failureTaxonomy.js
+  - src/shared/lib/qfm/responseAdapter.js
+  - src/shared/lib/qfm/index.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - QFM = Query/Failure/Mutation error classification system
+  - 7 buckets with predefined user behaviors
+  - classifyQfmFailure extracts signals (reason codes, messages, status codes)
+  - Signals matched against keyword lists to determine bucket
+  - Response adapter handles wrapped ({statusCode, data, message}) vs raw payloads
+  - Contract violation detection for broken response shapes
+  - Each bucket has failure mode ID and default reason code

@@ -1,0 +1,134 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.reports-page-controller
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.reports_page_controller
+    coverage: full
+    notes: >
+      Reports page controller orchestrates filter state, SWR queries,
+      pagination, and business selection. It composes query keys from
+      filter values and manages page-level state transitions.
+
+description: >
+  Orchestrates the reports page by connecting filter state, SWR data
+  queries, pagination, and business selection. The controller composes
+  query keys from filter values, manages page-level state transitions,
+  and coordinates between local state and server-backed queries.
+
+state_machine:
+  initial: loading
+  states:
+    - id: loading
+      description: Initial data fetch in progress.
+    - id: ready
+      description: Data loaded, page interactive.
+    - id: empty
+      description: No reports match current filters.
+    - id: error
+      description: Data fetch failed.
+  transitions:
+    - id: data_loaded
+      from: loading
+      to: ready
+      trigger: SWR query resolves with data.
+      effects:
+        - Populate reports list.
+        - Update pagination state.
+    - id: filter_changed
+      from: ready
+      to: loading
+      trigger: Filter value changes.
+      effects:
+        - Recompose query key.
+        - Trigger SWR revalidation.
+    - id: no_results
+      from: ready
+      to: empty
+      trigger: Query returns empty results.
+      effects:
+        - Show empty state.
+    - id: fetch_error
+      from: loading
+      to: error
+      trigger: SWR query fails.
+      effects:
+        - Show error state.
+
+conditions:
+  - id: query_key_composition
+    description: >
+      Query key is composed from filter values and business selection.
+      Changes to any filter trigger key change and SWR revalidation.
+    trigger: Filter values change.
+    guards:
+      - field: business_id
+        condition: businessId is non-empty string.
+      - field: user_id
+        condition: userId is non-empty string.
+    then:
+      - Compose query key with all filter values.
+      - Trigger SWR fetch.
+    else:
+      - Pass null key to disable fetch.
+
+  - id: pagination_state
+    description: >
+      Manages pagination state from SWR response. Provides page, pageSize,
+      total, and hasMore for pagination controls.
+    trigger: SWR query resolves.
+    guards:
+      - field: pagination
+        condition: data.pagination is present.
+    then:
+      - Update pagination state.
+    else:
+      - Use default pagination.
+
+inputs:
+  - id: business_id
+    type: string
+    source: Business selection
+    required: true
+
+  - id: filters
+    type: "filter object from Zustand store"
+    source: Reports list filter store
+    required: false
+
+outputs:
+  - id: page_state
+    type: "reports list and pagination"
+    destination: Reports page components
+    lifespan: query lifecycle
+
+evidence_refs:
+  - path: src/features/reports/hooks/useReportsListQuery.ts
+    snippet: |
+      export function useReportsListQuery(options: any = {}) {
+        const { businessId, enabled, page, pageSize, search, sortBy, sortOrder, calculatorId } = options;
+        const token = getToken();
+        const userId = typeof token?._id === "string" && token._id.length > 0 ? token._id : null;
+        const isEnabled = enabled && typeof userId === "string" && userId.length > 0 && typeof businessId === "string" && businessId.length > 0;
+        const queryKey = useMemo(() => ["reports.list", userId, businessId, page, pageSize, search, sortBy, sortOrder, calculatorId], [businessId, userId, page, pageSize, search, sortBy, sortOrder, calculatorId]);
+        const swrQuery = useSWR(isEnabled ? queryKey : null, () => fetchReportsListRuntime({ businessId, page, pageSize, search, sortBy, sortOrder, calculatorId }), { keepPreviousData: true });
+        return { ...swrQuery, pagination: swrQuery.data?.pagination ?? { page, pageSize, total: 0, hasMore: false } };
+      }
+    covers:
+      - "condition:query_key_composition"
+      - "condition:pagination_state"
+      - "input:business_id"
+      - "input:filters"
+      - "output:page_state"
+
+confidence: 0.94
+confidence_rationale: >
+  Query key composition, pagination handling, and SWR integration are
+  directly evidenced in useReportsListQuery.ts. The controller pattern
+  and state transitions are confirmed by the code.
+unresolved_questions:
+  - Whether pagination persists across filter changes.
+  - Exact keepPreviousData behavior during transitions.
+status: complete

@@ -1,0 +1,86 @@
+run_id: run-0016
+mutator: mutator
+status: complete
+provider: sample-project
+
+proposed_change:
+  type: step_management
+  target_step: explore
+  current: >
+    The current formula's explore step only says "Explore structure,
+    dependencies, and state-machine boundaries" and emits trace,
+    exploration_notes, and state_machine_boundaries. It does not require a
+    golden-target scan, discovered-file coverage accounting, or a handoff gate
+    before draft when cited golden evidence files are still missing.
+  proposed: >
+    Upgrade explore into a guarded discovery step. For each golden behavior,
+    seed exploration with every cited missing evidence file plus one-hop
+    neighboring routes/components/hooks/contracts in the same folder; emit a
+    discovered_files_matrix keyed by golden_behavior_id; and block draft unless
+    each golden behavior has at least one directly discovered source file or an
+    explicit "not present in checkout" note. Require targeted scans of
+    src/routes/, src/components/, src/features/reports/hooks/,
+    src/features/auth/contracts/, and src/shared/lib/routing/ when the golden
+    set points into those surfaces.
+  expected_improvement: >
+    This directly targets the run's main loss mechanism: missing file
+    discovery. Starting from the official overall_score of 0.59 (recall 0.03,
+    precision 0.88, consistency 0.87), the guarded scan should raise recall
+    materially by bringing project-edit.tsx, ReportActions.tsx,
+    toa-contract.js, useReportCreation.ts, and gate-new-contract.js into
+    evidence before drafting. Because the evaluator's precision/consistency are
+    already strong, the expected gain is mostly on golden_set_recall and
+    conditional_flow_documentation without needing rubric mutation in this run.
+  risk: >
+    Medium. Wider scans can increase breadth and worsen the shadow precision
+    concern already seen in state.management if the generator pulls adjacent
+    files without keeping specs behavior-scoped. The draft block also adds
+    process cost and may produce more "no coverage" failures when workspace
+    copies are incomplete, but that failure mode is preferable to falsely
+    precise thematic substitutions.
+  rationale: >
+    The analyzer classifies every recall miss as search_failure, not
+    prompt_failure or rubric_gap_failure. The formula already instructs
+    conditional-flow and gate analysis, yet the run never discovered the exact
+    route/component/hook/contract files named in the shadow findings. That
+    means the lowest effective mutation is not another wording tweak; it is
+    step management that forces golden-targeted discovery and prevents draft
+    from proceeding on nearby-but-wrong surfaces. This also answers the shadow
+    precision concern by favoring exact evidence coverage over broad thematic
+    spec expansion.
+
+insanity_check:
+  method_already_failed: false
+  failed_runs:
+    - run_id: run-0010
+      method: prompt_tweak
+      failure_type: rubric_gap_failure
+      result: FAILED
+      note: >
+        A prompt_tweak already failed in run-0010, but not for the same
+        failure_type or target. That failure is still relevant because it warns
+        against solving an upstream discovery defect with more wording alone.
+  learned_runs:
+    - run_id: run-0010
+      method: rubric_candidate_proposal
+      failure_type: rubric_gap_failure
+      result: PASSED
+      note: >
+        Run-0010 showed rubric mutation is useful when scoring criteria are the
+        bottleneck. Here the analyzer marks rubric gaps secondary-only, so the
+        learned lesson is to fix discovery first and defer rubric mutation.
+
+rubric_candidate: null
+
+confidence: 0.94
+confidence_rationale: >
+  Confidence is high because the official evaluator shows strong
+  precision/consistency but near-zero recall, and the shadow findings name the
+  exact missing evidence files for all three recall misses. That pattern matches
+  a discovery-control defect more than a prompt or rubric defect. Confidence is
+  not absolute because a stricter explore gate could expose missing-checkout
+  cases or broaden adjacent coverage unless later steps stay behavior-scoped.
+  Shadow rubric-gap candidates are real, but the analyzer marks them
+  secondary-only, so rubric mutation would be premature for run-0016.
+
+mutator_timestamp: "2026-04-23T07:50:26Z"

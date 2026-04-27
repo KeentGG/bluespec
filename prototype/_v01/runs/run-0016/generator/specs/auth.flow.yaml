@@ -1,0 +1,1092 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.flow
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth-login-flow
+    coverage: full
+    notes: >
+      The login page submits email, password, and rememberMe to /auth/login,
+      stages the returned access token in memory, clears cached client data, and
+      redirects successful logins to /companies.
+  - id: auth-token-management
+    coverage: full
+    notes: >
+      Access tokens are normalized into an in-memory authSession object and
+      mirrored into a readable user cookie. Logout clears memory and the user
+      cookie. Refresh uses an HTTP-only refreshToken cookie and propagates CSRF
+      headers when present.
+  - id: auth-cross-tab-sync
+    coverage: full
+    notes: >
+      Login and logout events are broadcast across tabs through
+      BroadcastChannel/localStorage. Login redirects other tabs away from
+      /login; logout clears auth state and redirects protected routes to /login.
+  - id: auth-token-refresh
+    coverage: full
+    notes: >
+      Token refresh is coordinated both within one tab and across tabs. One tab
+      performs /auth/refresh while others wait for TOKEN_REFRESHED. Successful
+      refresh re-stages the access token and publishes the result.
+  - id: auth-route-protection
+    coverage: full
+    notes: >
+      authGuard redirects anonymous users from protected routes to /login and
+      redirects authenticated users away from /login to /companies. Middleware
+      attempts silent refresh before enforcing the redirect on guarded routes.
+
+description: >
+  Implements a browser-based authentication flow that starts on the login form,
+  stages a returned access token into in-memory session state, keeps a readable
+  user cookie for middleware-visible session continuity, and uses an HTTP-only
+  refresh cookie for silent re-authentication. The flow protects guarded routes,
+  redirects authenticated users away from /login, coordinates login/logout and
+  refresh activity across tabs, and injects CSRF headers when refresh/logout
+  requests are sent.
+
+state_machine:
+  initial: anonymous
+  states:
+    - id: anonymous
+      description: No valid staged session is available to the current page or guard evaluation.
+    - id: authenticating
+      description: The login form has submitted credentials and is waiting for the login response.
+    - id: authenticated
+      description: A normalized session with _id and accessToken exists and protected routes are allowed.
+    - id: refreshing
+      description: The system is attempting /auth/refresh, either in this tab or via a coordinating leader tab.
+    - id: redirecting_to_companies
+      description: The browser is navigating an authenticated user to /companies.
+    - id: redirecting_to_login
+      description: The browser is navigating an anonymous or expired session to /login.
+  transitions:
+    - id: login_submit
+      from: anonymous
+      to: authenticating
+      trigger: User submits the login form.
+      guards:
+        - field: is_loading
+          condition: isLoading is false before submission starts.
+        - field: credentials
+          condition: email is trimmed and password is present from required form inputs.
+      effects:
+        - Send POST /auth/login with email, password, and rememberMe.
+        - Set local loading state and clear any prior error message.
+    - id: login_success
+      from: authenticating
+      to: redirecting_to_companies
+      trigger: bootstrapLoginSession returns a staged session and redirect decision.
+      guards:
+        - field: login_response
+          condition: statusCode resolves to 200 and payload.user contains non-empty _id and accessToken.
+      effects:
+        - Normalize and store the access token in memory.
+        - Write the user cookie and broadcast login to other tabs.
+        - Clear client data cache and redirect to /companies.
+    - id: login_failure
+      from: authenticating
+      to: anonymous
+      trigger: Login response does not produce a staged session.
+      effects:
+        - Show loginResponse.message when available, otherwise show a generic credential error.
+        - End the loading state without navigating.
+    - id: authenticated_login_redirect
+      from: authenticated
+      to: redirecting_to_companies
+      trigger: authGuard evaluates a valid session on the /login route.
+      effects:
+        - Return a redirect decision targeting /companies.
+    - id: anonymous_protected_redirect
+      from: anonymous
+      to: redirecting_to_login
+      trigger: authGuard evaluates a protected route without a valid session.
+      effects:
+        - Return a redirect decision targeting /login.
+    - id: protected_route_silent_refresh
+      from: anonymous
+      to: refreshing
+      trigger: Middleware handles /login or a protected route and finds a refreshToken cookie but no valid session.
+      guards:
+        - field: pathname
+          condition: shouldResolveSession(pathname) is true.
+        - field: refresh_cookie
+          condition: cookieHeader includes refreshToken=.
+      effects:
+        - Call /auth/refresh with the request cookie header and optional x-csrf-token.
+        - Retry refresh once without x-csrf-token if the first attempt errors.
+    - id: silent_refresh_success
+      from: refreshing
+      to: authenticated
+      trigger: Middleware silent refresh returns a normalized session.
+      effects:
+        - Set user, csrfToken, and refreshToken cookies on the outgoing response when present.
+        - Re-run authGuard using the refreshed session before continuing.
+    - id: token_refresh_requested
+      from: authenticated
+      to: refreshing
+      trigger: refreshAccessToken is called because the current tab needs a fresh access token.
+      effects:
+        - Reuse the in-tab refresh promise if one already exists.
+        - Otherwise acquire or wait on the cross-tab refresh lock.
+    - id: token_refresh_success
+      from: refreshing
+      to: authenticated
+      trigger: performRefresh receives a valid refresh response.
+      guards:
+        - field: refresh_response
+          condition: raw.user or raw.data.user contains string _id and string accessToken.
+      effects:
+        - Store the refreshed token in memory and the user cookie.
+        - Broadcast TOKEN_REFRESHED for other tabs.
+        - Release the refresh lock.
+    - id: token_refresh_failure
+      from: refreshing
+      to: redirecting_to_login
+      trigger: Refresh errors, times out, or does not return a valid token payload.
+      effects:
+        - Return a failed refresh result or null session to the caller.
+        - Redirect guarded navigation to /login when auth cannot be re-established.
+        - Release the refresh lock.
+    - id: logout_broadcast_received
+      from: authenticated
+      to: redirecting_to_login
+      trigger: Another tab broadcasts logout while this tab is on a protected route.
+      effects:
+        - Clear in-memory session and readable user cookie.
+        - Redirect to /login with the current base path preserved.
+
+conditions:
+  - id: refresh_lock_coordination
+    description: >
+      Only one tab performs /auth/refresh at a time. If another tab already owns
+      the lock, the current tab waits for a TOKEN_REFRESHED result before trying
+      to refresh on its own.
+    trigger: refreshAccessToken() runs while another tab may already be refreshing.
+    guards:
+      - field: refresh_lock
+        condition: localStorage refresh lock exists and is younger than LOCK_TIMEOUT_MS.
+    then:
+      - Wait for TOKEN_REFRESHED via waitForResult using REFRESH_RESULT_KEY.
+      - If the result succeeds, apply the token from the other tab.
+      - If waiting fails or times out, try to acquire the lock again and continue cautiously.
+    else:
+      - Acquire the lock and perform refresh in the current tab.
+
+  - id: cross_tab_login_sync
+    description: >
+      A login broadcast from another tab redirects the current tab to /companies
+      only when the user is still on /login; otherwise it only refreshes auth state.
+    trigger: Login event arrives through BroadcastChannel or localStorage listener.
+    guards:
+      - field: current_path
+        condition: window.location.pathname includes /login.
+    then:
+      - Compute the base path and set window.location.href to the corresponding /companies route.
+      - Invoke the supplied login callback.
+    else:
+      - Keep the current route.
+      - Invoke the supplied login callback.
+
+  - id: cross_tab_logout_sync
+    description: >
+      A logout broadcast clears auth state in other tabs and redirects only when
+      the receiving tab is on a protected route.
+    trigger: Logout event arrives through BroadcastChannel or localStorage listener.
+    guards:
+      - field: current_path
+        condition: window.location.pathname includes /companies or /reports.
+    then:
+      - Compute the base path and set window.location.href to the corresponding /login route.
+      - Invoke the logout callback to clear cookies and session state.
+    else:
+      - Do not redirect.
+      - Invoke the logout callback to clear cookies and session state.
+
+  - id: csrf_header_injection
+    description: >
+      Refresh and logout requests attach x-csrf-token when a csrfToken cookie is
+      available, including middleware-side silent refresh requests.
+    trigger: A refresh or logout HTTP request is prepared.
+    guards:
+      - field: csrf_cookie
+        condition: getCsrfToken(cookieString) returns a non-empty value.
+    then:
+      - Merge x-csrf-token into the request headers.
+    else:
+      - Send the request without x-csrf-token.
+
+  - id: silent_refresh_retry_without_csrf
+    description: >
+      Middleware attempts silent refresh with the current csrfToken first, then
+      retries once without that header if the first attempt errors.
+    trigger: attemptSilentRefresh() runs for a guarded request.
+    guards:
+      - field: first_refresh_attempt
+        condition: The initial callRefreshEndpoint result has an error or response.error.
+    then:
+      - "Call callRefreshEndpoint again with csrfToken: null."
+    else:
+      - Keep the first refresh result.
+
+  - id: protected_route_match
+    description: >
+      Route protection uses prefix matching so nested routes under a protected path
+      inherit the same guard behavior.
+    trigger: authGuard evaluates pathname against protectedPaths.
+    guards:
+      - field: pathname
+        condition: pathname equals a protected path or starts with protectedPath + '/'.
+    then:
+      - Treat the route as protected for redirect decisions.
+    else:
+      - Treat the route as public.
+
+inputs:
+  - id: credentials
+    type: email/password object
+    source: LoginPageContent form submission
+    required: true
+    validation:
+      email: trimmed string from the email field
+      password: non-empty string from the password field
+
+  - id: remember_me
+    type: boolean
+    source: LoginPageContent rememberMe checkbox
+    required: false
+    validation:
+      default: "false"
+
+  - id: pathname
+    type: string URL path
+    source: Next.js router, window.location.pathname, or middleware request URL
+    required: true
+    validation:
+      normalization: empty or missing path normalizes to /
+
+  - id: login_response
+    type: auth API response envelope
+    source: POST /auth/login response
+    required: true
+    validation:
+      statusCode: must resolve to 200 for session bootstrap
+      user: must include _id and accessToken strings
+
+  - id: refresh_cookie
+    type: HTTP-only refreshToken cookie
+    source: browser cookie header supplied to middleware or backend refresh endpoint
+    required: false
+    validation:
+      presence_check: cookieHeader includes refreshToken=
+
+  - id: csrf_cookie
+    type: csrfToken cookie value
+    source: browser cookies
+    required: false
+    validation:
+      header_mapping: copied into x-csrf-token when present
+
+  - id: session_candidate
+    type: session-like object with _id, email, accessToken
+    source: login payload, refresh payload, or middleware user payload
+    required: false
+    validation:
+      _id: non-empty string
+      accessToken: non-empty string
+
+  - id: cross_tab_event
+    type: BroadcastChannel message or localStorage event payload
+    source: other browser tabs
+    required: false
+    validation:
+      event_types: logout, login, TOKEN_REFRESHED
+
+outputs:
+  - id: login_request
+    type: POST /auth/login HTTP request
+    destination: backend /auth/login endpoint
+    lifespan: per submission
+
+  - id: access_token_memory
+    type: normalized session object containing _id, email, accessToken, and user
+    destination: module-scoped authSession variable in memory
+    lifespan: browser session until cleared or replaced
+
+  - id: user_cookie
+    type: JSON-encoded user cookie
+    destination: browser cookie named user
+    lifespan: 7 days on client writes, 14 days on middleware silent-refresh writes
+
+  - id: csrf_header
+    type: x-csrf-token request header
+    destination: refresh and logout HTTP requests
+    lifespan: per request
+
+  - id: refresh_result_broadcast
+    type: TOKEN_REFRESHED event payload
+    destination: BroadcastChannel and localStorage REFRESH_RESULT_KEY
+    lifespan: 500ms cleanup window for the localStorage copy
+
+  - id: route_guard_decision
+    type: object with action, destination, reason, clearSessionCookie
+    destination: middleware or client-side guard caller
+    lifespan: per authGuard invocation
+
+  - id: response_session_cookies
+    type: user, csrfToken, and refreshToken response cookies
+    destination: NextResponse generated by middleware after silent refresh
+    lifespan: 14 days when set by middleware
+
+  - id: redirect_to_companies
+    type: browser navigation to /companies
+    destination: router.replace, window.location.href, or NextResponse.redirect
+    lifespan: immediate
+
+  - id: redirect_to_login
+    type: browser navigation to /login
+    destination: window.location.href or NextResponse.redirect
+    lifespan: immediate
+
+  - id: login_error_message
+    type: UI error string
+    destination: login page errorMessage state
+    lifespan: until a later submit clears or replaces it
+
+evidence_refs:
+  - path: src/features/auth/components/LoginPageContent.tsx
+    snippet: |
+      async function loginRequest(apiClient, credentials) {
+        const response = await apiClient.post({
+          path: "/auth/login",
+          body: credentials,
+          headers: {
+            Accept: "application/json",
+          },
+          cache: "no-store",
+          skipTokenRefresh: true,
+          skipAuthErrorHandling: true,
+        });
+
+        if (response.raw && typeof response.raw === "object") {
+          return response.raw;
+        }
+
+        return {
+          statusCode: response.statusCode ?? (response.aborted ? 499 : 503),
+          message: response.message || "Login request failed.",
+        };
+      }
+    covers:
+      - "transition:login_submit"
+      - "input:credentials"
+      - "output:login_request"
+    line_range:
+      start: 25
+      end: 45
+
+  - path: src/features/auth/components/LoginPageContent.tsx
+    snippet: |
+      async function handleSubmit(event) {
+        event.preventDefault();
+
+        if (isLoading) {
+          return;
+        }
+
+        setErrorMessage("");
+        setIsLoading(true);
+
+        const trimmedEmail = email.trim();
+        let stagedSessionPayload = null;
+
+        try {
+          const loginResponse = await loginRequest(apiClient, {
+            email: trimmedEmail,
+            password,
+            rememberMe,
+          });
+
+          const decision = await bootstrapLoginSession({
+            loginResponse,
+            stageSession: async (sessionPayload) => {
+              stagedSessionPayload = sessionPayload;
+              await clearClientDataCache();
+            },
+          });
+
+          if (!decision.sessionStaged) {
+            setErrorMessage(
+              typeof loginResponse?.message === "string" && loginResponse.message.length > 0
+                ? loginResponse.message
+                : "Unable to log in with those credentials.",
+            );
+            return;
+          }
+
+          if (decision.action === "redirect" && typeof decision.destination === "string") {
+            router.replace(decision.destination);
+            return;
+          }
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    covers:
+      - "transition:login_submit"
+      - "transition:login_success"
+      - "transition:login_failure"
+      - "output:redirect_to_companies"
+      - "output:login_error_message"
+    line_range:
+      start: 89
+      end: 134
+
+  - path: src/features/auth/api/sessionBootstrap.js
+    snippet: |
+      function parseAuthSuccessEnvelope(response) {
+        log("parseAuthSuccessEnvelope() called");
+        const payload = extractLoginEnvelopePayload(response);
+        log("Extracted payload:", payload);
+
+        if (!isPlainObject(payload)) {
+          log("Payload is not a plain object, returning null");
+          return null;
+        }
+
+        const statusCode = toStatusCode(payload.statusCode);
+        log("Status code:", statusCode);
+
+        if (statusCode !== 200) {
+          log("Status code is not 200, returning null");
+          return null;
+        }
+
+        const sessionPayload = toSessionPayload(payload.user);
+        log("Session payload:", sessionPayload ? "valid" : "invalid");
+        return sessionPayload;
+      }
+    covers:
+      - "input:login_response"
+      - "transition:login_success"
+      - "input:session_candidate"
+    line_range:
+      start: 113
+      end: 134
+
+  - path: src/features/auth/api/sessionBootstrap.js
+    snippet: |
+      async function bootstrapSession(options = {}) {
+        const { authResponse, stageSession, routes, source } = options;
+        log("bootstrapSession() called, source:", source);
+        const resolvedRoutes = resolveRoutes(routes);
+        const parseEnvelope =
+          source === "signup" ? parseSignupSuccessEnvelope : parseLoginSuccessEnvelope;
+        const sessionPayload = parseEnvelope(authResponse);
+
+        if (!sessionPayload) {
+          log("No session payload extracted, aborting");
+          return createDecision("none", null, `${source}_envelope_not_success`, false, false);
+        }
+
+        log("Session payload extracted, _id:", sessionPayload._id);
+
+        try {
+          log("Calling setToken()...");
+          setToken(sessionPayload);
+          log("setToken() completed");
+
+          if (typeof stageSession === "function") {
+            log("Calling stageSession callback...");
+            await stageSession(sessionPayload);
+            log("stageSession callback completed");
+          }
+        } catch (_error) {
+          log("Session staging failed:", _error.message);
+          return createDecision("none", null, `${source}_session_stage_failed`, false, false);
+        }
+
+        log("Bootstrap complete, redirecting to:", resolvedRoutes.companies);
+        return createDecision(
+          "redirect",
+          resolvedRoutes.companies,
+          `${source}_session_verified_redirect_companies`,
+          true,
+          true,
+        );
+      }
+    covers:
+      - "transition:login_success"
+      - "output:route_guard_decision"
+      - "output:redirect_to_companies"
+      - "output:access_token_memory"
+    line_range:
+      start: 149
+      end: 187
+
+  - path: src/features/auth/api/authMemorySession.js
+    snippet: |
+      function normalizeSessionPayload(candidate) {
+        if (!isPlainObject(candidate)) {
+          return null;
+        }
+
+        const userId = normalizeOptionalString(candidate._id).trim();
+        const accessToken = normalizeOptionalString(candidate.accessToken).trim();
+
+        if (!userId || !accessToken) {
+          return null;
+        }
+
+        const email = normalizeOptionalString(candidate.email);
+
+        return {
+          _id: userId,
+          email,
+          accessToken,
+          user: {
+            ...candidate,
+            _id: userId,
+            email,
+            accessToken,
+          },
+        };
+      }
+
+      export function setAuthSession(candidate) {
+        const normalized = normalizeSessionPayload(candidate);
+        authSession = normalized;
+        return authSession;
+      }
+    covers:
+      - "input:session_candidate"
+      - "output:access_token_memory"
+      - "state:authenticated"
+    line_range:
+      start: 62
+      end: 93
+
+  - path: src/features/auth/api/tokenService.js
+    snippet: |
+      export function setToken(tokenPayload) {
+        log("setToken() called");
+
+        const normalized = setAuthSession(tokenPayload);
+        log("Auth session set:", normalized ? "success" : "failed");
+
+        if (!normalized) {
+          log("No normalized token - skipping cookie and broadcast");
+          return;
+        }
+
+        log("Writing user cookie...");
+        setBrowserUserCookie(normalized);
+
+        // Broadcast login to other tabs (client-side only)
+        broadcastAuthChange("login");
+      }
+
+      export function clearToken() {
+        log("clearToken() called");
+
+        broadcastAuthChange("logout");
+        clearAuthSession();
+        clearBrowserUserCookie();
+        log("clearToken() completed");
+      }
+    covers:
+      - "transition:login_success"
+      - "transition:logout_broadcast_received"
+      - "output:user_cookie"
+      - "output:access_token_memory"
+    line_range:
+      start: 200
+      end: 236
+
+  - path: src/features/auth/lib/authBroadcast.js
+    snippet: |
+      export function broadcastLogout() {
+        log("broadcastLogout() called");
+
+        if (typeof window === "undefined") {
+          log("Skipping broadcast - window undefined (server-side)");
+          return;
+        }
+
+        const timestamp = Date.now();
+        log("Broadcasting logout at timestamp:", timestamp);
+
+        broadcastMessage({
+          channelName: CHANNEL_NAME,
+          eventType: LOGOUT_EVENT,
+          data: { timestamp },
+          storageKey: `${LOGOUT_KEY_PREFIX}${timestamp}`,
+          cleanupMs: 100,
+        });
+      }
+
+      export function broadcastLogin() {
+        log("broadcastLogin() called");
+
+        if (typeof window === "undefined") {
+          log("Skipping broadcast - window undefined (server-side)");
+          return;
+        }
+
+        const timestamp = Date.now();
+        log("Broadcasting login at timestamp:", timestamp);
+
+        broadcastMessage({
+          channelName: CHANNEL_NAME,
+          eventType: LOGIN_EVENT,
+          data: { timestamp },
+          storageKey: `${LOGIN_KEY_PREFIX}${timestamp}`,
+          cleanupMs: 100,
+        });
+      }
+    covers:
+      - "output:refresh_result_broadcast"
+      - "condition:cross_tab_login_sync"
+      - "condition:cross_tab_logout_sync"
+    line_range:
+      start: 35
+      end: 78
+
+  - path: src/features/auth/lib/authBroadcast.js
+    snippet: |
+      function handleLoginEvent(callback) {
+        log("handleLoginEvent() called");
+
+        const now = Date.now();
+        log("Current time:", now, "Last login:", lastLoginTime);
+
+        if (now - lastLoginTime < LOGIN_DEBOUNCE_MS) {
+          log("Ignoring login event - within debounce window (", LOGIN_DEBOUNCE_MS, "ms)");
+          return;
+        }
+
+        lastLoginTime = now;
+        log("Processing login event");
+
+        const currentPath = window.location.pathname;
+        const isLoginPage = currentPath.includes("/login");
+
+        if (isLoginPage) {
+          log("On login page, redirecting to companies");
+          const basePath = currentPath.split("/login")[0] || "";
+          const companiesPath = basePath ? `${basePath}/companies` : "/companies";
+          window.location.href = companiesPath;
+        } else {
+          log("Not on login page, staying on current page but will refresh auth state");
+        }
+
+        if (typeof callback === "function") {
+          log("Calling login callback");
+          try {
+            callback();
+          } catch (error) {
+    covers:
+      - "condition:cross_tab_login_sync"
+      - "output:redirect_to_companies"
+    line_range:
+      start: 217
+      end: 252
+
+  - path: src/features/auth/lib/authBroadcast.js
+    snippet: |
+      function handleLogoutEvent(callback) {
+        log("handleLogoutEvent() called");
+
+        const now = Date.now();
+        log("Current time:", now, "Last redirect:", lastRedirectTime);
+
+        if (now - lastRedirectTime < REDIRECT_DEBOUNCE_MS) {
+          log("Ignoring event - within debounce window (", REDIRECT_DEBOUNCE_MS, "ms)");
+          return;
+        }
+
+        lastRedirectTime = now;
+        log("Processing logout event");
+
+        const currentPath = window.location.pathname;
+        const isProtected = currentPath.includes("/companies") || currentPath.includes("/reports");
+
+        if (isProtected) {
+          const basePath = window.location.pathname.split("/companies")[0].split("/reports")[0] || "";
+          const loginPath = basePath ? `${basePath}/login` : "/login";
+          log("Redirecting to:", loginPath);
+          window.location.href = loginPath;
+        } else {
+          log("Not on protected route, no redirect needed");
+        }
+
+        if (typeof callback === "function") {
+          log("Calling logout callback");
+          try {
+            callback();
+            log("Callback executed successfully");
+          } catch (error) {
+    covers:
+      - "condition:cross_tab_logout_sync"
+      - "transition:logout_broadcast_received"
+      - "output:redirect_to_login"
+    line_range:
+      start: 264
+      end: 298
+
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      export async function refreshAccessToken(options = {}) {
+        if (isRefreshing || refreshPromise) {
+          log("Refresh already in progress in this tab, waiting...");
+          return (
+            refreshPromise ||
+            Promise.resolve({ success: false, error: "Refresh in progress", token: null })
+          );
+        }
+
+        const { apiClient } = options;
+
+        isRefreshing = true;
+
+        refreshPromise = performCoordinatedRefresh(apiClient).finally(() => {
+          isRefreshing = false;
+          refreshPromise = null;
+        });
+
+        return refreshPromise;
+      }
+
+      async function performCoordinatedRefresh(apiClient) {
+        const hasLock = acquireRefreshLock();
+
+        if (!hasLock) {
+          log("Waiting for another tab to complete refresh...");
+
+          try {
+            const { waitForResult } = await getCrossTab();
+            const result = await waitForResult({
+              storageKey: REFRESH_RESULT_KEY,
+              eventType: "TOKEN_REFRESHED",
+              timeoutMs: 8000,
+            });
+
+            if (result && result.success) {
+              log("Applying token from other tab's refresh");
+              setToken(result.token);
+              return result;
+            }
+          } catch (error) {
+            log("Cross-tab wait failed, proceeding with own refresh:", error.message);
+          }
+        }
+    covers:
+      - "transition:token_refresh_requested"
+      - "condition:refresh_lock_coordination"
+      - "state:refreshing"
+    line_range:
+      start: 139
+      end: 190
+
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      async function performRefresh(apiClient) {
+        try {
+          const timeoutPromise = new Promise((resolve) => {
+            setTimeout(() => resolve({ __timeout: true }), REFRESH_TIMEOUT_MS);
+          });
+
+          const result = await Promise.race([
+            refreshToken({}, apiClient ? { client: apiClient } : {}),
+            timeoutPromise,
+          ]);
+
+          if (result && result.__timeout) {
+            log(`REFRESH TIMEOUT: No response after ${REFRESH_TIMEOUT_MS}ms`);
+            return {
+              success: false,
+              error: `Token refresh timed out after ${REFRESH_TIMEOUT_MS}ms`,
+              token: null,
+            };
+          }
+
+          const actualResponse = result;
+          const raw = actualResponse?.raw;
+          const rawStatusCode = raw?.statusCode ?? actualResponse?.statusCode;
+
+          if (actualResponse?.error || (typeof rawStatusCode === "number" && rawStatusCode >= 400)) {
+            return {
+              success: false,
+              error: raw?.message || actualResponse?.message || "Token refresh failed",
+              statusCode: rawStatusCode,
+              token: null,
+            };
+          }
+
+          const userData = raw?.user ?? raw?.data?.user;
+
+          if (!userData || typeof userData.accessToken !== "string" || typeof userData._id !== "string") {
+            return {
+              success: false,
+              error: "No access token in refresh response",
+              token: null,
+            };
+          }
+
+          const newTokenPayload = {
+            _id: userData._id,
+            email: typeof userData.email === "string" ? userData.email : "",
+            accessToken: userData.accessToken,
+          };
+
+          const csrfToken = raw?.csrfToken ?? raw?.data?.csrfToken ?? null;
+
+          setToken(newTokenPayload);
+
+          return {
+            success: true,
+            token: newTokenPayload,
+            csrfToken,
+            message: raw?.message || "Token refreshed successfully",
+          };
+    covers:
+      - "transition:token_refresh_success"
+      - "transition:token_refresh_failure"
+      - "output:access_token_memory"
+    line_range:
+      start: 226
+      end: 288
+
+  - path: src/features/auth/api/csrfHelper.js
+    snippet: |
+      export function applyCsrfHeaders(baseHeaders = {}, cookieString) {
+        const token = getCsrfToken(cookieString);
+
+        if (!token) {
+          return baseHeaders;
+        }
+
+        return {
+          ...baseHeaders,
+          "x-csrf-token": token,
+        };
+      }
+    covers:
+      - "condition:csrf_header_injection"
+      - "input:csrf_cookie"
+      - "output:csrf_header"
+    line_range:
+      start: 115
+      end: 126
+
+  - path: src/features/auth/api/auth-service.js
+    snippet: |
+      export async function logoutUser(options = {}) {
+        const client = getClient(options);
+        return client.post({
+          path: "/auth/logout",
+          body: null,
+          headers: applyCsrfHeaders(),
+        });
+      }
+
+      export async function refreshToken(paramsOrOptions = {}, maybeOptions = {}) {
+        const hasLegacyParams =
+          paramsOrOptions &&
+          typeof paramsOrOptions === "object" &&
+          Object.prototype.hasOwnProperty.call(paramsOrOptions, "accessToken");
+        const options = hasLegacyParams ? maybeOptions : paramsOrOptions;
+        const client = getClient(options);
+        return client.post({
+          path: "/auth/refresh",
+          body: null,
+          headers: applyCsrfHeaders(),
+          skipTokenRefresh: true,
+          skipAuthErrorHandling: true,
+        });
+      }
+    covers:
+      - "condition:csrf_header_injection"
+      - "transition:token_refresh_requested"
+    line_range:
+      start: 52
+      end: 107
+
+  - path: middleware.js
+    snippet: |
+      async function attemptSilentRefresh(options = {}) {
+        const { cookieHeader, requestOrigin, fetchImpl } = options;
+        const appApiUrl = resolveAppApiUrl();
+
+        if (typeof cookieHeader !== "string" || cookieHeader.length === 0 || appApiUrl.length === 0) {
+          return null;
+        }
+
+        const hasRefreshToken = cookieHeader.includes("refreshToken=");
+        if (!hasRefreshToken) {
+          return null;
+        }
+
+        const csrfToken = extractCookieValue(cookieHeader, CSRF_TOKEN_COOKIE);
+
+        let result = await callRefreshEndpoint({
+          cookieHeader,
+          requestOrigin,
+          fetchImpl,
+          csrfToken,
+          appApiUrl,
+        });
+
+        if (result.error || (result.response && result.response.error)) {
+          result = await callRefreshEndpoint({
+            cookieHeader,
+            requestOrigin,
+            fetchImpl,
+            csrfToken: null,
+            appApiUrl,
+          });
+        }
+
+        const { response, error } = result;
+
+        if (error || response.error) {
+          return null;
+        }
+
+        const raw = response.raw;
+        const rawStatusCode = raw?.statusCode ?? response.statusCode;
+
+        if (rawStatusCode !== 200) {
+          return null;
+        }
+
+        const user = raw?.user ?? raw?.data?.user;
+        if (!user) {
+          return null;
+        }
+
+        return {
+          session: normalizeSessionPayload(user),
+          csrfToken: raw?.csrfToken ?? raw?.data?.csrfToken,
+          refreshToken,
+        };
+      }
+    covers:
+      - "transition:protected_route_silent_refresh"
+      - "condition:silent_refresh_retry_without_csrf"
+      - "input:refresh_cookie"
+    line_range:
+      start: 264
+      end: 332
+
+  - path: middleware.js
+    snippet: |
+      if (!session && shouldResolveSession(pathname)) {
+        const hasRefreshToken = cookieHeader.includes(`${REFRESH_TOKEN_COOKIE}=`);
+        if (hasRefreshToken) {
+          const refreshResult = await attemptSilentRefresh({
+            cookieHeader,
+            requestOrigin,
+            fetchImpl: fetch,
+          });
+
+          if (refreshResult?.session) {
+            session = refreshResult.session;
+
+            const response = NextResponse.next();
+
+            response.cookies.set({
+              name: USER_COOKIE,
+              value: JSON.stringify(session),
+              path: "/",
+              maxAge: COOKIE_MAX_AGE_SECONDS,
+              sameSite: "lax",
+            });
+
+            if (refreshResult.csrfToken) {
+              response.cookies.set({
+                name: CSRF_TOKEN_COOKIE,
+                value: refreshResult.csrfToken,
+                path: "/",
+                maxAge: COOKIE_MAX_AGE_SECONDS,
+                sameSite: "lax",
+              });
+            }
+
+            if (refreshResult.refreshToken) {
+              response.cookies.set({
+                name: REFRESH_TOKEN_COOKIE,
+                value: refreshResult.refreshToken,
+                path: "/",
+                maxAge: COOKIE_MAX_AGE_SECONDS,
+                sameSite: "lax",
+                httpOnly: true,
+              });
+            }
+
+            const decision = await authGuard({
+              pathname,
+              routes: ROUTES,
+              protectedPaths: PROTECTED_PATHS,
+              session,
+            });
+          }
+        }
+      }
+    covers:
+      - "transition:silent_refresh_success"
+      - "output:response_session_cookies"
+      - "output:route_guard_decision"
+    line_range:
+      start: 429
+      end: 483
+
+  - path: src/features/auth/api/authGuard.js
+    snippet: |
+      export async function authGuard(options = {}) {
+        const {
+          pathname = "/",
+          session = null,
+          routes = DEFAULT_ROUTES,
+          protectedPaths = DEFAULT_PROTECTED_PATHS,
+        } = options;
+
+        const resolvedPath = normalizePathname(pathname);
+        const resolvedSession = normalizeSession(session);
+        const protectedRoute = isProtectedRoute(resolvedPath, protectedPaths);
+        const clearSessionCookie = false;
+
+        if (!resolvedSession) {
+          if (protectedRoute) {
+            return redirect(routes.login, "anonymous_redirect_login", clearSessionCookie);
+          }
+
+          return allow("anonymous_allow_public", clearSessionCookie);
+        }
+
+        if (resolvedPath === routes.login) {
+          return redirect(routes.companies, "authenticated_redirect_companies", clearSessionCookie);
+        }
+
+        return allow("authenticated_allow_route", clearSessionCookie);
+      }
+    covers:
+      - "transition:anonymous_protected_redirect"
+      - "transition:authenticated_login_redirect"
+      - "condition:protected_route_match"
+      - "output:route_guard_decision"
+      - "input:pathname"
+    line_range:
+      start: 69
+      end: 95
+
+confidence: 0.96
+confidence_rationale: >
+  The main login, bootstrap, token staging, cross-tab sync, refresh coordination,
+  middleware silent refresh, CSRF header injection, and authGuard redirects are
+  all directly evidenced in the named source files. The remaining ambiguity is
+  mostly around backend response contracts beyond the validated fields and the
+  exact UX after non-protected-tab logout callbacks.
+unresolved_questions: []
+status: complete

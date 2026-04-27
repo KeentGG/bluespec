@@ -1,0 +1,825 @@
+id: qfm.rollback-gate
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: rollback-threshold-monitor
+    coverage: full
+    notes: >
+      Error-rate monitor tracks 4 channels: mutation (API writes), handoff
+      (navigation), pdf_terminal (PDF generation), storage (localStorage reads).
+      Each channel has a failure mode ID (FM-CONTRACT-001, FM-ROUTE-001,
+      FM-PDF-001, FM-STORAGE-001). Observations are recorded via
+      recordObservation() which increments attempt and failure counters per
+      channel. finalizeWindow() snapshots counters, calculates percentage rates,
+      and compares against configurable thresholds (contractRatePctMax default
+      0.5, routeRatePctMax default 0.2, pdfFailureBaselineRatePct + deltaMax,
+      storageRecoveryRatePct vs previous checkpoint). Breaches are detected when
+      rate exceeds threshold AND there are observations in that channel. Breach
+      keys are tracked per window and compared to previous window's breach keys
+      to detect sustained breaches.
+  - id: rollback-automatic-activation
+    coverage: full
+    notes: >
+      Automatic rollback activates when the same breach key appears in two
+      consecutive windows ("sustained breach"). When finalizeWindow() detects
+      sustainedBreachKeys.length > 0, it sets shouldRollback: true on the
+      checkpoint. The gate controller's evaluateMonitoringWindow() calls
+      activateRollback() which persists a rollback payload to localStorage under
+      key "qfm.rollback.active" with schema, reason, activatedAt, source, and
+      checkpoint windowId. Once activated, rollbackActive becomes true and all
+      subsequent resolveRoute() calls return shouldRedirect: true pointing to
+      the legacy dashboard URL.
+  - id: rollback-manual-override
+    coverage: full
+    notes: >
+      Manual rollback is triggered via NEXT_PUBLIC_DASHBOARD_PARITY_ROLLBACK
+      environment variable. When set to a truthy value ("1", "true", "yes", "y",
+      "on", "enabled"), manualRollbackEnabled becomes true in the gate
+      controller. This causes resolveRoute() to return shouldRedirect: true
+      immediately, bypassing the threshold monitor entirely. The rollback reason
+      is set to "rollback_manual_override". This takes precedence over the
+      parity feature flag — even if parity is enabled, manual rollback forces
+      redirect to v1.
+
+description: >
+  Rollback gate monitors error rates across 4 channels (mutation, handoff,
+  pdf_terminal, storage) during the dashboard v2 migration. When error rates
+  breach configurable thresholds in two consecutive monitoring windows, the
+  system automatically redirects users to the legacy v1 dashboard. A manual
+  override via environment variable can force rollback at any time. The gate
+  controller resolves routing decisions by checking: (1) whether the parity
+  feature is enabled, (2) whether manual rollback is active, (3) whether
+  automatic rollback has been triggered. Rollback state is persisted to
+  localStorage and survives page reloads. During rollback, specific storage
+  keys are preserved to maintain user data continuity.
+
+state_machine:
+  initial: monitoring
+  states:
+    - id: monitoring
+      description: >
+        Normal operation. Observations are being recorded across all 4 channels.
+        No rollback is active. The threshold monitor accumulates attempt and
+        failure counters within the current window.
+    - id: window_finalized
+      description: >
+        A monitoring window has been finalized. Counters are snapshotted, rates
+        calculated, and breaches detected. The checkpoint is stored in history
+        and counters reset for the next window. If no sustained breach is
+        detected, returns to monitoring.
+    - id: sustained_breach_detected
+      description: >
+        The same breach key(s) appeared in two consecutive windows. The gate
+        controller's evaluateMonitoringWindow() detects checkpoint.shouldRollback
+        is true and triggers activateRollback().
+    - id: rollback_activated
+      description: >
+        Rollback is active. The rollback payload is persisted to localStorage
+        under "qfm.rollback.active". All subsequent resolveRoute() calls return
+        shouldRedirect: true with the legacy dashboard URL as destination.
+        This state persists across page reloads until the localStorage key is
+        removed.
+  transitions:
+    - id: observation_recorded
+      from: monitoring
+      to: monitoring
+      trigger: recordObservation() called with channel, count, failed, recovered
+      guards:
+        - field: channel
+          condition: >
+            Channel is one of: mutation, handoff, pdf_terminal, storage
+      effects:
+        - Attempt counter for the channel incremented by count
+        - If failed or recovered is true, failure counter incremented via
+          resolveFailureModeForChannel()
+    - id: window_finalized_no_breach
+      from: monitoring
+      to: monitoring
+      trigger: finalizeWindow() called and no sustained breach detected
+      guards:
+        - field: sustained_breach_keys
+          condition: sustainedBreachKeys.length is 0
+      effects:
+        - Checkpoint stored in history array
+        - previousCheckpoint and previousBreachKeys updated
+        - Window counters reset to zero
+    - id: window_finalized_with_breach
+      from: monitoring
+      to: window_finalized
+      trigger: finalizeWindow() called and at least one breach detected in this window
+      guards:
+        - field: breach_keys
+          condition: breachKeys.length > 0
+      effects:
+        - Checkpoint stored with breachKeys and metrics
+        - previousBreachKeys updated to current breachKeys
+        - Window counters reset to zero
+    - id: sustained_breach_confirmed
+      from: window_finalized
+      to: sustained_breach_detected
+      trigger: >
+        finalizeWindow() detects breachKeys overlap with previousBreachKeys
+        (sustainedBreachKeys.length > 0)
+      guards:
+        - field: sustained_breach_keys
+          condition: >
+            At least one breach key from current window was also present in
+            previous window's breach keys
+      effects:
+        - checkpoint.shouldRollback set to true
+    - id: rollback_activated_by_monitor
+      from: sustained_breach_detected
+      to: rollback_activated
+      trigger: >
+        evaluateMonitoringWindow() calls activateRollback() with reason
+        "rollback_{sustainedBreachKeys[0]}"
+      effects:
+        - rollbackPayload persisted to localStorage as JSON
+        - rollbackActive set to true in controller state
+        - rollbackReason set to the activation reason
+    - id: rollback_activated_manual
+      from: monitoring
+      to: rollback_activated
+      trigger: >
+        Gate controller initialized with manualRollbackEnabled=true from
+        NEXT_PUBLIC_DASHBOARD_PARITY_ROLLBACK env var
+      guards:
+        - field: manual_rollback_env
+          condition: >
+            NEXT_PUBLIC_DASHBOARD_PARITY_ROLLBACK is truthy ("1", "true",
+            "yes", "y", "on", "enabled")
+      effects:
+        - rollbackActive set to true immediately on controller creation
+        - rollbackReason set to "rollback_manual_override"
+    - id: rollback_restored_from_storage
+      from: monitoring
+      to: rollback_activated
+      trigger: >
+        Gate controller reads existing rollback payload from localStorage
+        on initialization
+      guards:
+        - field: stored_rollback_payload
+          condition: >
+            localStorage key "qfm.rollback.active" contains valid JSON object
+      effects:
+        - rollbackActive set to true from stored payload
+        - rollbackReason restored from stored payload.reason
+
+conditions:
+  - id: parity-feature-enabled
+    description: >
+      Controls whether the v2 dashboard feature is active. When false, all
+      users are redirected to v1 regardless of rollback state. This is the
+      outermost kill switch.
+    trigger: resolveRoute() called
+    guards:
+      - field: parity_feature_enabled
+        condition: >
+          NEXT_PUBLIC_DASHBOARD_PARITY_ENABLED env var is truthy (default: true)
+    then:
+      - Proceed to check rollback state
+    else:
+      - Return shouldRedirect: true with reason "parity_feature_disabled"
+      - Destination set to legacy dashboard URL with requested path
+
+  - id: rollback-active-check
+    description: >
+      Determines whether rollback is currently active (either via manual
+      override or automatic activation). If active, all route resolutions
+      redirect to v1.
+    trigger: resolveRoute() called with parity feature enabled
+    guards:
+      - field: rollback_active
+        condition: >
+          manualRollbackEnabled is true OR rollbackActive is true (from
+          automatic activation or stored payload)
+    then:
+      - Return shouldRedirect: true with reason from rollbackReason
+      - Destination set to legacy dashboard URL with requested path
+    else:
+      - Return shouldRedirect: false with reason "parity_feature_enabled"
+      - Destination is null (user stays on v2)
+
+  - id: threshold-breach-contract
+    description: >
+      Checks if the contract failure rate (API write errors) exceeds the
+      configured threshold. Only triggers if there were mutation attempts in
+      the window.
+    trigger: finalizeWindow() calculates metrics
+    guards:
+      - field: mutation_attempts
+        condition: snapshot.mutationAttempts > 0
+      - field: contract_rate
+        condition: >
+          metrics.contractRatePct > thresholds.contractRatePctMax
+          (default 0.5 = 50%)
+    then:
+      - Add "contract_rate_breach" to breachKeys
+    else:
+      - No breach for contract channel
+
+  - id: threshold-breach-route
+    description: >
+      Checks if the route failure rate (navigation errors) exceeds the
+      configured threshold. Only triggers if there were handoff attempts.
+    trigger: finalizeWindow() calculates metrics
+    guards:
+      - field: handoff_attempts
+        condition: snapshot.handoffAttempts > 0
+      - field: route_rate
+        condition: >
+          metrics.routeRatePct > thresholds.routeRatePctMax
+          (default 0.2 = 20%)
+    then:
+      - Add "route_rate_breach" to breachKeys
+    else:
+      - No breach for route channel
+
+  - id: threshold-breach-pdf
+    description: >
+      Checks if the PDF terminal failure rate exceeds baseline + delta
+      threshold. Only triggers if there were PDF attempts.
+    trigger: finalizeWindow() calculates metrics
+    guards:
+      - field: pdf_attempts
+        condition: snapshot.pdfTerminalAttempts > 0
+      - field: pdf_rate
+        condition: >
+          metrics.pdfTerminalFailureRatePct >
+          thresholds.pdfFailureBaselineRatePct + thresholds.pdfFailureRatePctDeltaMax
+    then:
+      - Add "pdf_terminal_failure_rate_breach" to breachKeys
+    else:
+      - No breach for PDF channel
+
+  - id: threshold-breach-storage
+    description: >
+      Checks if the storage recovery rate increased compared to the previous
+      checkpoint. Only triggers if there were storage samples AND a previous
+      checkpoint exists.
+    trigger: finalizeWindow() calculates metrics
+    guards:
+      - field: storage_samples
+        condition: snapshot.storageSamples > 0
+      - field: previous_checkpoint
+        condition: previousCheckpoint is not null
+      - field: storage_recovery_rate
+        condition: >
+          metrics.storageRecoveryRatePct >
+          previousCheckpoint.metrics.storageRecoveryRatePct
+    then:
+      - Add "storage_recovery_rate_increase" to breachKeys
+    else:
+      - No breach for storage channel
+
+  - id: sustained-breach-detection
+    description: >
+      Detects when the same breach key appears in two consecutive windows.
+      This is the "sustained breach" mechanism that prevents rollback on
+      transient spikes.
+    trigger: finalizeWindow() after breachKeys are computed
+    guards:
+      - field: previous_breach_keys
+        condition: previousBreachKeys.size > 0
+      - field: current_breach_keys
+        condition: breachKeys overlap with previousBreachKeys
+    then:
+      - sustainedBreachKeys = breachKeys filtered by previousBreachKeys
+      - shouldRollback set to true
+    else:
+      - sustainedBreachKeys is empty
+      - shouldRollback remains false
+
+inputs:
+  - id: observation
+    type: "Observation object { channel, count, failed, recovered, failureModeId }"
+    source: "Application code calling recordObservation()"
+    required: true
+    validation:
+      channel: "string — one of: mutation, handoff, pdf_terminal, storage"
+      count: "positive integer, default 1"
+      failed: "boolean, default false"
+      recovered: "boolean, default false"
+      failureModeId: "string, optional — explicit failure mode override"
+
+  - id: env_parity_enabled
+    type: "string (truthy/falsy flag)"
+    source: "NEXT_PUBLIC_DASHBOARD_PARITY_ENABLED environment variable"
+    required: false
+    validation:
+      truthy_values: '["1", "true", "yes", "y", "on", "enabled"]'
+      falsy_values: '["0", "false", "no", "n", "off", "disabled"]'
+      default: "true"
+
+  - id: env_manual_rollback
+    type: "string (truthy/falsy flag)"
+    source: "NEXT_PUBLIC_DASHBOARD_PARITY_ROLLBACK environment variable"
+    required: false
+    validation:
+      truthy_values: '["1", "true", "yes", "y", "on", "enabled"]'
+      default: "false"
+
+  - id: env_legacy_url
+    type: "string URL"
+    source: "NEXT_PUBLIC_LEGACY_DASHBOARD_URL or NEXT_PUBLIC_TOOLS_URL env var"
+    required: false
+    validation:
+      default: "https://exitonyourterms.com/tools/"
+
+  - id: storage_rollback_payload
+    type: "JSON string in localStorage"
+    source: 'localStorage key "qfm.rollback.active"'
+    required: false
+    validation:
+      format: "JSON object with schema, reason, activatedAt, source, checkpoint fields"
+
+  - id: thresholds
+    type: "Thresholds object { contractRatePctMax, routeRatePctMax, pdfFailureBaselineRatePct, pdfFailureRatePctDeltaMax }"
+    source: "Options passed to createRollbackThresholdMonitor()"
+    required: false
+    validation:
+      contractRatePctMax: "number, default 0.5 (50%)"
+      routeRatePctMax: "number, default 0.2 (20%)"
+      pdfFailureBaselineRatePct: "number, default 0"
+      pdfFailureRatePctDeltaMax: "number, default 2 (minimum observations)"
+
+outputs:
+  - id: route_decision
+    type: "RouteDecision object { schema, shouldRedirect, reason, destination, parityFeatureEnabled, rollbackActive, rollbackReason, shouldPreserveState, destructiveStorageResetAllowed, preserveStorageKeys, storageMutations }"
+    destination: "Caller of resolveRoute() or resolveRollbackRouteContract()"
+    lifespan: "immediate (per-call decision)"
+
+  - id: rollback_payload
+    type: "JSON string persisted to localStorage"
+    destination: 'localStorage key "qfm.rollback.active"'
+    lifespan: "persists until manually removed"
+
+  - id: checkpoint
+    type: "Checkpoint object { schema, windowId, timestamp, thresholds, counters, metrics, breaches, breachKeys, sustainedBreachKeys, shouldRollback }"
+    destination: "Stored in monitor history array and returned to caller"
+    lifespan: "session (in-memory history array)"
+
+  - id: monitor_snapshot
+    type: "Snapshot object { schema, thresholds, windowCounters, checkpointCount, lastCheckpoint }"
+    destination: "Caller of monitor.snapshot()"
+    lifespan: "immediate"
+
+  - id: preserved_storage_keys
+    type: "Array of localStorage keys preserved during rollback"
+    destination: "Used by storage cleanup logic to avoid deleting user data"
+    lifespan: "permanent (static list)"
+    notes: >
+      Includes "db_businessid" plus all keys from STORAGE_KEY_CONTRACTS
+      (user, rememberMe, targetId, questionnaireSteps, currentStepper,
+      isClassificationFinished, LastformValues, downloadingpdf, downloadPdfKey).
+
+evidence_refs:
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      export const ROLLBACK_DEFAULT_FAILURE_THRESHOLD = 0.5;
+      export const ROLLBACK_DEFAULT_MIN_RATE = 0.2;
+      export const ROLLBACK_DEFAULT_MIN_OBSERVATIONS = 2;
+      export const QFM_ROLLBACK_CHANNELS = Object.freeze({
+        MUTATION: "mutation",
+        HANDOFF: "handoff",
+        PDF_TERMINAL: "pdf_terminal",
+        STORAGE: "storage",
+      });
+      export const QFM_ROLLBACK_FAILURE_MODES = Object.freeze({
+        CONTRACT: "FM-CONTRACT-001",
+        ROUTE: "FM-ROUTE-001",
+        PDF: "FM-PDF-001",
+        STORAGE: "FM-STORAGE-001",
+      });
+    covers:
+      - "condition:threshold-breach-contract"
+      - "condition:threshold-breach-route"
+      - "condition:threshold-breach-pdf"
+      - "condition:threshold-breach-storage"
+    line_range:
+      start: 46
+      end: 67
+
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      export function createRollbackThresholdMonitor(options = {}) {
+        const thresholds = normalizeThresholds(options.thresholds);
+        const now = resolveNowFactory(options.now);
+        const history = [];
+        let counters = createWindowCounters();
+        let previousCheckpoint = null;
+        let previousBreachKeys = new Set();
+
+        function recordObservation(observation = {}) {
+          const channel = normalizeString(observation.channel);
+          const count = normalizePositiveInteger(observation.count, 1);
+          const failed = observation.failed === true;
+          const recovered = observation.recovered === true;
+
+          if (channel === QFM_ROLLBACK_CHANNELS.MUTATION) {
+            counters.mutationAttempts += count;
+          } else if (channel === QFM_ROLLBACK_CHANNELS.HANDOFF) {
+            counters.handoffAttempts += count;
+          } else if (channel === QFM_ROLLBACK_CHANNELS.PDF_TERMINAL) {
+            counters.pdfTerminalAttempts += count;
+          } else if (channel === QFM_ROLLBACK_CHANNELS.STORAGE) {
+            counters.storageSamples += count;
+          }
+
+          const failureModeId = resolveFailureModeForChannel(
+            channel,
+            failed || recovered,
+            observation.failureModeId,
+          );
+          if (failureModeId) {
+            incrementFailureCounter(counters, failureModeId, count);
+          }
+
+          if (channel === QFM_ROLLBACK_CHANNELS.STORAGE && recovered && !failureModeId) {
+            counters.storageRecoveries += count;
+          }
+
+          return {
+            schema: QFM_ROLLBACK_GATE_SCHEMA,
+            windowCounters: copyCounters(counters),
+          };
+        }
+    covers:
+      - "transition:observation_recorded"
+      - "condition:threshold-breach-contract"
+      - "condition:threshold-breach-route"
+      - "condition:threshold-breach-pdf"
+      - "condition:threshold-breach-storage"
+    line_range:
+      start: 344
+      end: 385
+
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      function finalizeWindow(options = {}) {
+        const windowId = normalizeString(options.windowId) ?? `window-${history.length + 1}`;
+        const timestamp = String(resolveNowFactory(options.now ?? now)());
+        const snapshot = copyCounters(counters);
+        const metrics = {
+          contractRatePct: calculateRate(snapshot.contractFailures, snapshot.mutationAttempts),
+          routeRatePct: calculateRate(snapshot.routeFailures, snapshot.handoffAttempts),
+          pdfTerminalFailureRatePct: calculateRate(snapshot.pdfFailures, snapshot.pdfTerminalAttempts),
+          storageRecoveryRatePct: calculateRate(snapshot.storageRecoveries, snapshot.storageSamples),
+        };
+
+        const breaches = {
+          contractRate:
+            snapshot.mutationAttempts > 0 && metrics.contractRatePct > thresholds.contractRatePctMax,
+          routeRate: snapshot.handoffAttempts > 0 && metrics.routeRatePct > thresholds.routeRatePctMax,
+          pdfTerminalFailureRate:
+            snapshot.pdfTerminalAttempts > 0 &&
+            metrics.pdfTerminalFailureRatePct >
+              thresholds.pdfFailureBaselineRatePct + thresholds.pdfFailureRatePctDeltaMax,
+          storageRecoveryIncrease:
+            snapshot.storageSamples > 0 &&
+            previousCheckpoint !== null &&
+            metrics.storageRecoveryRatePct > previousCheckpoint.metrics.storageRecoveryRatePct,
+        };
+
+        const breachKeys = [];
+        if (breaches.contractRate) breachKeys.push(CHECKPOINT_BREACH_KEYS.CONTRACT);
+        if (breaches.routeRate) breachKeys.push(CHECKPOINT_BREACH_KEYS.ROUTE);
+        if (breaches.pdfTerminalFailureRate) breachKeys.push(CHECKPOINT_BREACH_KEYS.PDF);
+        if (breaches.storageRecoveryIncrease) breachKeys.push(CHECKPOINT_BREACH_KEYS.STORAGE);
+
+        const sustainedBreachKeys = breachKeys.filter((key) => previousBreachKeys.has(key));
+        const checkpoint = {
+          schema: QFM_ROLLBACK_GATE_SCHEMA,
+          windowId,
+          timestamp,
+          thresholds,
+          counters: snapshot,
+          metrics,
+          breaches,
+          breachKeys,
+          sustainedBreachKeys,
+          shouldRollback: sustainedBreachKeys.length > 0,
+        };
+
+        history.push(checkpoint);
+        previousCheckpoint = checkpoint;
+        previousBreachKeys = new Set(breachKeys);
+        counters = createWindowCounters();
+
+        return checkpoint;
+      }
+    covers:
+      - "transition:window_finalized_no_breach"
+      - "transition:window_finalized_with_breach"
+      - "condition:sustained-breach-detection"
+      - "output:checkpoint"
+    line_range:
+      start: 387
+      end: 446
+
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      export function createRollbackGateController(options = {}) {
+        const now = resolveNowFactory(options.now);
+        const parityFeatureEnabled = parseBooleanFlag(options.parityFeatureEnabled, true);
+        const manualRollbackEnabled = parseBooleanFlag(options.manualRollbackEnabled, false);
+        const monitor = isPlainObject(options.monitor) ? options.monitor : null;
+        const storage = options.storage ?? null;
+        const legacyDashboardUrl = normalizeLegacyDashboardUrl(options.legacyDashboardUrl);
+
+        let rollbackPayload = parseRollbackPayload(readStorageValue(storage, QFM_ROLLBACK_STORAGE_KEY));
+        let rollbackActive = manualRollbackEnabled || rollbackPayload !== null;
+        let rollbackReason =
+          normalizeString(rollbackPayload?.reason) ??
+          (manualRollbackEnabled ? "rollback_manual_override" : null);
+    covers:
+      - "transition:rollback_activated_manual"
+      - "transition:rollback_restored_from_storage"
+      - "condition:parity-feature-enabled"
+      - "condition:rollback-active-check"
+    line_range:
+      start: 471
+      end: 483
+
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      function activateRollback(options = {}) {
+        const reason = normalizeString(options.reason) ?? "rollback_threshold_breach";
+        const payload = {
+          schema: QFM_ROLLBACK_GATE_SCHEMA,
+          reason,
+          activatedAt: String(now()),
+          source: normalizeString(options.source) ?? "qfm.threshold.monitor",
+          checkpoint:
+            isPlainObject(options.checkpoint) && normalizeString(options.checkpoint.windowId)
+              ? options.checkpoint.windowId
+              : null,
+        };
+
+        rollbackPayload = payload;
+        rollbackActive = true;
+        rollbackReason = payload.reason;
+
+        const payloadJson = JSON.stringify(payload);
+        const persisted = writeStorageValue(storage, QFM_ROLLBACK_STORAGE_KEY, payloadJson);
+
+        return {
+          schema: QFM_ROLLBACK_GATE_SCHEMA,
+          rollbackActivated: true,
+          rollbackReason: rollbackReason,
+          rollbackPayload: payload,
+          storageMutations: persisted
+            ? [{ key: QFM_ROLLBACK_STORAGE_KEY, action: "set", value: payloadJson }]
+            : [],
+          shouldPreserveState: true,
+          destructiveStorageResetAllowed: false,
+        };
+      }
+    covers:
+      - "transition:rollback_activated_by_monitor"
+      - "output:rollback_payload"
+    line_range:
+      start: 485
+      end: 516
+
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      function resolveRoute(options = {}) {
+        const path = options.path;
+        const destination = resolveLegacyDestination(legacyDashboardUrl, path);
+
+        if (parityFeatureEnabled !== true) {
+          return createRouteDecision({
+            shouldRedirect: true,
+            reason: "parity_feature_disabled",
+            destination,
+            parityFeatureEnabled,
+            rollbackActive,
+            rollbackReason,
+          });
+        }
+
+        if (manualRollbackEnabled || rollbackActive) {
+          return createRouteDecision({
+            shouldRedirect: true,
+            reason: rollbackReason ?? "rollback_active",
+            destination,
+            parityFeatureEnabled,
+            rollbackActive: true,
+            rollbackReason,
+          });
+        }
+
+        return createRouteDecision({
+          shouldRedirect: false,
+          reason: "parity_feature_enabled",
+          destination: null,
+          parityFeatureEnabled,
+          rollbackActive,
+          rollbackReason,
+        });
+      }
+    covers:
+      - "condition:parity-feature-enabled"
+      - "condition:rollback-active-check"
+      - "output:route_decision"
+    line_range:
+      start: 559
+      end: 593
+
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      export function resolveRollbackRouteContract(options = {}) {
+        const env = isPlainObject(options.env) ? options.env : {};
+        const controller = createRollbackGateController({
+          parityFeatureEnabled:
+            typeof options.parityFeatureEnabled !== "undefined"
+              ? options.parityFeatureEnabled
+              : env.NEXT_PUBLIC_DASHBOARD_PARITY_ENABLED,
+          manualRollbackEnabled:
+            typeof options.manualRollbackEnabled !== "undefined"
+              ? options.manualRollbackEnabled
+              : env.NEXT_PUBLIC_DASHBOARD_PARITY_ROLLBACK,
+          legacyDashboardUrl:
+            options.legacyDashboardUrl ??
+            env.NEXT_PUBLIC_LEGACY_DASHBOARD_URL ??
+            env.NEXT_PUBLIC_TOOLS_URL ??
+            DEFAULT_LEGACY_DASHBOARD_URL,
+          storage: options.storage ?? null,
+          now: options.now,
+        });
+
+        return controller.resolveRoute({
+          path: options.path,
+        });
+      }
+    covers:
+      - "output:route_decision"
+      - "condition:parity-feature-enabled"
+      - "condition:rollback-active-check"
+    line_range:
+      start: 621
+      end: 644
+
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      export const QFM_ROLLBACK_PRESERVED_STORAGE_KEYS = Object.freeze([
+        "db_businessid",
+        ...Object.keys(STORAGE_KEY_CONTRACTS),
+      ]);
+    covers:
+      - "output:preserved_storage_keys"
+    line_range:
+      start: 68
+      end: 71
+
+  - path: src/shared/lib/contracts/storage-contract.js
+    snippet: |
+      export const STORAGE_KEY_CONTRACTS = Object.freeze({
+        user: Object.freeze({
+          medium: "cookie",
+          owners: Object.freeze(["tokenService", "authFlows"]),
+          identityBearing: false,
+        }),
+        rememberMe: Object.freeze({
+          medium: "cookie",
+          owners: Object.freeze(["tokenService"]),
+          identityBearing: false,
+        }),
+        targetId: Object.freeze({
+          medium: "secureLocalStorage",
+          owners: Object.freeze(["useTargetId", "gateReportFlows"]),
+          identityBearing: true,
+        }),
+        questionnaireSteps: Object.freeze({
+          medium: "secureLocalStorage",
+          owners: Object.freeze(["useQuestionnaireStore"]),
+          identityBearing: false,
+        }),
+        currentStepper: Object.freeze({
+          medium: "secureLocalStorage",
+          owners: Object.freeze(["useQuestionnaireStore"]),
+          identityBearing: false,
+        }),
+        isClassificationFinished: Object.freeze({
+          medium: "secureLocalStorage",
+          owners: Object.freeze(["useIndustryClassification"]),
+          identityBearing: false,
+        }),
+        LastformValues: Object.freeze({
+          medium: "secureLocalStorage",
+          owners: Object.freeze(["useLocalStorage", "StoredAnswersContext"]),
+          identityBearing: false,
+        }),
+        downloadingpdf: Object.freeze({
+          medium: "secureLocalStorage",
+          owners: Object.freeze(["useDownloadStore"]),
+          identityBearing: false,
+        }),
+        downloadPdfKey: Object.freeze({
+          medium: "secureLocalStorage",
+          owners: Object.freeze(["useDownloadStore"]),
+          identityBearing: true,
+        }),
+      });
+    covers:
+      - "output:preserved_storage_keys"
+    line_range:
+      start: 109
+      end: 155
+
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      function evaluateMonitoringWindow(options = {}) {
+        const checkpoint =
+          isPlainObject(options.checkpoint) && options.checkpoint.schema
+            ? options.checkpoint
+            : monitor && typeof monitor.finalizeWindow === "function"
+              ? monitor.finalizeWindow(options)
+              : null;
+
+        if (!checkpoint) {
+          return {
+            schema: QFM_ROLLBACK_GATE_SCHEMA,
+            evaluated: false,
+            rollbackActivated: false,
+            checkpoint: null,
+          };
+        }
+
+        if (checkpoint.shouldRollback !== true) {
+          return {
+            schema: QFM_ROLLBACK_GATE_SCHEMA,
+            evaluated: true,
+            rollbackActivated: false,
+            checkpoint,
+          };
+        }
+
+        const activated = activateRollback({
+          reason: `rollback_${checkpoint.sustainedBreachKeys?.[0] ?? "threshold_breach"}`,
+          source: "qfm.threshold.monitor",
+          checkpoint,
+        });
+
+        return {
+          schema: QFM_ROLLBACK_GATE_SCHEMA,
+          evaluated: true,
+          rollbackActivated: true,
+          checkpoint,
+          ...activated,
+        };
+      }
+    covers:
+      - "transition:sustained_breach_confirmed"
+      - "transition:rollback_activated_by_monitor"
+    line_range:
+      start: 518
+      end: 557
+
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      const TRUTHY_FLAGS = new Set(["1", "true", "yes", "y", "on", "enabled"]);
+      const FALSY_FLAGS = new Set(["0", "false", "no", "n", "off", "disabled"]);
+      const DEFAULT_LEGACY_DASHBOARD_URL = "https://exitonyourterms.com/tools/";
+    covers:
+      - "condition:parity-feature-enabled"
+      - "condition:rollback-active-check"
+      - "input:env_parity_enabled"
+      - "input:env_manual_rollback"
+    line_range:
+      start: 73
+      end: 75
+
+confidence: 0.93
+confidence_rationale: >
+  All three discovered behaviors are fully evidenced across 2 source files with
+  direct code snippets. Threshold monitor confirmed in rollbackGate.js with
+  createRollbackThresholdMonitor() tracking 4 channels, recording observations,
+  finalizing windows, and detecting sustained breaches across consecutive
+  windows. Automatic activation confirmed via evaluateMonitoringWindow() calling
+  activateRollback() when checkpoint.shouldRollback is true, with localStorage
+  persistence. Manual override confirmed via parseBooleanFlag() on
+  NEXT_PUBLIC_DASHBOARD_PARITY_ROLLBACK env var with truthy flag set. Route
+  resolution confirmed in resolveRoute() with 3-way decision tree (parity
+  disabled / rollback active / normal). Storage contract confirmed in
+  storage-contract.js with 9 key contracts that form the preserved keys list.
+  Deducted 0.07 because: (1) the actual consumers of resolveRollbackRouteContract()
+  are not in scope — we see the function but not where it's called in the app,
+  (2) the storage read/write functions (readStorageValue/writeStorageValue) are
+  thin wrappers but their failure modes in real browsers (quota exceeded, private
+  browsing) are not tested here, (3) the window finalization timing is
+  caller-dependent — the spec documents the mechanism but not the actual
+  monitoring interval used in production.
+
+unresolved_questions:
+  - "Where is resolveRollbackRouteContract() called in the application? The function is exported but its integration point (likely a layout component or route guard) is not in scope."
+  - "What is the actual monitoring interval / window duration? finalizeWindow() is called by the caller — the spec documents the mechanism but not the production timing."
+  - "How is the rollback payload removed from localStorage to recover from rollback? The activateRollback() writes it but no deactivation/removal function is visible in this module."
+  - "What happens if localStorage is unavailable (private browsing, quota exceeded)? readStorageValue/writeStorageValue silently fail, which means rollback state cannot be persisted — is this intentional?"
+  - "Are there any other consumers of the STORAGE_KEY_CONTRACTS besides the rollback gate's preserved keys list? The contract is imported but its full usage across the app is not visible."
+  - "Does the storage recovery rate breach (storageRecoveryIncrease) have a different semantic meaning than the other breaches? It compares against the previous checkpoint's rate rather than an absolute threshold."
+
+status: complete

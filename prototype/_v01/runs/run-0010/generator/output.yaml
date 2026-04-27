@@ -1,0 +1,45 @@
+run_id: run-0010
+generator: run_generator
+status: complete
+provider: manual-orchestrated
+model: gpt-5.4-mini
+steps_completed: 5
+failed_at_step: null
+error_reason: null
+confidence_by_section:
+  explore: 0.96
+  analyze: 0.93
+  delegate: 0.98
+  draft: 0.94
+  verify: 0.97
+overall_confidence: 0.95
+generation_started_at: 2026-04-22T07:57:55Z
+generation_completed_at: 2026-04-22T08:00:45Z
+unresolved_questions:
+  - Whether the stale auth golden should be remapped to the create-flow TOA gate or split from the edit resume flow downstream.
+  - Whether the stale download golden should be interpreted as hidden-then-visible or visible-disabled-then-visible-enabled in downstream specs.
+  - Whether any other report action surface hides the Download control outside the manifest-scoped files.
+phase_outputs:
+  explore: generator/steps/step-1-explore.yaml
+  analyze: generator/steps/step-2-analyze.yaml
+  delegate: generator/steps/step-3-delegate.yaml
+  draft: generator/steps/step-4-draft.yaml
+  verify: generator/steps/step-5-verify.yaml
+specs_generated:
+  - generator/specs/auth.conditional-redirect.yaml
+  - generator/specs/reports.download-button-visibility.yaml
+flags_for_analyzer:
+  - "auth-conditional-redirect: partial coverage — agreement-state gate exists, but on create-report TOA rather than the stale edit route"
+  - "reports.download-button-visibility: partial coverage — button is visible-but-disabled before 100 instead of hidden"
+  - "both specs carry stale evidence-path notes and cite live source files"
+summary: >
+  The run produced two partial behavioral specs and preserved the predicate-level
+  differences the mutation asked for: agreement-state gating vs ordinary handoff,
+  and visible-disabled vs visible-enabled download behavior.
+cross_refs:
+  - from: auth.conditional-redirect.yaml
+    to: reports.download-button-visibility.yaml
+    relation: same dashboard reports surface; distinct conditional branches
+  - from: reports.download-button-visibility.yaml
+    to: auth.conditional-redirect.yaml
+    relation: same dashboard surface; separate gate semantics

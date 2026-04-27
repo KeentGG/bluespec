@@ -1,0 +1,70 @@
+run_id: "run-0010"
+evaluator: "run_evaluator"
+status: "complete"
+provider: "opencode-agent"
+scored_specs:
+  - "auth.conditional-redirect.yaml"
+  - "reports.download-button-visibility.yaml"
+recall_hits:
+  - spec_id: "auth.conditional-redirect.yaml"
+    golden_behavior_id: "auth-conditional-redirect"
+    coverage: "partial"
+    matched_behavior:
+      - "Captures TOA agreement gating in the create-report branch and the separate edit-handoff/resume-route path."
+      - "Documents the introduction redirect, gate handoff, and saved-progress resume flow with concrete evidence refs."
+    evidence_basis:
+      - "useReportCreation.ts and toa-contract.js show agreement-state gating for create-report."
+      - "useReportNavigation.ts and gate-edit-contract.js show ordinary edit handoff and resume routing."
+  - spec_id: "reports.download-button-visibility.yaml"
+    golden_behavior_id: "download-button-visibility"
+    coverage: "partial"
+    matched_behavior:
+      - "Captures the thresholded download affordance: the button stays mounted and becomes interactive only when progress reaches 100."
+      - "Documents the in-flight disabled state and label swap to Downloading...."
+    evidence_basis:
+      - "ReportSplitActions.tsx shows the always-mounted button with disabled/enabled branching."
+      - "ReportsTable.tsx, useReportRowController.ts, and useDownloadStore.ts connect the affordance to the download lifecycle."
+recall_misses:
+  - spec_id: "auth.conditional-redirect.yaml"
+    golden_behavior_id: "auth-conditional-redirect"
+    missed_behavior: "The golden requires agreement-state gating on the edit flow, but the generated spec places the agreement check on create-report and explicitly says edit does not consult the agreement flag."
+    severity: "high"
+  - spec_id: "reports.download-button-visibility.yaml"
+    golden_behavior_id: "download-button-visibility"
+    missed_behavior: "The golden requires the button to become visible only after the download stage, but the generated spec keeps the button visible at all times and only changes disabled state."
+    severity: "high"
+precision_findings:
+  - spec_id: "auth.conditional-redirect.yaml"
+    severity: "low"
+    finding: "The evidence is solid for the create-flow TOA gate and the edit handoff, but the end-to-end story is assembled across multiple files rather than proven by a single cited snippet."
+  - spec_id: "reports.download-button-visibility.yaml"
+    severity: "low"
+    finding: "The button-state mapping is grounded, but 'download stage' is inferred from progressPercentage === 100 rather than named as a distinct UI stage in the cited code."
+consistency_findings:
+  - spec_id: "auth.conditional-redirect.yaml"
+    severity: "none"
+    finding: "No material internal contradiction found; the create-flow gate and edit-flow handoff are described consistently."
+  - spec_id: "reports.download-button-visibility.yaml"
+    severity: "none"
+    finding: "No material internal contradiction found; rendered/disabled/Downloading... states line up."
+rubric_gap_candidates:
+  - id: "predicate_level_visibility_distinction"
+    proposed_only: true
+    suspicion: "The rubric should distinguish hidden-vs-disabled visibility predicates for state-dependent button behavior."
+    rationale: "The download spec is faithful to the code but not to the stale golden wording; a rubric axis for visibility predicates would make the mismatch explicit."
+  - id: "stale_golden_vs_observed_route_flow"
+    proposed_only: true
+    suspicion: "The rubric should flag when the golden behavior names the wrong flow boundary (create vs edit)."
+    rationale: "The auth spec documents observed TOA gating accurately, but the golden behavior points to edit-flow gating, so a rubric gap around stale-golden drift would prevent conflating evidence fidelity with golden recall."
+overall_score: 0.76
+overall_score_breakdown:
+  recall: 0.41
+  precision: 0.92
+  consistency: 0.97
+confidence: 0.91
+confidence_rationale: >
+  The score is grounded in the two generated spec files, the frozen rubric, and
+  the golden set. Confidence is high because both specs are internally coherent
+  and evidence-backed, but not maximal because the evaluator must judge recall
+  against golden wording that appears stale relative to the observed code.
+scoring_timestamp: "2026-04-22T08:11:26Z"

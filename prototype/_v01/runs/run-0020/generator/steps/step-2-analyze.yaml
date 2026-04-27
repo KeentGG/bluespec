@@ -1,0 +1,180 @@
+predicate_inventory:
+  - behavior_id: auth_route_guard_middleware
+    predicates:
+      - QFM rollback gate active (v1/v2 routing decision)
+      - Session cookie present in request
+      - Route is protected (/companies, /reports)
+      - Silent token refresh succeeds (HTTP-only refresh cookie)
+    render_mode: hidden
+  - behavior_id: auth_client_route_guard
+    predicates:
+      - In-memory token exists on page mount
+      - Token refresh attempt succeeds
+    render_mode: visible-disabled
+  - behavior_id: auth_token_refresh
+    predicates:
+      - HTTP 401 response detected
+      - localStorage lock acquired (leader tab)
+      - Lock NOT acquired (follower tab — waits via crossTab)
+      - POST /auth/refresh API call succeeds
+      - POST /auth/refresh API call fails
+      - Lock auto-expires after 10s timeout (deadlock prevention)
+      - Intra-tab promise deduplication active (one refresh per tab)
+    render_mode: hidden
+  - behavior_id: auth_cross_tab_sync
+    predicates:
+      - BroadcastChannel API available (fallback to localStorage for Safari)
+      - Logout broadcast received
+      - Login broadcast received
+      - Receiving tab is on a protected route (redirect to /login)
+      - Receiving tab is on /login (redirect to /companies on login broadcast)
+      - Debounce window (1s) has elapsed since last broadcast
+    render_mode: hidden
+  - behavior_id: auth_error_handling
+    predicates:
+      - Response status is 401 or 403
+      - Error message matches auth-related patterns
+      - Module-level concurrent handling flag is NOT set
+      - "apiClient 401 path: refresh attempted first, handler is fallback"
+    render_mode: hidden
+  - behavior_id: auth_csrf_protection
+    predicates:
+      - Request method is POST, PATCH, or DELETE
+      - csrfToken cookie exists in document.cookie
+      - csrfToken cookie missing → proactive refresh triggered
+      - Retry count < 1 (max 1 retry, prevents infinite loop)
+    render_mode: hidden
+  - behavior_id: auth_api_client_integration
+    predicates:
+      - Request method requires Bearer token (all requests)
+      - Request method requires CSRF header (POST/PATCH/DELETE)
+      - Response returns 401 → refresh-and-retry flow
+      - CSRF failure detected → refresh-and-retry flow
+      - Refresh fails → handleAuthError fallback
+      - Response passes through QFM responseAdapter normalization
+    render_mode: hidden
+  - behavior_id: auth_token_validation
+    predicates:
+      - JWT payload is valid base64url
+      - Token structure passes validateToken check
+      - isTokenExpired intentionally returns false (defers to backend 401)
+    render_mode: hidden
+  - behavior_id: stateful_ui_dashboard_shell
+    predicates:
+      - User email extracted from in-memory token (useEffect + getToken)
+      - Sidebar isOpen state is true/false (toggled by hamburger)
+      - Logout action triggered (API call → clear session → toast → redirect)
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui_sidebar
+    predicates:
+      - isOpen prop is true (sidebar visible)
+      - isOpen prop is false (sidebar hidden)
+      - activeItemId matches current route (highlighted nav item)
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui_company_modals
+    predicates:
+      - "Create modal: user clicks create button → isOpenCreate=true"
+      - "Edit modal: user clicks edit on row → isOpenEdit=true, selectedCompany
+        set"
+      - "Delete modal: user clicks delete on row → isOpenDelete=true,
+        selectedCompany set"
+      - Form validation passes/fails (useCompanyForm)
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui_reports_stores
+    predicates:
+      - List filters applied (useReportsListStore)
+      - Pagination state changes
+      - Create wizard step advances (useCreateReportStore)
+      - Row-level action state active (useReportActionStore)
+      - Modal visibility flags for Create/Delete/Email
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui_gate_routing
+    predicates:
+      - Session state determines initial redirect (useRootRedirect)
+      - New entry form validation (useGateNewEntryState)
+      - Edit entry form validation (useGateEditEntryState)
+      - Route entry status displayed (GateStatusView)
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui_pdf_overlay
+    predicates:
+      - PDF generation in progress → overlay visible
+      - Download state changes (useDownloadStore Zustand)
+    render_mode: visible-enabled
+  - behavior_id: infra_qfm_response_normalization
+    predicates:
+      - Response needs normalization through responseAdapter
+      - Error classified by failureTaxonomy (auth/session, network, validation,
+        etc.)
+      - "Rollback gate: v2 active or redirect to v1"
+    render_mode: hidden
+  - behavior_id: infra_stale_response_guards
+    predicates:
+      - API response timestamp is older than current in-flight request
+      - Response should be ignored (stale — prevents out-of-order corruption)
+    render_mode: hidden
+behaviors_to_spec:
+  - auth_login_signup
+  - auth_session_memory_store
+  - auth_token_refresh
+  - auth_cross_tab_sync
+  - auth_route_guard_middleware
+  - auth_client_route_guard
+  - auth_error_handling
+  - auth_csrf_protection
+  - auth_password_reset
+  - auth_token_validation
+  - auth_api_client_integration
+  - auth_user_service
+  - stateful_ui_dashboard_shell
+  - stateful_ui_sidebar
+  - stateful_ui_company_modals
+  - stateful_ui_reports_stores
+  - stateful_ui_gate_routing
+  - stateful_ui_photo_editor
+  - stateful_ui_pdf_overlay
+  - infra_qfm_response_normalization
+  - infra_stale_response_guards
+needs_deeper_exploration:
+  - behavior_id: auth_token_refresh
+    reason: >
+      The cross-tab lock/leader/follower state machine is the most complex
+      coordination mechanism in the auth system. The description mentions a
+      localStorage-based lock, 10s auto-expiry, promise deduplication, and
+      crossTab.waitForResult — but the exact state transitions, error handling
+      during lock acquisition, and the boundary between intra-tab dedup and
+      cross-tab coordination need source-level verification. The lock's failure
+      modes (what if leader tab closes during refresh? what if broadcast is
+      lost?) are unspecified.
+  - behavior_id: auth_csrf_protection
+    reason: >
+      The description states "If the token is missing, it proactively triggers a
+      refresh to obtain one" with "max 1 retry." The interaction between this
+      retry and the apiClient's own 401-refresh-retry needs verification. There
+      is a risk of double-refresh or infinite loop if the CSRF retry and the 401
+      retry are not coordinated. Need to confirm the retry tracking mechanism
+      and its interaction with auth_api_client_integration.
+  - behavior_id: stateful_ui_reports_stores
+    reason: >
+      Reports uses three separate Zustand stores (list, create wizard, action)
+      plus dedicated hooks for each action (email, rename, delete, download) and
+      dedicated modal hooks. The orchestration via useReportsPageController and
+      the interaction between stores (e.g., does create wizard write to the list
+      store? does delete action update list store optimistically?) needs deeper
+      verification. The stale-response-guard interaction with these stores is
+      also unclear.
+  - behavior_id: infra_qfm_response_normalization
+    reason: >
+      The rollbackGate determines v1/v2 routing, and the responseAdapter
+      normalizes responses. Their interaction — does the rollback gate affect
+      which adapter is used? Does failureTaxonomy classification trigger the
+      rollback gate? — needs source-level verification. The pdfLifecycle state
+      machine bundled in this module is also a separate concern that may warrant
+      its own behavior spec.
+  - behavior_id: auth_route_guard_middleware
+    reason: >
+      The middleware performs a "silent token refresh" using the HTTP-only
+      refresh cookie and then "sets response cookies (user, csrf, refreshToken)"
+      on success. The exact cookie names, expiration policies, and the
+      interaction between the middleware's refresh and the client-side
+      tokenRefresher's refresh need verification. If both can refresh, there is
+      a potential race condition on initial page load.

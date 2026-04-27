@@ -1,0 +1,144 @@
+predicate_inventory:
+  - behavior_id: auth_flow
+    predicates:
+      - token._id && token.accessToken
+      - session != null
+      - refreshResult.success
+      - isProtectedRoute(pathname)
+    render_mode: visible-enabled
+  - behavior_id: auth_flow
+    predicates:
+      - isChecking
+    render_mode: visible-disabled
+  - behavior_id: auth_flow
+    predicates:
+      - isAuthenticated
+    render_mode: visible-enabled
+  - behavior_id: route_guarding
+    predicates:
+      - isProtectedPath(pathname)
+    render_mode: visible-enabled
+  - behavior_id: route_guarding
+    predicates:
+      - session != null
+    render_mode: visible-enabled
+  - behavior_id: route_guarding
+    predicates:
+      - isChecking
+    render_mode: visible-disabled
+  - behavior_id: cross_tab_sync
+    predicates:
+      - isBroadcastSupported()
+    render_mode: visible-enabled
+  - behavior_id: cross_tab_sync
+    predicates:
+      - currentPath.includes('/companies') || currentPath.includes('/reports')
+    render_mode: visible-enabled
+  - behavior_id: csrf_protection
+    predicates:
+      - hasCsrfToken()
+    render_mode: visible-enabled
+  - behavior_id: csrf_protection
+    predicates:
+      - isCsrfTokenValid(token)
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui
+    predicates:
+      - listState == 'error'
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui
+    predicates:
+      - listState == 'loading'
+    render_mode: visible-disabled
+  - behavior_id: stateful_ui
+    predicates:
+      - listState == 'ready'
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui
+    predicates:
+      - listState == 'empty'
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui
+    predicates:
+      - listState == 'idle'
+    render_mode: hidden
+  - behavior_id: stateful_ui
+    predicates:
+      - isGenerating
+    render_mode: visible-enabled
+  - behavior_id: stateful_ui
+    predicates:
+      - hasSelectedBusiness
+    render_mode: visible-enabled
+  - behavior_id: api_data_fetching
+    predicates:
+      - result.ok
+    render_mode: visible-enabled
+  - behavior_id: api_data_fetching
+    predicates:
+      - response.ok
+    render_mode: visible-enabled
+  - behavior_id: pdf_generation_flow
+    predicates:
+      - dlStatus == 'waiting'
+    render_mode: visible-enabled
+  - behavior_id: pdf_generation_flow
+    predicates:
+      - dlStatus == 'finished'
+    render_mode: visible-enabled
+  - behavior_id: pdf_generation_flow
+    predicates:
+      - dlStatus == 'failed'
+    render_mode: visible-enabled
+  - behavior_id: pdf_generation_flow
+    predicates:
+      - dlStatus == 'completed'
+    render_mode: visible-enabled
+  - behavior_id: pdf_generation_flow
+    predicates:
+      - isGenerating
+    render_mode: visible-enabled
+  - behavior_id: data_list_state
+    predicates:
+      - listContract.ui.showTable
+    render_mode: visible-enabled
+  - behavior_id: data_list_state
+    predicates:
+      - hasMore
+    render_mode: visible-enabled
+  - behavior_id: data_list_state
+    predicates:
+      - isLoadingMore
+    render_mode: visible-disabled
+  - behavior_id: modal_dialog_system
+    predicates:
+      - isOpen
+    render_mode: visible-enabled
+  - behavior_id: qfm_response_normalization
+    predicates:
+      - result.ok
+    render_mode: visible-enabled
+  - behavior_id: qfm_response_normalization
+    predicates:
+      - taxonomyBucket
+    render_mode: visible-enabled
+  - behavior_id: stale_response_handling
+    predicates:
+      - signal.aborted
+    render_mode: visible-enabled
+behaviors_to_spec:
+  - auth_flow
+  - route_guarding
+  - cross_tab_sync
+  - csrf_protection
+  - stateful_ui
+  - api_data_fetching
+  - pdf_generation_flow
+  - data_list_state
+  - modal_dialog_system
+  - qfm_response_normalization
+  - stale_response_handling
+needs_deeper_exploration:
+  - form_state_management
+  - shell_layout
+  - animation_transitions

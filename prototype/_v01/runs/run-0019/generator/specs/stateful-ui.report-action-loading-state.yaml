@@ -1,0 +1,145 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.report-action-loading-state
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.report_action_loading_state
+    coverage: full
+    notes: >
+      Per-report action loading states are tracked in four keyed maps
+      (downloading, renaming, deleting, emailing). anyActionInProgress
+      aggregates these flags to disable UI affordances during operations.
+
+description: >
+  Tracks loading states for per-report actions (download, rename, delete,
+  email) using four keyed Zustand maps. Each map stores boolean flags
+  indexed by report ID. The anyActionInProgress function aggregates these
+  flags to determine if any action is currently executing for a given report.
+
+state_machine: null
+
+conditions:
+  - id: is_downloading
+    description: >
+      Checks if a download action is in progress for a specific report.
+      Used to disable download button during PDF generation.
+    trigger: Report action UI is rendered.
+    guards:
+      - field: report_id
+        condition: downloading[reportId] is truthy.
+    then:
+      - Show loading indicator on download button.
+    else:
+      - Enable download button.
+
+  - id: is_renaming
+    description: >
+      Checks if a rename action is in progress for a specific report.
+      Used to disable rename affordance during operation.
+    trigger: Report action UI is rendered.
+    guards:
+      - field: report_id
+        condition: renaming[reportId] is truthy.
+    then:
+      - Show loading indicator on rename affordance.
+    else:
+      - Enable rename affordance.
+
+  - id: is_deleting
+    description: >
+      Checks if a delete action is in progress for a specific report.
+      Used to disable delete button during operation.
+    trigger: Report action UI is rendered.
+    guards:
+      - field: report_id
+        condition: deleting[reportId] is truthy.
+    then:
+      - Show loading indicator on delete button.
+    else:
+      - Enable delete button.
+
+  - id: is_emailing
+    description: >
+      Checks if an email action is in progress for a specific report.
+      Used to disable email button during operation.
+    trigger: Report action UI is rendered.
+    guards:
+      - field: report_id
+        condition: emailing[reportId] is truthy.
+    then:
+      - Show loading indicator on email button.
+    else:
+      - Enable email button.
+
+  - id: any_action_in_progress
+    description: >
+      Aggregates all per-report action flags to determine if any action
+      is currently executing. Used to disable entire row or modal actions.
+    trigger: Report row or modal UI is rendered.
+    guards:
+      - field: report_id
+        condition: Any of downloading, renaming, deleting, emailing is truthy for reportId.
+    then:
+      - Disable all action affordances for the report.
+    else:
+      - Enable all action affordances.
+
+inputs:
+  - id: report_id
+    type: string
+    source: Report row or action component
+    required: true
+
+outputs:
+  - id: action_flags
+    type: "four boolean maps"
+    destination: Report action store
+    lifespan: in-memory until overwritten
+
+  - id: aggregate_flag
+    type: boolean
+    destination: Row or modal UI affordances
+    lifespan: per render cycle
+
+evidence_refs:
+  - path: src/features/reports/store/useReportActionStore.ts
+    snippet: |
+      export const useReportActionStore = create<ReportActionState>((set, get) => ({
+        downloading: {},
+        renaming: {},
+        deleting: {},
+        emailing: {},
+        setDownloading: (reportId, isLoading) => set((state) => ({ downloading: { ...state.downloading, [reportId]: isLoading } })),
+        setRenaming: (reportId, isLoading) => set((state) => ({ renaming: { ...state.renaming, [reportId]: isLoading } })),
+        setDeleting: (reportId, isLoading) => set((state) => ({ deleting: { ...state.deleting, [reportId]: isLoading } })),
+        setEmailing: (reportId, isLoading) => set((state) => ({ emailing: { ...state.emailing, [reportId]: isLoading } })),
+        isDownloading: (reportId) => !!get().downloading[reportId],
+        isRenaming: (reportId) => !!get().renaming[reportId],
+        isDeleting: (reportId) => !!get().deleting[reportId],
+        isEmailing: (reportId) => !!get().emailing[reportId],
+        anyActionInProgress: (reportId) => {
+          const state = get();
+          return !!state.downloading[reportId] || !!state.renaming[reportId] || !!state.deleting[reportId] || !!state.emailing[reportId];
+        },
+      }));
+    covers:
+      - "condition:is_downloading"
+      - "condition:is_renaming"
+      - "condition:is_deleting"
+      - "condition:is_emailing"
+      - "condition:any_action_in_progress"
+      - "input:report_id"
+      - "output:action_flags"
+      - "output:aggregate_flag"
+
+confidence: 0.97
+confidence_rationale: >
+  Action store structure, individual action checks, and aggregation function
+  are directly evidenced in useReportActionStore.ts. The store design and
+  query patterns are confirmed by the code.
+unresolved_questions:
+  - Whether action flags persist across page navigation.
+  - Cleanup logic for completed actions.
+status: complete

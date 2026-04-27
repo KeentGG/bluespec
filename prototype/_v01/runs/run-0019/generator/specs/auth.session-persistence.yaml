@@ -1,0 +1,146 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.session-persistence
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth_flow.session_persistence
+    coverage: full
+    notes: >
+      Session persistence uses in-memory authSession for access tokens and
+      a readable user cookie for middleware-visible session continuity. The
+      token is stored in memory (not localStorage) for XSS protection while
+      the user cookie enables SSR middleware to detect authenticated users.
+
+description: >
+  Manages session persistence through a dual-storage strategy: in-memory
+  authSession for access tokens (XSS-protected) and a readable user cookie
+  for middleware-visible session continuity. The session is normalized before
+  storage to ensure consistent structure across login, refresh, and middleware
+  operations.
+
+state_machine: null
+
+conditions:
+  - id: token_memory_storage
+    description: >
+      Access tokens are stored in a module-scoped authSession variable in
+      memory. This prevents XSS attacks from accessing tokens via
+      document.cookie or localStorage.
+    trigger: setToken() is called after successful login or refresh.
+    guards:
+      - field: token_payload
+        condition: payload contains non-empty _id and accessToken strings.
+    then:
+      - Normalize session payload with _id, email, accessToken, and user object.
+      - Store normalized session in module-scoped authSession variable.
+      - Write user cookie for middleware visibility.
+      - Broadcast login event to other tabs.
+    else:
+      - Skip storage, return null session.
+
+  - id: user_cookie_storage
+    description: >
+      A readable user cookie provides middleware-visible session continuity.
+      The cookie contains a JSON-encoded user object and is set with a
+      7-day TTL on client writes and 14-day TTL on middleware writes.
+    trigger: setBrowserUserCookie() is called after token normalization.
+    guards:
+      - field: normalized_session
+        condition: Session is successfully normalized with valid _id.
+    then:
+      - Serialize session to JSON.
+      - Set cookie named "user" with path="/", sameSite="lax".
+      - Set maxAge to 7 days (client) or 14 days (middleware).
+    else:
+      - Skip cookie write.
+
+  - id: session_cleanup
+    description: >
+      Session cleanup clears both in-memory storage and cookies. This is
+      triggered by logout, token refresh failure, or explicit session
+      invalidation.
+    trigger: clearToken() is called.
+    effects:
+      - Broadcast logout event to other tabs.
+      - Clear in-memory authSession.
+      - Remove user cookie.
+
+inputs:
+  - id: token_payload
+    type: "object with _id, email, accessToken"
+    source: Login response, refresh response, or middleware payload
+    required: true
+    validation:
+      _id: non-empty string
+      accessToken: non-empty string
+
+outputs:
+  - id: auth_session
+    type: "normalized session object"
+    destination: Module-scoped authSession variable
+    lifespan: browser session until cleared or replaced
+
+  - id: user_cookie
+    type: "JSON-encoded user cookie"
+    destination: Browser cookie named "user"
+    lifespan: 7 days (client) or 14 days (middleware)
+
+evidence_refs:
+  - path: src/features/auth/api/authMemorySession.js
+    snippet: |
+      function normalizeSessionPayload(candidate) {
+        if (!isPlainObject(candidate)) return null;
+        const userId = normalizeOptionalString(candidate._id).trim();
+        const accessToken = normalizeOptionalString(candidate.accessToken).trim();
+        if (!userId || !accessToken) return null;
+        const email = normalizeOptionalString(candidate.email);
+        return {
+          _id: userId,
+          email,
+          accessToken,
+          user: { ...candidate, _id: userId, email, accessToken },
+        };
+      }
+
+      export function setAuthSession(candidate) {
+        const normalized = normalizeSessionPayload(candidate);
+        authSession = normalized;
+        return authSession;
+      }
+    covers:
+      - "condition:token_memory_storage"
+      - "input:token_payload"
+      - "output:auth_session"
+
+  - path: src/features/auth/api/tokenService.js
+    snippet: |
+      export function setToken(tokenPayload) {
+        const normalized = setAuthSession(tokenPayload);
+        if (!normalized) return;
+        setBrowserUserCookie(normalized);
+        broadcastAuthChange("login");
+      }
+
+      export function clearToken() {
+        broadcastAuthChange("logout");
+        clearAuthSession();
+        clearBrowserUserCookie();
+      }
+    covers:
+      - "condition:token_memory_storage"
+      - "condition:user_cookie_storage"
+      - "condition:session_cleanup"
+      - "output:user_cookie"
+
+confidence: 0.95
+confidence_rationale: >
+  In-memory session storage, user cookie persistence, and session cleanup
+  are directly evidenced in authMemorySession.js and tokenService.js.
+  The dual-storage strategy and XSS protection rationale are confirmed
+  by the code structure.
+unresolved_questions:
+  - Exact cookie serialization format beyond JSON.stringify.
+  - Whether user cookie contains additional fields beyond session data.
+status: complete

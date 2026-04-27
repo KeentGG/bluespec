@@ -1,0 +1,962 @@
+id: state.management
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: zustand-stores
+    coverage: full
+    notes: >
+      Cross-component UI state is kept in small Zustand stores for report list
+      filters, report modals, create-report modal visibility, per-report action
+      flags, and PDF download lifecycle. The PDF store also mirrors state into
+      localStorage so the workflow survives refreshes.
+  - id: swr-data-fetching
+    coverage: full
+    notes: >
+      Company and report list data use SWR with explicit enable gates derived
+      from auth state and selected identifiers. Query keys are composed from the
+      active filter values, and the companies page hydrates or clears local page
+      state from query results.
+  - id: local-component-state
+    coverage: full
+    notes: >
+      Transient view state stays local to components and hooks: companies page
+      search/sort/debounce/error state uses React useState/useMemo/useEffect,
+      and the login form manages field values, submit in-flight state, and
+      error/debug visibility locally.
+
+description: >
+  Frontend state is split by responsibility. Zustand stores hold shared UI and
+  workflow state for report filters, modal visibility, per-report action flags,
+  and PDF download progress. SWR owns server-backed company and report list
+  queries, with fetches gated by auth-derived identifiers and current filter
+  selections. Local React state handles page-scoped concerns like debounced
+  company search, runtime error messages, logo fallback tracking, and login form
+  submission. Successful queries hydrate local render state; failed queries set
+  local errors; modal/action stores expose explicit open/close/start/finish
+  transitions; and PDF download state persists through localStorage-backed
+  Zustand setters.
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: No PDF download workflow is active; persisted download fields are empty or cleared.
+    - id: waiting
+      description: PDF generation has been started and the store is waiting for the polling layer to resolve it.
+    - id: finished
+      description: PDF generation succeeded and a public URL has been written into the shared download store.
+    - id: failed
+      description: PDF generation failed to start or later polling marked the workflow as failed.
+  transitions:
+    - id: begin_download
+      from: idle
+      to: waiting
+      trigger: useDownloadStore.startDownload(...) is called from a report action
+      effects:
+        - Set isGenerating to true
+        - Set dlStatus to waiting
+        - Persist pdfKey, cid, reportId, and cleared publicUrl through localStorage-backed setters
+        - Call startPdfGeneration(...)
+    - id: start_download_api_rejected
+      from: waiting
+      to: failed
+      trigger: startPdfGeneration(...) returns a non-ok result or throws
+      effects:
+        - Set dlStatus to failed
+        - Return false to the caller
+    - id: polling_marks_finished
+      from: waiting
+      to: finished
+      trigger: PdfGenerationOverlay polling sees status "finished" or a publicUrl
+      guards:
+        - field: publicUrl
+          condition: statusData.publicUrl is present OR the status is finished
+      effects:
+        - Set dlStatus to finished
+        - Persist publicUrl into the download store
+    - id: polling_marks_failed
+      from: waiting
+      to: failed
+      trigger: PdfGenerationOverlay polling sees failed status, unknown status message, or max attempts reached
+      effects:
+        - Set dlStatus to failed
+    - id: reset_finished
+      from: finished
+      to: idle
+      trigger: useDownloadStore.reset() is called
+      effects:
+        - Clear in-memory Zustand fields
+        - Remove all download-related localStorage keys
+    - id: reset_failed
+      from: failed
+      to: idle
+      trigger: useDownloadStore.reset() is called
+      effects:
+        - Clear in-memory Zustand fields
+        - Remove all download-related localStorage keys
+
+conditions:
+  - id: company-query-enabled
+    description: >
+      The companies SWR query only runs when the caller leaves enabled=true and
+      the auth token exposes a non-empty userId.
+    trigger: useCompanyListQuery(options) executes
+    guards:
+      - field: enabled
+        condition: options.enabled is true or omitted
+      - field: auth_token._id
+        condition: getToken()?._id is a non-empty string
+    then:
+      - Compose query key ["companies.list", userId, debouncedSearchQuery, sortBy, sortOrder]
+      - Call useSWR(queryKey, fetchCompanyListRuntime, ...)
+    else:
+      - Pass null as the SWR key so no fetch runs
+
+  - id: reports-query-enabled
+    description: >
+      The reports SWR query only runs when enabled=true, a non-empty auth userId
+      exists, and a non-empty businessId is selected.
+    trigger: useReportsListQuery(options) executes
+    guards:
+      - field: enabled
+        condition: options.enabled is true or omitted
+      - field: auth_token._id
+        condition: getToken()?._id is a non-empty string
+      - field: businessId
+        condition: businessId is a non-empty string
+    then:
+      - Compose query key with businessId, page, pageSize, search, sortBy, sortOrder, and calculatorId
+      - Call useSWR(queryKey, fetchReportsListRuntime, ...)
+    else:
+      - Pass null as the SWR key so no fetch runs
+
+  - id: search-debounce
+    description: >
+      Companies page search updates the immediate input state on every keystroke,
+      but only updates the API-facing debouncedSearchQuery after the configured
+      debounce timer fires. Loading stays true while the trimmed values differ.
+    trigger: User types in the companies search input
+    guards:
+      - field: searchQuery
+        condition: searchQuery.trim() !== debouncedSearchQuery.trim()
+    then:
+      - setSearchQuery(nextSearchQuery) runs immediately
+      - debouncedSearch(nextSearchQuery) schedules setDebouncedSearchQuery(...)
+      - isLoading becomes true even before SWR resolves
+    else:
+      - isLoading falls back to companyListQuery.isLoading
+
+  - id: company-query-success-hydration
+    description: >
+      When the companies query resolves with ok=true, local page state is
+      hydrated from result.businesses and previous logo failures/runtime errors
+      are cleared.
+    trigger: companyListQuery.data changes
+    guards:
+      - field: result.ok
+        condition: result.ok is true
+    then:
+      - Set companyList from result.businesses or EMPTY_COMPANY_LIST
+      - Reset logoLoadFailuresByBusinessId to an empty object
+      - Clear runtimeErrorMessage
+    else:
+      - Set companyList to EMPTY_COMPANY_LIST
+
+  - id: company-abort-error-suppression
+    description: >
+      Failed company queries only surface a runtime error when the failure reason
+      is not "aborted".
+    trigger: companyListQuery.data resolves with ok=false
+    guards:
+      - field: result.reason
+        condition: result.reason !== "aborted"
+    then:
+      - Set runtimeErrorMessage to result.message or "Unable to load companies."
+    else:
+      - Leave runtimeErrorMessage unchanged
+
+  - id: report-filters-reset
+    description: >
+      Resetting the reports list store restores its fixed default filter set.
+    trigger: useReportsListStore.resetFilters() is called
+    then:
+      - Set searchQuery to an empty string
+      - Set sortId to "updatedAt:desc"
+      - Set calcTypeFilter to "all"
+
+  - id: modal-delete-lifecycle
+    description: >
+      Opening the delete modal stores the selected report target, starting delete
+      marks the modal busy, and finishing delete closes the modal, clears the
+      target, and invokes the optional success callback.
+    trigger: useReportModalsStore delete actions are called
+    then:
+      - openDelete(report) sets isDeleteOpen=true and deleteTarget=report
+      - startDelete() sets isDeleting=true
+      - finishDelete() clears modal state and calls onDeleteSuccess if present
+      - closeDelete() clears modal state without invoking the callback
+
+  - id: modal-email-lifecycle
+    description: >
+      Opening the email modal stores the report id and resets the email draft,
+      startEmailSend marks the modal busy, and finishEmailSend closes the modal
+      and invokes the optional success callback.
+    trigger: useReportModalsStore email actions are called
+    then:
+      - openEmail(reportId) sets isEmailOpen=true, emailReportId=reportId, emailAddress="", isSending=false
+      - setEmailAddress(email) stores the current draft value
+      - startEmailSend() sets isSending=true
+      - finishEmailSend() clears modal state and calls onEmailSuccess if present
+      - closeEmail() clears modal state without invoking the callback
+
+  - id: create-report-modal-defaults
+    description: >
+      The create-report modal can be opened with an optional defaultBusinessId;
+      closing it always clears both visibility and the default selection.
+    trigger: useCreateReportStore.open(...) or close() is called
+    then:
+      - open(defaultBusinessId) sets isOpen=true and stores defaultBusinessId or null
+      - close() sets isOpen=false and defaultBusinessId=null
+
+  - id: per-report-action-aggregation
+    description: >
+      Per-report action flags are stored in four keyed maps; anyActionInProgress
+      returns true when any of the maps contains a truthy entry for the same
+      report id.
+    trigger: anyActionInProgress(reportId) is called
+    then:
+      - Return true when downloading[reportId], renaming[reportId], deleting[reportId], or emailing[reportId] is truthy
+    else:
+      - Return false
+
+  - id: login-submit-singleflight
+    description: >
+      The login form ignores repeat submits while a request is already in flight,
+      clears prior errors before a new attempt, and always clears isLoading in a
+      finally block after bootstrapLoginSession resolves.
+    trigger: LoginPageContent.handleSubmit(event) runs
+    guards:
+      - field: isLoading
+        condition: isLoading is false before submit starts
+    then:
+      - Clear errorMessage
+      - Set isLoading=true
+      - Call loginRequest(...) and bootstrapLoginSession(...)
+      - Redirect when decision.action is redirect, otherwise set an error message on failure
+      - Set isLoading=false in finally
+    else:
+      - Return immediately without issuing another login request
+
+inputs:
+  - id: auth_token
+    type: "token object with _id field"
+    source: getToken() in company and reports query hooks
+    required: true
+    validation:
+      user_id: "_id must be a non-empty string for SWR queries to enable"
+
+  - id: company_search_query
+    type: string
+    source: Companies page text input and local React state
+    required: false
+    validation:
+      normalization: "trimmed for debounce/loading comparison"
+
+  - id: company_sort_selection
+    type: "sortBy + sortOrder pair"
+    source: Companies page local React state
+    required: false
+    validation:
+      default: "updatedAt:desc"
+
+  - id: reports_filters
+    type: "object with searchQuery, sortId, calcTypeFilter"
+    source: useReportsListStore Zustand state
+    required: false
+    validation:
+      defaults: "searchQuery='', sortId='updatedAt:desc', calcTypeFilter='all'"
+
+  - id: reports_query_params
+    type: "object with businessId, page, pageSize, search, sortBy, sortOrder, calculatorId"
+    source: useReportsListQuery caller options
+    required: false
+    validation:
+      business_id: "must be a non-empty string for SWR to enable"
+      page_default: "1"
+      page_size_default: "5"
+
+  - id: modal_target
+    type: "delete target object or email reportId string"
+    source: useReportModalsStore action callers
+    required: false
+    validation:
+      delete_target: "{ _id, businessId, name? } for openDelete"
+      email_target: "non-empty reportId string for openEmail"
+
+  - id: report_action_id
+    type: string
+    source: useReportActionStore action callers
+    required: false
+    validation:
+      format: "report id used as the key in loading-state maps"
+
+  - id: pdf_download_request
+    type: "object with userId, reportId, cid, optional email"
+    source: useDownloadStore.startDownload caller
+    required: true
+    validation:
+      required_fields: "userId, reportId, cid are expected by the store workflow"
+
+  - id: login_credentials
+    type: "object with email, password, rememberMe"
+    source: LoginPageContent local form state
+    required: true
+    validation:
+      email: "trimmed before submission"
+      password: "submitted as entered"
+
+outputs:
+  - id: company_list_query_key
+    type: "array [companies.list, userId, debouncedSearchQuery, sortBy, sortOrder] or null"
+    destination: useSWR invocation in useCompanyListQuery
+    lifespan: per-render while hook inputs remain stable
+
+  - id: reports_list_query_key
+    type: "array [reports.list, userId, businessId, page, pageSize, search, sortBy, sortOrder, calculatorId] or null"
+    destination: useSWR invocation in useReportsListQuery
+    lifespan: per-render while hook inputs remain stable
+
+  - id: company_page_local_state
+    type: "local React state for companyList, debouncedSearchQuery, runtimeErrorMessage, logoLoadFailuresByBusinessId, and isLoading"
+    destination: useCompaniesPage return value consumed by page components
+    lifespan: current component lifetime
+
+  - id: reports_filter_store_state
+    type: "Zustand state with searchQuery, sortId, calcTypeFilter"
+    destination: useReportsListStore consumers across the reports UI
+    lifespan: in-memory until store is reset or page reloads
+
+  - id: report_modal_state
+    type: "Zustand modal state for delete/email/create-report flows and optional success callbacks"
+    destination: report modal components and modal-opening controllers
+    lifespan: in-memory until actions close or reset the modal
+
+  - id: report_action_state
+    type: "four per-report loading maps plus derived anyActionInProgress(reportId)"
+    destination: row-level report action controllers and UI affordances
+    lifespan: in-memory until overwritten by later setter calls
+
+  - id: pdf_download_state
+    type: "Zustand fields dlStatus, isGenerating, pdfKey, cid, publicUrl, currentReportId mirrored to localStorage"
+    destination: PDF overlay, report actions, and browser localStorage
+    lifespan: persists across refreshes until reset() removes storage keys
+
+  - id: login_ui_state
+    type: "local React state for email, password, rememberMe, debug visibility, isLoading, and errorMessage"
+    destination: LoginPageContent rendering and router redirect decisions
+    lifespan: current login page component lifetime
+
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/store/useReportsListStore.ts
+    snippet: |
+      export const useReportsListStore = create<ReportsListState>((set) => ({
+        searchQuery: "",
+        sortId: "updatedAt:desc",
+        calcTypeFilter: "all",
+
+        setSearchQuery: (query) => set({ searchQuery: query }),
+        setSortId: (sortId) => set({ sortId }),
+        setCalcTypeFilter: (filter) => set({ calcTypeFilter: filter }),
+        resetFilters: () =>
+          set({
+            searchQuery: "",
+            sortId: "updatedAt:desc",
+            calcTypeFilter: "all",
+          }),
+      }));
+    covers:
+      - "condition:report-filters-reset"
+      - "input:reports_filters"
+      - "output:reports_filter_store_state"
+    line_range:
+      start: 14
+      end: 28
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/pdf/store/useDownloadStore.ts
+    snippet: |
+      export const useDownloadStore = create<DownloadState & DownloadActions>((set, get) => ({
+        // Initial state from storage
+        dlStatus: getStorageValue(STORAGE_KEY_STATUS) as DownloadState["dlStatus"] || "",
+        isGenerating: getIsGeneratingFromStorage(),
+        pdfKey: getStorageValue(STORAGE_KEY_PDF_KEY),
+        cid: getStorageValue(STORAGE_KEY_CID),
+        publicUrl: getStorageValue(STORAGE_KEY_PUBLIC_URL),
+        currentReportId: getStorageValue(STORAGE_KEY_REPORT_ID),
+
+        setDlStatus: (status) => {
+          set({ dlStatus: status });
+          setStorageValue(STORAGE_KEY_STATUS, status);
+        },
+
+        setIsGenerating: (value) => {
+          set({ isGenerating: value });
+          setStorageValue(STORAGE_KEY_IS_GENERATING, value.toString());
+        },
+
+        setPdfKey: (value) => {
+          set({ pdfKey: value });
+          setStorageValue(STORAGE_KEY_PDF_KEY, value);
+        },
+
+        setCid: (value) => {
+          set({ cid: value });
+          setStorageValue(STORAGE_KEY_CID, value);
+        },
+
+        setPublicUrl: (value) => {
+          set({ publicUrl: value });
+          setStorageValue(STORAGE_KEY_PUBLIC_URL, value);
+        },
+    covers:
+      - "state:idle"
+      - "state:waiting"
+      - "state:finished"
+      - "output:pdf_download_state"
+    line_range:
+      start: 68
+      end: 100
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/pdf/store/useDownloadStore.ts
+    snippet: |
+        startDownload: async ({ userId, reportId, cid, email }) => {
+          try {
+            // Set generating state first
+            get().setIsGenerating(true);
+            get().setDlStatus("waiting");
+            get().setPdfKey(userId);
+            get().setCid(cid);
+            get().setCurrentReportId(reportId);
+            get().setPublicUrl("");
+
+            // Call API to start generation
+            const response = await startPdfGeneration({ userId, reportId, email });
+
+            // Fix: response.data contains userId directly, not nested under .data
+            if (response.ok && response.data?.userId) {
+              // Generation started successfully
+              return true;
+            } else {
+              // API returned error
+              get().setDlStatus("failed");
+              return false;
+            }
+          } catch (error) {
+            console.error("Failed to start PDF generation:", error);
+            get().setDlStatus("failed");
+            return false;
+          }
+        },
+
+        reset: () => {
+          set({
+            dlStatus: "",
+            isGenerating: false,
+            pdfKey: "",
+            cid: "",
+            publicUrl: "",
+            currentReportId: "",
+          });
+          removeStorageValue(STORAGE_KEY_IS_GENERATING);
+          removeStorageValue(STORAGE_KEY_PDF_KEY);
+          removeStorageValue(STORAGE_KEY_CID);
+          removeStorageValue(STORAGE_KEY_STATUS);
+          removeStorageValue(STORAGE_KEY_PUBLIC_URL);
+          removeStorageValue(STORAGE_KEY_REPORT_ID);
+        },
+    covers:
+      - "transition:begin_download"
+      - "transition:start_download_api_rejected"
+      - "transition:reset_finished"
+      - "transition:reset_failed"
+      - "input:pdf_download_request"
+      - "output:pdf_download_state"
+    line_range:
+      start: 107
+      end: 151
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/pdf/components/PdfGenerationOverlay.tsx
+    snippet: |
+      useEffect(() => {
+        if (!isGenerating || !pdfKey) return;
+        if (dlStatus === "finished" || dlStatus === "failed") return;
+
+        let attempts = 0;
+
+        const poll = async () => {
+          try {
+            const status = await getPdfStatus({ userId: pdfKey });
+            const statusData = status?.raw?.data;
+
+            if (statusData?.status === "finished" || statusData?.publicUrl) {
+              setDlStatus("finished");
+              setPublicUrl(statusData.publicUrl || "#");
+              return true;
+            }
+
+            if (statusData?.status === "failed" || statusData?.status?.includes("failed")) {
+              setDlStatus("failed");
+              return true;
+            }
+
+            if (status?.raw?.message?.includes("Unknown")) {
+              setDlStatus("failed");
+              return true;
+            }
+
+            return false;
+          } catch {
+            return false;
+          }
+        };
+
+        const intervalId = setInterval(async () => {
+          attempts++;
+
+          if (attempts >= MAX_ATTEMPTS) {
+            clearInterval(intervalId);
+            setDlStatus("failed");
+            return;
+          }
+
+          const shouldStop = await poll();
+          if (shouldStop) {
+            clearInterval(intervalId);
+          }
+        }, POLL_INTERVAL);
+
+        return () => clearInterval(intervalId);
+      }, [isGenerating, pdfKey, dlStatus, setDlStatus, setPublicUrl]);
+    covers:
+      - "transition:polling_marks_finished"
+      - "transition:polling_marks_failed"
+      - "state:waiting"
+      - "state:finished"
+      - "state:failed"
+    line_range:
+      start: 108
+      end: 157
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/store/useReportModalsStore.ts
+    snippet: |
+      export const useReportModalsStore = create<ReportModalsState>((set, get) => ({
+        isDeleteOpen: false,
+        deleteTarget: null,
+        isDeleting: false,
+
+        isEmailOpen: false,
+        emailReportId: null,
+        emailAddress: "",
+        isSending: false,
+
+        onDeleteSuccess: null,
+        onEmailSuccess: null,
+
+        openDelete: (report) => set({ isDeleteOpen: true, deleteTarget: report }),
+        closeDelete: () => set({ isDeleteOpen: false, deleteTarget: null, isDeleting: false }),
+        startDelete: () => set({ isDeleting: true }),
+        finishDelete: () => {
+          const { onDeleteSuccess } = get();
+          set({ isDeleteOpen: false, deleteTarget: null, isDeleting: false });
+          onDeleteSuccess?.();
+        },
+
+        openEmail: (reportId) =>
+          set({ isEmailOpen: true, emailReportId: reportId, emailAddress: "", isSending: false }),
+        closeEmail: () =>
+          set({ isEmailOpen: false, emailReportId: null, emailAddress: "", isSending: false }),
+        setEmailAddress: (email) => set({ emailAddress: email }),
+        startEmailSend: () => set({ isSending: true }),
+        finishEmailSend: () => {
+          const { onEmailSuccess } = get();
+          set({ isEmailOpen: false, emailReportId: null, isSending: false });
+          onEmailSuccess?.();
+        },
+    covers:
+      - "condition:modal-delete-lifecycle"
+      - "condition:modal-email-lifecycle"
+      - "input:modal_target"
+      - "output:report_modal_state"
+    line_range:
+      start: 33
+      end: 65
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/store/useCreateReportStore.ts
+    snippet: |
+      export const useCreateReportStore = create<CreateReportState>((set) => ({
+        isOpen: false,
+        defaultBusinessId: null,
+
+        open: (defaultBusinessId) => set({ isOpen: true, defaultBusinessId: defaultBusinessId || null }),
+        close: () => set({ isOpen: false, defaultBusinessId: null }),
+      }));
+    covers:
+      - "condition:create-report-modal-defaults"
+      - "output:report_modal_state"
+    line_range:
+      start: 11
+      end: 17
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/store/useReportActionStore.ts
+    snippet: |
+      export const useReportActionStore = create<ReportActionState>((set, get) => ({
+        downloading: {},
+        renaming: {},
+        deleting: {},
+        emailing: {},
+
+        setDownloading: (reportId, isLoading) =>
+          set((state) => ({
+            downloading: { ...state.downloading, [reportId]: isLoading },
+          })),
+
+        setRenaming: (reportId, isLoading) =>
+          set((state) => ({
+            renaming: { ...state.renaming, [reportId]: isLoading },
+          })),
+
+        setDeleting: (reportId, isLoading) =>
+          set((state) => ({
+            deleting: { ...state.deleting, [reportId]: isLoading },
+          })),
+
+        setEmailing: (reportId, isLoading) =>
+          set((state) => ({
+            emailing: { ...state.emailing, [reportId]: isLoading },
+          })),
+
+        isDownloading: (reportId) => !!get().downloading[reportId],
+        isRenaming: (reportId) => !!get().renaming[reportId],
+        isDeleting: (reportId) => !!get().deleting[reportId],
+        isEmailing: (reportId) => !!get().emailing[reportId],
+
+        anyActionInProgress: (reportId) => {
+          const state = get();
+          return (
+            !!state.downloading[reportId] ||
+            !!state.renaming[reportId] ||
+            !!state.deleting[reportId] ||
+            !!state.emailing[reportId]
+          );
+        },
+      }));
+    covers:
+      - "condition:per-report-action-aggregation"
+      - "input:report_action_id"
+      - "output:report_action_state"
+    line_range:
+      start: 21
+      end: 61
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/company/hooks/useCompanyListQuery.ts
+    snippet: |
+      export function useCompanyListQuery(options: any = {}) {
+        const { debouncedSearchQuery = "", sortBy = "updatedAt", sortOrder = "desc", enabled = true } = options;
+        const token = getToken();
+        const userId = typeof token?._id === "string" && token._id.length > 0 ? token._id : null;
+        const isEnabled = enabled && typeof userId === "string" && userId.length > 0;
+
+        const queryKey = useMemo(
+          () => ["companies.list", userId, debouncedSearchQuery, sortBy, sortOrder],
+          [debouncedSearchQuery, sortBy, sortOrder, userId],
+        );
+
+        const swrQuery = useSWR(
+          isEnabled ? queryKey : null,
+          () =>
+            fetchCompanyListRuntime({
+              debouncedSearchQuery,
+              sortBy,
+              sortOrder,
+            }),
+          {
+            keepPreviousData: false,
+            revalidateOnMount: true,
+            shouldRetryOnError: false,
+          },
+        );
+
+        return {
+          ...swrQuery,
+          revalidate: () => swrQuery.mutate(),
+        };
+      }
+    covers:
+      - "condition:company-query-enabled"
+      - "input:auth_token"
+      - "input:company_search_query"
+      - "input:company_sort_selection"
+      - "output:company_list_query_key"
+    line_range:
+      start: 9
+      end: 39
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportsListQuery.ts
+    snippet: |
+      export function useReportsListQuery(options: any = {}) {
+        const {
+          businessId = null,
+          enabled = true,
+          page = 1,
+          pageSize = DEFAULT_PAGE_SIZE,
+          search = "",
+          sortBy = "",
+          sortOrder = "",
+          calculatorId = "",
+        } = options;
+        const token = getToken();
+        const userId = typeof token?._id === "string" && token._id.length > 0 ? token._id : null;
+        const isEnabled =
+          enabled &&
+          typeof userId === "string" &&
+          userId.length > 0 &&
+          typeof businessId === "string" &&
+          businessId.length > 0;
+
+        const queryKey = useMemo(
+          () => [
+            "reports.list",
+            userId,
+            businessId,
+            page,
+            pageSize,
+            search,
+            sortBy,
+            sortOrder,
+            calculatorId,
+          ],
+          [businessId, userId, page, pageSize, search, sortBy, sortOrder, calculatorId],
+        );
+
+        const swrQuery = useSWR(
+          isEnabled ? queryKey : null,
+          () =>
+            fetchReportsListRuntime({
+              businessId,
+              page,
+              pageSize,
+              search,
+              sortBy,
+              sortOrder,
+              calculatorId,
+            }),
+          {
+            keepPreviousData: true,
+            revalidateOnMount: true,
+            shouldRetryOnError: false,
+          },
+        );
+
+        // Extract pagination data from the response
+        const pagination = swrQuery.data?.pagination ?? { page, pageSize, total: 0, hasMore: false };
+
+        return {
+          ...swrQuery,
+          revalidate: () => swrQuery.mutate(),
+          pagination,
+        };
+      }
+    covers:
+      - "condition:reports-query-enabled"
+      - "input:auth_token"
+      - "input:reports_query_params"
+      - "output:reports_list_query_key"
+    line_range:
+      start: 11
+      end: 73
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/company/hooks/useCompaniesPage.ts
+    snippet: |
+      const [searchQuery, setSearchQuery] = useState("");
+      const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+      const [sortBy, setSortBy] = useState<string>(COMPANY_LIST_DEFAULT_SORT.sortBy);
+      const [sortOrder, setSortOrder] = useState<string>(COMPANY_LIST_DEFAULT_SORT.sortOrder);
+      const [runtimeErrorMessage, setRuntimeErrorMessage] = useState("");
+      const [logoLoadFailuresByBusinessId, setLogoLoadFailuresByBusinessId] = useState<
+        Record<string, boolean>
+      >(() => Object.create(null));
+      const [companyList, setCompanyList] = useState<readonly CompanyRecord[]>(EMPTY_COMPANY_LIST);
+
+      // Debounced search
+      const debouncedSearch = useMemo(
+        () =>
+          createCompanySearchDebouncer(
+            (nextSearchQuery) => {
+              setDebouncedSearchQuery(nextSearchQuery);
+            },
+            {
+              delayMs: COMPANY_LIST_DEBOUNCE_MS,
+            },
+          ),
+        [],
+      );
+
+      useEffect(
+        () => () => {
+          debouncedSearch.cancel();
+        },
+        [debouncedSearch],
+      );
+    covers:
+      - "condition:search-debounce"
+      - "input:company_search_query"
+      - "input:company_sort_selection"
+      - "output:company_page_local_state"
+    line_range:
+      start: 81
+      end: 110
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/company/hooks/useCompaniesPage.ts
+    snippet: |
+      useEffect(() => {
+        const result = companyListQuery.data;
+        if (!result) {
+          return;
+        }
+
+        if (result.ok) {
+          const businesses = Array.isArray(result.businesses)
+            ? (result.businesses as readonly CompanyRecord[])
+            : EMPTY_COMPANY_LIST;
+
+          setCompanyList(businesses);
+          setLogoLoadFailuresByBusinessId(Object.create(null));
+          setRuntimeErrorMessage("");
+          return;
+        }
+
+        setCompanyList(EMPTY_COMPANY_LIST);
+        if (result.reason !== "aborted") {
+          setRuntimeErrorMessage(result.message || "Unable to load companies.");
+        }
+      }, [companyListQuery.data]);
+    covers:
+      - "condition:company-query-success-hydration"
+      - "condition:company-abort-error-suppression"
+      - "output:company_page_local_state"
+    line_range:
+      start: 139
+      end: 160
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/company/hooks/useCompaniesPage.ts
+    snippet: |
+      const isDebouncingSearch = searchQuery.trim() !== debouncedSearchQuery.trim();
+      const isLoading = isDebouncingSearch || companyListQuery.isLoading;
+
+      const handleSearchChange = useCallback(
+        (event: React.ChangeEvent<HTMLInputElement>) => {
+          const nextSearchQuery = event.target.value ?? "";
+          setSearchQuery(nextSearchQuery);
+          debouncedSearch(nextSearchQuery);
+        },
+        [debouncedSearch],
+      );
+    covers:
+      - "condition:search-debounce"
+      - "output:company_page_local_state"
+    line_range:
+      start: 163
+      end: 207
+
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/components/LoginPageContent.tsx
+    snippet: |
+      export function LoginPageContent() {
+        const router = useRouter();
+        const searchParams = useSearchParams();
+        const [email, setEmail] = useState("");
+        const [password, setPassword] = useState("");
+        const [rememberMe, setRememberMeChecked] = useState(false);
+        const [showDebug, setShowDebug] = useState(false);
+        const [debugInfo, setDebugInfo] = useState<any>(null);
+
+        const [isLoading, setIsLoading] = useState(false);
+        const [errorMessage, setErrorMessage] = useState("");
+        const apiBaseUrl = useMemo(getApiBaseUrl, []);
+        const apiClient = useMemo(
+          () =>
+            createDefaultApiClient({
+              apiBaseUrl,
+            }),
+          [apiBaseUrl],
+        );
+
+        async function handleSubmit(event) {
+          event.preventDefault();
+
+          if (isLoading) {
+            return;
+          }
+
+          setErrorMessage("");
+          setIsLoading(true);
+
+          const trimmedEmail = email.trim();
+          let stagedSessionPayload = null;
+
+          try {
+            const loginResponse = await loginRequest(apiClient, {
+              email: trimmedEmail,
+              password,
+              rememberMe,
+            });
+
+            const decision = await bootstrapLoginSession({
+              loginResponse,
+              stageSession: async (sessionPayload) => {
+                stagedSessionPayload = sessionPayload;
+                await clearClientDataCache();
+              },
+            });
+
+            if (!decision.sessionStaged) {
+              setErrorMessage(
+                typeof loginResponse?.message === "string" && loginResponse.message.length > 0
+                  ? loginResponse.message
+                  : "Unable to log in with those credentials.",
+              );
+              return;
+            }
+
+            if (decision.action === "redirect" && typeof decision.destination === "string") {
+              router.replace(decision.destination);
+              return;
+            }
+
+            setErrorMessage("Unable to continue after authentication.");
+          } finally {
+            setIsLoading(false);
+          }
+        }
+    covers:
+      - "condition:login-submit-singleflight"
+      - "input:login_credentials"
+      - "output:login_ui_state"
+    line_range:
+      start: 50
+      end: 135
+
+confidence: 0.93
+confidence_rationale: >
+  The mixed state-management model is directly confirmed in sampled source: five
+  Zustand stores, two SWR query hooks, one page-level state hook, the login form,
+  and the PDF polling component. Query enable gates, debounce behavior, modal and
+  action store semantics, and PDF waiting/failed/reset transitions are explicit in
+  code. The only minor ambiguity is that the download store's dlStatus union also
+  includes "completed", but the sampled files only demonstrate waiting, finished,
+  and failed transitions.
+
+unresolved_questions:
+  - The download store type allows dlStatus="completed", but no sampled caller sets that value.
+
+status: complete

@@ -1,0 +1,354 @@
+id: reports.download-button-visibility.yaml
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: download-button-visibility
+    coverage: partial
+    notes: >
+      The live reports table always mounts the download button and only disables it
+      until progressPercentage reaches 100. The stale golden wording says the button
+      becomes visible only at the download stage, but the code keeps it visible and
+      toggles disabled/enabled state instead.
+description: >
+  Each reports table row always mounts a split-action control. The primary Download
+  button stays visible, is disabled until progressPercentage reaches 100, and starts
+  PDF generation when enabled and clicked. While a download is in flight, the button
+  remains visible but disabled and the label changes to Downloading....
+state_machine:
+  initial: rendered_locked
+  states:
+    - id: rendered_locked
+      description: The Download button is mounted but disabled because the row progress is below 100%.
+    - id: rendered_ready
+      description: The Download button is mounted and enabled because progress is exactly 100% and no download is active.
+    - id: rendered_downloading
+      description: The Download button remains mounted but disabled while the row download is running, and the label changes to Downloading....
+  transitions:
+    - id: progress_becomes_100
+      from: rendered_locked
+      to: rendered_ready
+      trigger: ReportsTable rerenders the row with progressPercentage === 100
+      guards:
+        - field: progressPercentage
+          condition: equals 100
+        - field: isDownloading
+          condition: "false"
+      effects:
+        - The button becomes clickable
+        - The label shows Download
+        - The title shows Download report
+    - id: click_download
+      from: rendered_ready
+      to: rendered_downloading
+      trigger: User clicks the Download button
+      guards:
+        - field: progressPercentage
+          condition: equals 100
+        - field: isDownloading
+          condition: "false"
+      effects:
+        - rowController.handleDownload(report._raw) runs
+        - actionStore.setDownloading(report._id, true) is set
+        - useDownloadStore.startDownload begins PDF generation
+    - id: download_settles
+      from: rendered_downloading
+      to: rendered_ready
+      trigger: reportActions.download resolves
+      guards:
+        - field: progressPercentage
+          condition: equals 100
+      effects:
+        - actionStore.setDownloading(report._id, false) is set after the awaited call returns
+        - The button returns to the enabled state if progress remains 100
+conditions:
+  - id: button_always_rendered
+    description: The Download button is never hidden by progress; every report row mounts the actions control.
+    trigger: ReportsTable renders a report row
+    then:
+      - Render the Download button in the actions cell
+      - Keep it in the DOM even before progress reaches 100
+  - id: button_enabled_only_at_100
+    description: The Download button is interactive only when progressPercentage is exactly 100 and the row is not already downloading.
+    trigger: ReportSplitActions renders
+    guards:
+      - field: progressPercentage
+        condition: equals 100
+      - field: isDownloading
+        condition: "false"
+    then:
+      - Set disabled=false
+      - Set the title to Download report
+      - Use the enabled brand-primary styling
+    else:
+      - Keep the button visible but disabled
+  - id: in_flight_action_locks_button
+    description: A download request keeps the button visible but disabled until the async download call settles.
+    trigger: rowController.handleDownload starts a PDF generation request
+    guards:
+      - field: isDownloading
+        condition: "true"
+    then:
+      - Keep the button mounted
+      - Switch the label to Downloading...
+      - Disable the row action button until the request finishes
+inputs:
+  - id: reportProgressPercentage
+    type: number
+    source: ReportsTable row data (`report.reportProgressPercentage`)
+    required: true
+  - id: isDownloading
+    type: boolean
+    source: useReportRowController / row action store (`rowController.isDownloading(report.reportId)`)
+    required: true
+  - id: reportRecord
+    type: report row object
+    source: ReportsTable row `_raw`
+    required: true
+outputs:
+  - id: download_button_render_state
+    type: rendered action button
+    destination: ReportsTable actions cell / ReportSplitActions primary button
+    lifespan: while the row is rendered
+  - id: download_button_disabled_state
+    type: boolean disabled flag
+    destination: ReportSplitActions button `disabled` prop and styling
+    lifespan: per render
+  - id: download_button_label
+    type: text label
+    destination: ReportSplitActions primary button text
+    lifespan: per render
+  - id: pdf_generation_request
+    type: PDF generation start request
+    destination: useDownloadStore.startDownload -> startPdfGeneration
+    lifespan: immediate on enabled click
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsTable.tsx
+    snippet: |
+      <div>
+        <ProgressBar percentage={report.reportProgressPercentage} />
+      </div>
+
+      <div className="flex justify-center relative">
+        <ReportSplitActions
+          reportName={report.name}
+          progressPercentage={report.reportProgressPercentage}
+          isDownloading={rowController.isDownloading(report.reportId)}
+          isRenaming={rowController.isRenaming(report.reportId)}
+          isDeleting={rowController.isDeleting(report.reportId)}
+          isEmailing={rowController.isEmailing(report.reportId)}
+          onDownload={(e) => {
+            e.stopPropagation();
+            rowController.handleDownload(report._raw);
+          }}
+          onEditReport={() => rowController.handleEdit(report._raw)}
+          onRename={() => rowController.startRename(report.reportId, report.name)}
+          onEmailPdf={() => rowController.handleEmail(report.reportId)}
+          onDelete={() => rowController.handleDelete(report._raw)}
+        />
+      </div>
+    line_range:
+      start: 159
+      end: 181
+    covers:
+      - condition:button_always_rendered
+      - input:reportProgressPercentage
+      - input:isDownloading
+      - input:reportRecord
+      - output:download_button_render_state
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportSplitActions.tsx
+    snippet: |
+      const anyActionInProgress = isDownloading || isRenaming || isDeleting || isEmailing;
+      const canDownload = progressPercentage === 100;
+
+      return (
+        <div className="inline-flex items-stretch rounded-md overflow-visible shadow-sm">
+          <button
+            type="button"
+            onClick={onDownload}
+            disabled={isDownloading || !canDownload}
+            title={canDownload ? "Download report" : "Report must be 100% complete to download"}
+            className={`h-8 px-3 text-white text-[12px] font-medium transition-colors rounded-l-md cursor-pointer flex items-center gap-1 ${
+              isDownloading || !canDownload
+                ? "bg-gray-400 cursor-not-allowed"
+                : "bg-brand-primary hover:bg-brand-primary-hover"
+            }`}
+          >
+            {isDownloading ? (
+              <>
+                <svg className="animate-spin h-3 w-3" fill="none" viewBox="0 0 24 24">
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                  />
+                </svg>
+                Downloading...
+              </>
+            ) : (
+              "Download"
+            )}
+          </button>
+    line_range:
+      start: 33
+      end: 71
+    covers:
+      - condition:button_enabled_only_at_100
+      - state:rendered_locked
+      - state:rendered_ready
+      - state:rendered_downloading
+      - transition:progress_becomes_100
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportRowController.ts
+    snippet: |
+      const handleDownload = useCallback(
+        async (report: any) => {
+          actionStore.setDownloading(report._id, true);
+          await reportActions.download({
+            reportId: report._id,
+            calculatorId: report.calculatorId || "1",
+          });
+          actionStore.setDownloading(report._id, false);
+        },
+        [reportActions, actionStore],
+      );
+    line_range:
+      start: 109
+      end: 118
+    covers:
+      - transition:click_download
+      - transition:download_settles
+      - input:reportRecord
+      - output:download_button_disabled_state
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportActions.ts
+    snippet: |
+      const handleDownloadReport = useCallback(
+        async (params: { reportId: string; calculatorId: string }) => {
+          const { reportId, calculatorId } = params;
+
+          try {
+            const token = getToken();
+            const success = await startDownload({
+              userId: token?._id,
+              reportId,
+              cid: calculatorId || "1",
+            });
+
+            if (!success) {
+              toast.error("Failed to start PDF generation.");
+            }
+
+            return { success };
+          } catch (err: any) {
+            toast.error(err.message || "PDF generation failed.");
+            return { success: false };
+          }
+        },
+        [startDownload]
+      );
+    line_range:
+      start: 127
+      end: 149
+    covers:
+      - transition:click_download
+      - output:pdf_generation_request
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/pdf/store/useDownloadStore.ts
+    snippet: |
+      startDownload: async ({ userId, reportId, cid, email }) => {
+        try {
+          // Set generating state first
+          get().setIsGenerating(true);
+          get().setDlStatus("waiting");
+          get().setPdfKey(userId);
+          get().setCid(cid);
+          get().setCurrentReportId(reportId);
+          get().setPublicUrl("");
+
+          // Call API to start generation
+          const response = await startPdfGeneration({ userId, reportId, email });
+
+          // Fix: response.data contains userId directly, not nested under .data
+          if (response.ok && response.data?.userId) {
+            // Generation started successfully
+            return true;
+          } else {
+            // API returned error
+            get().setDlStatus("failed");
+            return false;
+          }
+        } catch (error) {
+          console.error("Failed to start PDF generation:", error);
+          get().setDlStatus("failed");
+          return false;
+        }
+      },
+    line_range:
+      start: 107
+      end: 133
+    covers:
+      - transition:click_download
+      - output:pdf_generation_request
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/report-route-progress-contract.js
+    snippet: |
+      function resolveProgressPercentageByCalculatorId(calculatorId, route) {
+        if (calculatorId === CALCULATOR_IDS.VE) {
+          return resolveVeProgressPercentage(route);
+        }
+
+        if (calculatorId === CALCULATOR_IDS.DE) {
+          return resolveDeProgressPercentage(route);
+        }
+
+        if (calculatorId === CALCULATOR_IDS.VGA) {
+          return resolveVgaProgressPercentage(route);
+        }
+
+        if (calculatorId === CALCULATOR_IDS.NP) {
+          return resolveNpProgressPercentage(route);
+        }
+
+        return null;
+      }
+
+      function resolveNpProgressPercentage(route) {
+        const companyInformationStep = toStepNumber(route, /^\/company-information\/(\d+)(?:\/|$)/);
+        if (companyInformationStep !== null) {
+          return clampPercent(5 + (companyInformationStep - 1) * 7);
+        }
+
+        // Optional questions appear after download page - treat as 100% complete
+        if (route.includes("optional-questions")) {
+          return 100;
+        }
+
+        if (route === "/net-proceeds-overview" || route === "/thankyou" || route === "/value-estimate") {
+          return 100;
+        }
+
+        return null;
+      }
+    line_range:
+      start: 305
+      end: 367
+    covers:
+      - input:reportProgressPercentage
+      - condition:button_enabled_only_at_100
+confidence: 0.95
+confidence_rationale: >
+  The reports table always mounts the Download control, the button is disabled
+  until progressPercentage === 100, and the click path into PDF generation is
+  confirmed in the row controller, report actions hook, and download store. The
+  progress contract confirms that terminal routes resolve to 100, so the spec is
+  precise about the visible-disabled vs visible-enabled distinction while noting
+  that the hidden-then-visible golden wording is stale.
+unresolved_questions:
+  - Whether any other report action surface outside the listed files hides the Download control cannot be confirmed from the manifest-scoped evidence.
+  - The exact relationship between report.reportId and report._id is not proven in the inspected files, so the click-path input is described generically as a report record handoff.
+status: partial

@@ -1,0 +1,144 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.token-validation
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth_token_validation
+    coverage: full
+    notes: >
+      JWT payload is parsed from base64url encoding. Token structure is validated
+      via validateToken check. isTokenExpired intentionally returns false to
+      defer expiration checks to backend 401 responses.
+
+description: >
+  Provides client-side JWT validation for access tokens. Parses the JWT payload
+  from base64url encoding and validates token structure. The isTokenExpired
+  function intentionally returns false to defer expiration checks to backend
+  401 responses, preventing clock skew issues.
+
+state_machine: null
+
+conditions:
+  - id: jwt_payload_parsing
+    description: >
+      Parses JWT payload from the second segment of the token. Converts
+      base64url to base64, adds padding if needed, and decodes to JSON.
+    trigger: Token validation is requested.
+    guards:
+      - field: token_format
+        condition: Token has exactly 3 dot-separated segments.
+    then:
+      - Decode payload segment to JSON.
+    else:
+      - Return null (invalid token format).
+
+  - id: token_structure_validation
+    description: >
+      Validates that the parsed token contains required fields. Token is
+      considered structurally valid if payload can be parsed successfully.
+    trigger: Token is parsed.
+    guards:
+      - field: payload
+        condition: parseJwtPayload returns non-null object.
+    then:
+      - Token is structurally valid.
+    else:
+      - Token is invalid.
+
+  - id: expiration_deferral
+    description: >
+      Token expiration is intentionally not checked client-side. The
+      isTokenExpired function always returns false for parseable tokens.
+      Expiration is handled reactively via backend 401 responses.
+    trigger: isTokenExpired is called.
+    guards:
+      - field: payload
+        condition: parseJwtPayload returns non-null object.
+    then:
+      - Return false (defer to backend).
+    else:
+      - Return true (unparseable token is considered expired).
+
+inputs:
+  - id: access_token
+    type: JWT string
+    source: In-memory auth session
+    required: true
+    validation:
+      format: Three dot-separated segments (header.payload.signature)
+
+outputs:
+  - id: validation_result
+    type: "object with valid, expired, payload, expiresAt, userId"
+    destination: Token validation callers
+    lifespan: per validation call
+
+evidence_refs:
+  - path: src/features/auth/api/tokenValidator.js
+    snippet: |
+      export function parseJwtPayload(accessToken) {
+        if (typeof accessToken !== "string" || accessToken.length === 0) {
+          return null;
+        }
+        const parts = accessToken.split(".");
+        if (parts.length !== 3) {
+          return null;
+        }
+        try {
+          const base64Payload = parts[1];
+          const base64 = base64Payload.replace(/-/g, "+").replace(/_/g, "/");
+          const padLength = 4 - (base64.length % 4);
+          const paddedBase64 = padLength !== 4 ? base64 + "=".repeat(padLength) : base64;
+          const jsonPayload = atob(paddedBase64);
+          return JSON.parse(jsonPayload);
+        } catch (_error) {
+          return null;
+        }
+      }
+    covers:
+      - "condition:jwt_payload_parsing"
+
+  - path: src/features/auth/api/tokenValidator.js
+    snippet: |
+      export function isTokenExpired(accessToken) {
+        const payload = parseJwtPayload(accessToken);
+        if (!payload) {
+          return true;
+        }
+        return false;
+      }
+    covers:
+      - "condition:expiration_deferral"
+
+  - path: src/features/auth/api/tokenValidator.js
+    snippet: |
+      export function validateToken(accessToken) {
+        const payload = parseJwtPayload(accessToken);
+        if (!payload) {
+          return { valid: false, expired: true, reason: "invalid_token_format", payload: null };
+        }
+        const expired = false;
+        return {
+          valid: true,
+          expired: false,
+          reason: null,
+          payload,
+          expiresAt: typeof payload.exp === "number" ? new Date(payload.exp * 1000) : null,
+          userId: payload.userId || payload._id || payload.sub || null,
+        };
+      }
+    covers:
+      - "condition:token_structure_validation"
+      - "output:validation_result"
+
+confidence: 0.95
+confidence_rationale: >
+  JWT parsing, structure validation, and expiration deferral are directly
+  evidenced in tokenValidator.js. The intentional deferral of expiration
+  checks to backend 401s is documented in code comments.
+unresolved_questions:
+  - Whether token signature verification is performed (it is not client-side).
+  - Exact claims used for user ID extraction (userId, _id, or sub).
+status: complete

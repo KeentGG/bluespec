@@ -1,0 +1,35 @@
+spec_id: auth.error-handling
+output_path: runs/run-0015/generator/specs/auth.error-handling.yaml
+discovered_behaviors:
+  - id: auth-centralized-error-handling
+    description: Centralized 401/403 handling via authErrorHandler with automatic token refresh and session cleanup
+    priority: high
+    evidence_refs:
+      - src/features/auth/api/authErrorHandler.js
+  - id: auth-api-client-retry
+    description: API client automatically retries requests on 401/CSRF failures after successful token refresh
+    priority: high
+    evidence_refs:
+      - src/shared/lib/api/apiClient.ts
+  - id: auth-session-cleanup
+    description: On auth error, clear client data cache, clear auth session, clear browser user cookie, redirect to /login with reason parameter
+    priority: medium
+    evidence_refs:
+      - src/features/auth/api/authErrorHandler.js
+      - src/shared/lib/react/clearClientDataCache.ts
+source_files:
+  - src/features/auth/api/authErrorHandler.js
+  - src/shared/lib/api/apiClient.ts
+  - src/shared/lib/react/clearClientDataCache.ts
+  - src/features/auth/api/tokenService.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - authErrorHandler provides centralized 401/403 handling
+  - isAuthError() checks status code, taxonomy bucket, and auth-related keywords
+  - handleAuthError() clears cache, session, cookies, and redirects to /login
+  - Prevents concurrent handling with isAuthErrorHandling flag
+  - API client (apiClient.ts) detects 401/CSRF failures and retries after refresh
+  - Proactive CSRF token refresh when missing for state-changing requests
+  - clearClientDataCache() uses SWR mutate to clear all cached data
+  - Redirect includes reason parameter for user feedback

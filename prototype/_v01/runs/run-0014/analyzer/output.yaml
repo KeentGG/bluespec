@@ -1,0 +1,168 @@
+run_id: run-0014
+analyzer: analyzer-agent
+status: completed
+provider: local
+
+recall_miss_diagnoses:
+  - spec_id: download.button-visibility.yaml
+    behavior_id: download-button-visibility
+    miss_type: behavior_mismatch
+    failure_type: rubric_gap_failure
+    diagnosis: >
+      The generator correctly identified the interactivity toggle (disabled -> enabled)
+      in the code and preserved the hidden-vs-disabled distinction as instructed by the
+      formula's analyze step. The golden behavior inaccurately claims a visibility toggle
+      (hidden -> visible). The rubric lacks a criterion to distinguish between visibility
+      and interactivity UI gate patterns, causing the accurate spec to be penalized on recall.
+    failure_tier: rubric_mutation
+    suggested_mutation: >
+      Add ui_gate_pattern_precision criterion to rubric.active_criteria. This criterion
+      should credit specs that correctly identify the actual gate pattern (visibility vs
+      interactivity vs auth) rather than penalizing them for not matching imprecise
+      golden behavior wording.
+    expected_effect: >
+      Future runs will not penalize accurate interactivity-toggle documentation when
+      golden behaviors use imprecise "visibility" language.
+    rubric_gap_proposed: true
+    rubric_gap_proposal:
+      id: ui_gate_pattern_precision
+      description: >
+        Distinguish between "visibility" (render/unmount) and "interactivity"
+        (disabled/enabled) as separate UI gate patterns in scoring.
+    evidence_refs:
+      - runs/run-0014/evaluator/shadow-findings.yaml:recall_misses[0]
+      - runs/run-0014/evaluator/shadow-findings.yaml:rubric_gap_candidates[0]
+      - runs/run-0014/inputs/formula.yaml:steps[analyze]
+    confidence: 0.90
+    confidence_rationale: >
+      Formula explicitly instructs preserving hidden-vs-disabled differences. Generator
+      followed instruction and produced accurate spec. Evaluator confirmed spec matches
+      code. Only mismatch is golden behavior wording vs code reality.
+
+  - spec_id: auth-conditional-redirect
+    behavior_id: auth-conditional-redirect
+    miss_type: missing_condition
+    failure_type: rubric_gap_failure
+    diagnosis: >
+      The generator explored the correct files (gate-edit-contract.js,
+      useGateEditEntryState.ts) and explicitly documented the absence of the
+      agreement-state check. The formula's analyze step instructs preserving
+      agreement-state gating instead of collapsing it. The rubric lacks a criterion
+      for negative condition documentation, so the spec is penalized for accurately
+      reporting that the claimed condition does not exist in code.
+    failure_tier: rubric_mutation
+    suggested_mutation: >
+      Add negative_condition_documentation criterion to rubric.active_criteria.
+      This should credit specs that explicitly document when a golden-behavior
+      condition is absent from the code, rather than penalizing them for recall.
+    expected_effect: >
+      Future runs will reward honest negative findings, reducing pressure on
+      generators to hallucinate absent conditions to match golden behavior wording.
+    rubric_gap_proposed: true
+    rubric_gap_proposal:
+      id: negative_condition_documentation
+      description: >
+        Credit specs for explicitly documenting the absence of a claimed condition
+        when the condition does not exist in the evidenced code.
+    evidence_refs:
+      - runs/run-0014/evaluator/shadow-findings.yaml:recall_misses[1]
+      - runs/run-0014/evaluator/shadow-findings.yaml:rubric_gap_candidates[3]
+      - runs/run-0014/generator/output.yaml:flags_for_analyzer[0]
+      - runs/run-0014/inputs/formula.yaml:steps[analyze]
+    confidence: 0.95
+    confidence_rationale: >
+      Generator flags explicitly note "agreement-state gate absent from edit flow".
+      Evaluator confirms no TOA/agreement-state check exists in any evidenced file.
+      Spec documents actual code accurately. High confidence this is rubric gap,
+      not generator failure.
+
+  - spec_id: auth-conditional-redirect
+    behavior_id: auth-conditional-redirect
+    miss_type: stale_evidence
+    failure_type: rubric_gap_failure
+    diagnosis: >
+      The generator correctly identified that the golden-set evidence_ref
+      src/routes/project-edit.tsx is missing and found the actual implementation
+      in gate-edit-contract.js and useGateEditEntryState.ts. The formula includes
+      reference resolution validation but does not explicitly extend it to
+      golden-set evidence freshness. More importantly, the rubric lacks any
+      criterion for evidence_ref_existence, so stale golden-set refs mislead
+      scoring without any mechanism to discount them.
+    failure_tier: rubric_mutation
+    suggested_mutation: >
+      Add evidence_ref_existence criterion to rubric.active_criteria. This
+      criterion should validate that golden-set evidence_refs exist in the
+      codebase before scoring recall against them, or discount recall penalties
+      when golden-set refs are stale.
+    expected_effect: >
+      Future runs will not be misled by stale golden-set evidence. Scoring will
+      either validate refs upfront or adjust recall weights for stale references.
+    rubric_gap_proposed: true
+    rubric_gap_proposal:
+      id: evidence_ref_existence
+      description: >
+        Verify golden-set evidence_refs exist in the codebase before scoring,
+        or discount recall penalties for stale references.
+    evidence_refs:
+      - runs/run-0014/evaluator/shadow-findings.yaml:recall_misses[2]
+      - runs/run-0014/evaluator/shadow-findings.yaml:rubric_gap_candidates[1]
+      - runs/run-0014/generator/output.yaml:flags_for_analyzer[0]
+    confidence: 0.85
+    confidence_rationale: >
+      Generator found correct files and flagged stale ref. Evaluator confirmed
+      stale ref. Formula has references_resolve validation but focused on spec
+      references, not golden-set refs. Slight uncertainty whether formula should
+      also explicitly instruct golden-set ref validation.
+
+primary_failure_type: rubric_gap_failure
+diagnosis: >
+  All three recall misses in run-0014 are classified as rubric_gap_failure.
+  The generator successfully found relevant files, correctly recognized
+  behaviors, satisfied schema requirements, and followed formula instructions.
+  The misses stem from the rubric lacking criteria to handle: (1) UI gate
+  pattern precision, (2) negative condition documentation, and (3) golden-set
+  evidence freshness. The rubric's over-reliance on golden_set_recall without
+  these supporting criteria causes accurate specs to be penalized when golden
+  behaviors are imprecise, stale, or claim non-existent conditions.
+failure_tier: rubric_mutation
+suggested_mutation: >
+  Merge four rubric gap candidates into active_criteria with appropriate
+  weights: ui_gate_pattern_precision, negative_condition_documentation,
+  evidence_ref_existence, and backend_enforcement_documentation. Reduce
+  golden_set_recall weight slightly (e.g., from 1.2 to 1.0) to balance
+  against these new criteria and prevent over-penalization for golden-behavior
+  mismatches.
+expected_effect: >
+  A more nuanced rubric that rewards code-accurate documentation over
+  golden-behavior mimicry, reducing false recall misses and improving
+  generator trust in honest negative findings.
+
+rubric_gap_proposed: true
+rubric_gap_proposal:
+  id: rubric-v003-enriched
+  description: >
+    Propose rubric version v003 that adds four new criteria:
+    ui_gate_pattern_precision, negative_condition_documentation,
+    evidence_ref_existence, and backend_enforcement_documentation.
+    Adjust golden_set_recall weight from 1.2 to 1.0 to prevent
+    over-penalization for golden-behavior mismatches.
+
+evidence_refs:
+  - runs/run-0014/evaluator/output.yaml
+  - runs/run-0014/evaluator/shadow-findings.yaml
+  - runs/run-0014/generator/output.yaml
+  - runs/run-0014/inputs/formula.yaml
+  - runs/run-0014/inputs/rubric.yaml
+  - prompts/shared/failure-types.md
+
+confidence: 0.90
+confidence_rationale: >
+  All source files were available and readable. The decision tree was applied
+  exhaustively to each recall miss. All three misses passed steps 1-4 (not
+  search, recognition, format, or prompt failure) and clearly map to rubric
+  gap candidates in the evaluator's shadow findings. Minor uncertainty about
+  whether stale evidence handling is partially a prompt_failure (formula could
+  explicitly instruct golden-set ref validation), but the generator caught it
+  anyway so rubric gap remains the primary driver of the recall penalty.
+
+analyzer_timestamp: 2026-04-23T00:00:00Z

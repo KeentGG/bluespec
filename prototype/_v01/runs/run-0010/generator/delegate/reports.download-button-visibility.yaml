@@ -1,0 +1,44 @@
+spec_id: reports.download-button-visibility.yaml
+output_path: /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0010/generator/specs/reports.download-button-visibility.yaml
+golden_behaviors:
+  - id: download-button-visibility
+    description: download button becomes visible only after report progress reaches the download stage
+    priority: high
+    evidence_refs:
+      - src/components/ReportActions.tsx
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsTable.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportSplitActions.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportRowController.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportActions.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/pdf/store/useDownloadStore.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/report-route-progress-contract.js
+ecosystem: frontend
+analysis:
+  behavior_map:
+    - id: row_actions_always_mount
+      summary: ReportsTable renders ReportSplitActions for every report row. The Download button is always mounted in the actions cell.
+      live_surface:
+        - reports table row actions
+        - report split action control
+    - id: download_enablement_threshold
+      summary: ReportSplitActions treats progressPercentage === 100 as the download-ready threshold. Below 100 the button remains visible but disabled; at 100 it becomes enabled and starts PDF generation through the download store.
+      live_surface:
+        - row download button
+        - PDF generation overlay/store
+  predicate_inventory:
+    - predicate: progressPercentage < 100
+      render_mode: visible-disabled
+      relation_to_golden: partial
+      note: the button is not hidden before the download stage; it is mounted and disabled instead.
+    - predicate: progressPercentage === 100
+      render_mode: visible-enabled
+      relation_to_golden: partial
+      note: the threshold matches the download-ready point, but the golden wording says the control becomes visible only then, which is not how the code behaves.
+    - predicate: isDownloading === true
+      render_mode: visible-disabled
+      relation_to_golden: mismatch
+      note: a separate in-flight lock keeps the control visible but disabled while the PDF generation request is running.
+staleness_notes:
+  - The golden evidence path src/components/ReportActions.tsx is stale; the live equivalent is ReportSplitActions.tsx inside the reports feature.
+  - The code does not hide the download button at low progress. It keeps the button mounted and only changes disabled state and label.

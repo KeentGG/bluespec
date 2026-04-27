@@ -1,0 +1,56 @@
+spec_id: auth.flow.yaml
+output_path: runs/run-0016/generator/specs/auth.flow.yaml
+discovered_behaviors:
+  - id: auth-login-flow
+    description: User login with email/password, JWT token storage, session bootstrap
+    priority: high
+    evidence_refs:
+      - src/features/auth/api/auth-service.js
+      - src/features/auth/api/sessionBootstrap.js
+      - src/features/auth/components/LoginPageContent.tsx
+  - id: auth-token-management
+    description: JWT access token stored in memory, refresh token in HTTP-only cookie
+    priority: high
+    evidence_refs:
+      - src/features/auth/api/tokenService.js
+      - src/features/auth/api/authMemorySession.js
+  - id: auth-cross-tab-sync
+    description: Cross-tab session synchronization via BroadcastChannel
+    priority: medium
+    evidence_refs:
+      - src/features/auth/api/authMemorySession.js
+      - src/features/auth/lib/authBroadcast.js
+  - id: auth-token-refresh
+    description: Token refresh with cross-tab coordination and lock mechanism
+    priority: high
+    evidence_refs:
+      - src/features/auth/api/tokenRefresher.js
+  - id: auth-route-protection
+    description: Middleware and AuthGuard component for route protection
+    priority: high
+    evidence_refs:
+      - middleware.js
+      - src/features/auth/api/authGuard.js
+      - src/features/auth/components/AuthGuard.tsx
+source_files:
+  - src/features/auth/api/auth-service.js
+  - src/features/auth/api/tokenService.js
+  - src/features/auth/api/sessionBootstrap.js
+  - src/features/auth/api/authMemorySession.js
+  - src/features/auth/api/tokenRefresher.js
+  - src/features/auth/api/authGuard.js
+  - src/features/auth/components/LoginPageContent.tsx
+  - src/features/auth/components/AuthGuard.tsx
+  - src/shared/components/AuthSyncBootstrap.tsx
+  - middleware.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - Complete auth system with login/signup/logout endpoints
+  - JWT access token stored in memory (not localStorage) for XSS protection
+  - Refresh token stored in HTTP-only cookie (backend-managed)
+  - Cross-tab session sync via BroadcastChannel with localStorage fallback
+  - Token refresh uses cross-tab lock mechanism to prevent multiple simultaneous refreshes
+  - Middleware handles auth guard for protected routes (/companies, /reports)
+  - AuthGuard component wraps protected pages and shows loading state
+  - CSRF protection via x-csrf-token header on state-changing requests

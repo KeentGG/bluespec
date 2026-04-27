@@ -1,0 +1,632 @@
+id: pdf.lifecycle
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: pdf-generation-state-machine
+    coverage: full
+    notes: >
+      The live frontend workflow is represented by a persisted Zustand store plus a
+      polling overlay. The observed runtime states are idle, waiting, finished, and
+      failed. PDF generation starts with startDownload(), polling continues while
+      waiting, and terminal states are rendered in the overlay.
+  - id: pdf-cross-tab-coordination
+    coverage: partial
+    notes: >
+      The workflow shares state through localStorage keys, so a refreshed page or a
+      newly mounted tab can rehydrate the active PDF lifecycle. No storage-event
+      listener or other real-time tab-to-tab synchronization was found in the PDF
+      feature code, so coordination is persistence-based rather than live broadcast.
+  - id: pdf-persistence
+    coverage: full
+    notes: >
+      Download lifecycle fields are initialized from localStorage, updated through
+      store setters, and fully removed by reset(). Persisted fields include
+      isGenerating, pdfKey, cid, dlStatus, publicUrl, and currentReportId.
+
+description: >
+  The frontend PDF lifecycle starts when a report download request stores the active
+  job identifiers in a Zustand store and calls the PDF start endpoint. While the
+  store remains in the waiting state, the overlay polls the backend every 3 seconds
+  for completion, marks the workflow finished when a public URL arrives, marks it
+  failed on explicit failure, unknown status messaging, or timeout, and shows UI for
+  waiting, success, and failure. Lifecycle state is mirrored into localStorage so the
+  workflow survives refresh and can be rehydrated by another page context, and reset()
+  clears both in-memory and persisted state.
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: No PDF workflow is active and the overlay stays hidden because isGenerating is false.
+    - id: waiting
+      description: A PDF job has been started, store state has been persisted, and the overlay polls the status endpoint.
+    - id: finished
+      description: The backend reported a finished PDF or returned a public URL and the overlay can present the download action.
+    - id: failed
+      description: PDF generation was rejected, reported failed, surfaced an unknown status message, or exceeded the polling timeout.
+  transitions:
+    - id: start_download
+      from: idle
+      to: waiting
+      trigger: useDownloadStore.startDownload(...) is called for a report
+      guards:
+        - field: userId
+          condition: userId is provided to startDownload
+        - field: reportId
+          condition: reportId is provided to startDownload
+      effects:
+        - Set isGenerating to true
+        - Set dlStatus to waiting
+        - Persist pdfKey from userId, cid, currentReportId, and cleared publicUrl into localStorage-backed store fields
+        - Call startPdfGeneration({ userId, reportId, email })
+    - id: start_download_rejected
+      from: waiting
+      to: failed
+      trigger: startPdfGeneration(...) returns a non-ok response or throws inside startDownload
+      effects:
+        - Set dlStatus to failed
+        - Return false to the caller
+    - id: polling_continues
+      from: waiting
+      to: waiting
+      trigger: Poll interval fires and getPdfStatus(...) returns a non-terminal response
+      guards:
+        - field: isGenerating
+          condition: isGenerating is true
+        - field: pdfKey
+          condition: pdfKey is non-empty
+        - field: dlStatus
+          condition: dlStatus is neither finished nor failed
+      effects:
+        - Keep the interval active
+        - Leave dlStatus unchanged at waiting
+    - id: polling_finished
+      from: waiting
+      to: finished
+      trigger: getPdfStatus(...) yields statusData.status === finished OR statusData.publicUrl is present
+      effects:
+        - Set dlStatus to finished
+        - Persist publicUrl from statusData.publicUrl or the fallback "#"
+    - id: polling_failed
+      from: waiting
+      to: failed
+      trigger: getPdfStatus(...) yields failed status or an Unknown message
+      guards:
+        - field: backend_response
+          condition: statusData.status === failed OR statusData.status includes failed OR raw.message includes Unknown
+      effects:
+        - Set dlStatus to failed
+        - Stop polling
+    - id: polling_timeout
+      from: waiting
+      to: failed
+      trigger: Polling reaches MAX_ATTEMPTS without a terminal result
+      effects:
+        - Clear the polling interval
+        - Set dlStatus to failed
+    - id: retry_polling
+      from: failed
+      to: waiting
+      trigger: User clicks the Try Again button in the failed overlay
+      effects:
+        - Set dlStatus to waiting
+        - Re-enter the polling effect using the existing persisted pdfKey
+    - id: reset_after_success
+      from: finished
+      to: idle
+      trigger: User clicks the download link or close button and handleClose() calls reset()
+      effects:
+        - Clear all in-memory download fields
+        - Remove all persisted download localStorage keys
+    - id: reset_after_failure
+      from: failed
+      to: idle
+      trigger: User clicks the Close button and handleClose() calls reset()
+      effects:
+        - Clear all in-memory download fields
+        - Remove all persisted download localStorage keys
+
+conditions:
+  - id: overlay_visibility_gate
+    description: The PDF generation overlay only renders while the persisted workflow is marked as generating.
+    trigger: PdfGenerationOverlay renders
+    guards:
+      - field: isGenerating
+        condition: isGenerating is true
+    then:
+      - Render the overlay and derive waiting, finished, and failed UI from dlStatus
+    else:
+      - Return null and show no overlay
+
+  - id: polling_effect_gate
+    description: Polling only starts when a workflow is active, a pdfKey exists, and the current status is not already terminal.
+    trigger: PdfGenerationOverlay polling useEffect evaluates
+    guards:
+      - field: isGenerating
+        condition: isGenerating is true
+      - field: pdfKey
+        condition: pdfKey is non-empty
+      - field: dlStatus
+        condition: dlStatus is not finished and not failed
+    then:
+      - Start a 3000 ms interval
+      - "Increment attempts on each tick and call getPdfStatus({ userId: pdfKey })"
+    else:
+      - Skip polling entirely
+
+  - id: success_animation_window
+    description: After the workflow finishes, the overlay shows a celebration GIF for 5 seconds before swapping to the download link.
+    trigger: dlStatus changes
+    guards:
+      - field: dlStatus
+        condition: dlStatus equals finished
+    then:
+      - Set showAnimation to true
+      - Start a 5000 ms timer
+      - Set showAnimation to false after the timer expires
+    else:
+      - Set showAnimation to false immediately
+
+  - id: waiting_hides_close_button
+    description: The close button is intentionally hidden while the workflow is waiting so the overlay cannot be dismissed from the waiting UI.
+    trigger: Overlay action controls render
+    guards:
+      - field: isWaiting
+        condition: isWaiting is false
+    then:
+      - Render the close button in the overlay corner
+    else:
+      - Do not render the close button
+
+  - id: localstorage_rehydration
+    description: The store bootstraps its lifecycle fields from shared localStorage keys, allowing the workflow to resume after refresh or in another page context that initializes the store.
+    trigger: useDownloadStore is created
+    then:
+      - Read dlStatus, isGenerating, pdfKey, cid, publicUrl, and currentReportId from localStorage-backed helpers
+      - Seed initial Zustand state from those persisted values
+
+inputs:
+  - id: pdf_user_id
+    type: string
+    source: "useDownloadStore.startDownload({ userId, ... })"
+    required: true
+    validation:
+      format: non-empty string expected by startPdfGeneration and getPdfStatus
+
+  - id: report_id
+    type: string
+    source: "useDownloadStore.startDownload({ reportId, ... })"
+    required: true
+    validation:
+      format: non-empty string expected by startPdfGeneration
+
+  - id: calculator_id
+    type: string
+    source: "useDownloadStore.startDownload({ cid, ... }) and persisted store state"
+    required: true
+    validation:
+      usage: used to map the download link id query parameter to a tool label
+
+  - id: recipient_email
+    type: string
+    source: "optional email field passed into startDownload"
+    required: false
+    validation:
+      presence: only sent in the POST body when email is truthy
+
+  - id: pdf_status_response
+    type: object
+    source: "getPdfStatus({ userId: pdfKey }) response"
+    required: true
+    validation:
+      status: raw.data.status may be finished, failed, contain failed, or remain non-terminal
+      public_url: raw.data.publicUrl finishes the workflow when present
+      message: raw.message containing Unknown forces failure
+
+outputs:
+  - id: start_generation_request
+    type: "POST request to /calculator-reports-pdf/start-generate-pdf/{userId}/user/{reportId}/report"
+    destination: "backend PDF generation API"
+    lifespan: "one request per startDownload invocation"
+
+  - id: polling_request
+    type: "GET request to /calculator-reports-pdf/user/{userId}/status"
+    destination: "backend PDF status API"
+    lifespan: "repeated every 3000 ms until a terminal condition or timeout"
+
+  - id: persisted_download_state
+    type: "localStorage-backed Zustand fields for isGenerating, pdfKey, cid, dlStatus, publicUrl, and currentReportId"
+    destination: "browser localStorage and any component using useDownloadStore"
+    lifespan: "persists until reset() removes the storage keys"
+
+  - id: overlay_ui_state
+    type: "waiting, finished, or failed overlay presentation"
+    destination: "PdfGenerationOverlay render tree"
+    lifespan: "visible while isGenerating remains true"
+
+  - id: pdf_download_url
+    type: "browser href ${NEXT_PUBLIC_APP_API_URL}/calculator-reports/get-file?source={publicUrl}&id={tool}"
+    destination: "anchor download action in the finished overlay"
+    lifespan: "used when the user clicks the finished-state download control"
+
+evidence_refs:
+  - path: src/features/pdf/store/useDownloadStore.ts
+    snippet: |
+      const STORAGE_KEY_IS_GENERATING = "downloadingpdf";
+      const STORAGE_KEY_PDF_KEY = "downloadPdfKey";
+      const STORAGE_KEY_CID = "downloadPdfCid";
+      const STORAGE_KEY_STATUS = "downloadPdfStatus";
+      const STORAGE_KEY_PUBLIC_URL = "downloadPdfPublicUrl";
+      const STORAGE_KEY_REPORT_ID = "downloadPdfReportId";
+
+      export const useDownloadStore = create<DownloadState & DownloadActions>((set, get) => ({
+        // Initial state from storage
+        dlStatus: getStorageValue(STORAGE_KEY_STATUS) as DownloadState["dlStatus"] || "",
+        isGenerating: getIsGeneratingFromStorage(),
+        pdfKey: getStorageValue(STORAGE_KEY_PDF_KEY),
+        cid: getStorageValue(STORAGE_KEY_CID),
+        publicUrl: getStorageValue(STORAGE_KEY_PUBLIC_URL),
+        currentReportId: getStorageValue(STORAGE_KEY_REPORT_ID),
+    covers:
+      - transition:start_download
+      - condition:localstorage_rehydration
+      - input:calculator_id
+      - output:persisted_download_state
+    line_range:
+      start: 29
+      end: 75
+
+  - path: src/features/pdf/store/useDownloadStore.ts
+    snippet: |
+      setDlStatus: (status) => {
+        set({ dlStatus: status });
+        setStorageValue(STORAGE_KEY_STATUS, status);
+      },
+
+      setIsGenerating: (value) => {
+        set({ isGenerating: value });
+        setStorageValue(STORAGE_KEY_IS_GENERATING, value.toString());
+      },
+
+      setPdfKey: (value) => {
+        set({ pdfKey: value });
+        setStorageValue(STORAGE_KEY_PDF_KEY, value);
+      },
+
+      setCid: (value) => {
+        set({ cid: value });
+        setStorageValue(STORAGE_KEY_CID, value);
+      },
+
+      setPublicUrl: (value) => {
+        set({ publicUrl: value });
+        setStorageValue(STORAGE_KEY_PUBLIC_URL, value);
+      },
+
+      setCurrentReportId: (value) => {
+        set({ currentReportId: value });
+        setStorageValue(STORAGE_KEY_REPORT_ID, value);
+      },
+    covers:
+      - condition:localstorage_rehydration
+      - output:persisted_download_state
+    line_range:
+      start: 77
+      end: 105
+
+  - path: src/features/pdf/store/useDownloadStore.ts
+    snippet: |
+      startDownload: async ({ userId, reportId, cid, email }) => {
+        try {
+          // Set generating state first
+          get().setIsGenerating(true);
+          get().setDlStatus("waiting");
+          get().setPdfKey(userId);
+          get().setCid(cid);
+          get().setCurrentReportId(reportId);
+          get().setPublicUrl("");
+
+          // Call API to start generation
+          const response = await startPdfGeneration({ userId, reportId, email });
+
+          // Fix: response.data contains userId directly, not nested under .data
+          if (response.ok && response.data?.userId) {
+            // Generation started successfully
+            return true;
+          } else {
+            // API returned error
+            get().setDlStatus("failed");
+            return false;
+          }
+        } catch (error) {
+          console.error("Failed to start PDF generation:", error);
+          get().setDlStatus("failed");
+          return false;
+        }
+      },
+    covers:
+      - transition:start_download
+      - transition:start_download_rejected
+      - input:pdf_user_id
+      - input:report_id
+      - input:recipient_email
+      - output:start_generation_request
+    line_range:
+      start: 107
+      end: 134
+
+  - path: src/features/pdf/store/useDownloadStore.ts
+    snippet: |
+      reset: () => {
+        set({
+          dlStatus: "",
+          isGenerating: false,
+          pdfKey: "",
+          cid: "",
+          publicUrl: "",
+          currentReportId: "",
+        });
+        removeStorageValue(STORAGE_KEY_IS_GENERATING);
+        removeStorageValue(STORAGE_KEY_PDF_KEY);
+        removeStorageValue(STORAGE_KEY_CID);
+        removeStorageValue(STORAGE_KEY_STATUS);
+        removeStorageValue(STORAGE_KEY_PUBLIC_URL);
+        removeStorageValue(STORAGE_KEY_REPORT_ID);
+      },
+    covers:
+      - transition:reset_after_success
+      - transition:reset_after_failure
+      - output:persisted_download_state
+    line_range:
+      start: 136
+      end: 151
+
+  - path: src/features/pdf/components/PdfGenerationOverlay.tsx
+    snippet: |
+      useEffect(() => {
+        if (!isGenerating || !pdfKey) return;
+        if (dlStatus === "finished" || dlStatus === "failed") return;
+
+        let attempts = 0;
+
+        const poll = async () => {
+          try {
+            const status = await getPdfStatus({ userId: pdfKey });
+            const statusData = status?.raw?.data;
+
+            if (statusData?.status === "finished" || statusData?.publicUrl) {
+              setDlStatus("finished");
+              setPublicUrl(statusData.publicUrl || "#");
+              return true;
+            }
+
+            if (statusData?.status === "failed" || statusData?.status?.includes("failed")) {
+              setDlStatus("failed");
+              return true;
+            }
+
+            if (status?.raw?.message?.includes("Unknown")) {
+              setDlStatus("failed");
+              return true;
+            }
+
+            return false;
+          } catch {
+            return false;
+          }
+        };
+
+        const intervalId = setInterval(async () => {
+          attempts++;
+
+          if (attempts >= MAX_ATTEMPTS) {
+            clearInterval(intervalId);
+            setDlStatus("failed");
+            return;
+          }
+
+          const shouldStop = await poll();
+          if (shouldStop) {
+            clearInterval(intervalId);
+          }
+        }, POLL_INTERVAL);
+
+        return () => clearInterval(intervalId);
+      }, [isGenerating, pdfKey, dlStatus, setDlStatus, setPublicUrl]);
+    covers:
+      - transition:polling_continues
+      - transition:polling_finished
+      - transition:polling_failed
+      - transition:polling_timeout
+      - condition:polling_effect_gate
+      - input:pdf_status_response
+      - output:polling_request
+    line_range:
+      start: 108
+      end: 157
+
+  - path: src/features/pdf/components/PdfGenerationOverlay.tsx
+    snippet: |
+      const handleClose = useCallback(() => {
+        reset();
+      }, [reset]);
+
+      const handleRetry = useCallback(() => {
+        setDlStatus("waiting");
+      }, [setDlStatus]);
+
+      // Celebration animation timer - show Yehey GIF for 5 seconds before download button
+      const [showAnimation, setShowAnimation] = useState(false);
+
+      useEffect(() => {
+        if (dlStatus === "finished") {
+          setShowAnimation(true);
+          const timer = setTimeout(() => {
+            setShowAnimation(false);
+          }, ANIMATION_DURATION);
+          return () => clearTimeout(timer);
+        } else {
+          setShowAnimation(false);
+        }
+      }, [dlStatus]);
+
+      if (!isGenerating) return null;
+    covers:
+      - transition:retry_polling
+      - transition:reset_after_success
+      - transition:reset_after_failure
+      - condition:overlay_visibility_gate
+      - condition:success_animation_window
+      - output:overlay_ui_state
+    line_range:
+      start: 85
+      end: 106
+
+  - path: src/features/pdf/components/PdfGenerationOverlay.tsx
+    snippet: |
+      {isWaiting && (
+        <div className="mt-2 flex flex-col items-center">
+          <Image
+            src={CalculatorLoading}
+            alt="Generating report"
+            width={100}
+            height={100}
+            className="mb-[55px]"
+            unoptimized
+          />
+          <p>
+            We&apos;re putting together your personalized report. This should only take a
+            moment. Thanks for your patience.
+          </p>
+        </div>
+      )}
+
+      {isFinished && !showAnimation && (
+        <div className="mt-5 flex flex-col items-center">
+          <a
+            onClick={handleClose}
+            className="my-5 inline-block text-white font-bold py-4 px-4 rounded-full transition duration-300 hover:scale-105"
+            target="_blank"
+            href={`${process.env.NEXT_PUBLIC_APP_API_URL}/calculator-reports/get-file?source=${publicUrl}&id=${tool}`}
+            download
+          >
+            <ArrowDownTrayIcon className="w-[50px] h-[50px] text-green-400 hover:text-cyan-400" />
+          </a>
+        </div>
+      )}
+
+      {isFailed && (
+        <div className="mt-5 flex flex-col items-center">
+          <ExclamationCircleIcon className="animate-bounce w-[50px] h-[50px] text-[#D44950] mb-4" />
+          <div className="font-bold my-1">Report Generation Failed</div>
+          <div className="flex gap-3 mt-6">
+            <Button
+              type="button"
+              variant="unstyled"
+              size="none"
+              onClick={handleRetry}
+            >
+              <RefreshIcon className="w-4 h-4" />
+              Try Again
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {!isWaiting && (
+        <Button
+          type="button"
+          variant="unstyled"
+          size="none"
+          onClick={handleClose}
+          aria-label="Close"
+        >
+          <XMarkIcon className="w-6 h-6" />
+        </Button>
+      )}
+    covers:
+      - state:waiting
+      - state:finished
+      - state:failed
+      - transition:retry_polling
+      - transition:reset_after_success
+      - condition:waiting_hides_close_button
+      - output:overlay_ui_state
+      - output:pdf_download_url
+    line_range:
+      start: 176
+      end: 274
+
+  - path: src/features/pdf/api/pdf-service.ts
+    snippet: |
+      export async function startPdfGeneration(
+        { userId, reportId, email }: PdfGenerationParams,
+        options?: { client?: ReturnType<typeof createDefaultApiClient> }
+      ) {
+        const client = getClient(options);
+        return client.post({
+          path: `/calculator-reports-pdf/start-generate-pdf/${userId}/user/${reportId}/report`,
+          body: email ? { email } : null,
+        });
+      }
+
+      export async function getPdfStatus(
+        { userId }: PdfStatusParams,
+        options?: { client?: ReturnType<typeof createDefaultApiClient> }
+      ) {
+        const client = getClient(options);
+        return client.get({
+          path: `/calculator-reports-pdf/user/${userId}/status`,
+        });
+      }
+    covers:
+      - transition:start_download
+      - transition:polling_continues
+      - input:pdf_user_id
+      - input:report_id
+      - input:recipient_email
+      - output:start_generation_request
+      - output:polling_request
+    line_range:
+      start: 26
+      end: 45
+
+  - path: src/shared/lib/qfm/pdfLifecycle.js
+    snippet: |
+      export const QFM_PDF_STATES = Object.freeze({
+        IDLE: "idle",
+        WAITING: "waiting",
+        FINISHED: "finished",
+        FAILED: "failed",
+      });
+
+      const WAITING_ALIASES = Object.freeze(new Set(["queued", "processing", "in_progress", "waiting"]));
+      const FINISHED_ALIASES = Object.freeze(new Set(["finished", "complete", "completed", "ready"]));
+      const FAILED_ALIASES = Object.freeze(new Set(["failed", "error"]));
+    covers:
+      - state:idle
+      - state:waiting
+      - state:finished
+      - state:failed
+    line_range:
+      start: 55
+      end: 64
+
+confidence: 0.85
+confidence_rationale: >
+  The live store, overlay polling loop, and API endpoints are directly evidenced in
+  useDownloadStore.ts, PdfGenerationOverlay.tsx, and pdf-service.ts. Persisted
+  lifecycle keys and reset behavior are explicit. Confidence is reduced because the
+  manifest-listed helper module pdfLifecycle.js defines a richer canonical lifecycle
+  contract than the active overlay code appears to use directly, and cross-tab
+  behavior is only evidenced through shared localStorage rehydration rather than a
+  dedicated storage-event synchronization path.
+
+unresolved_questions:
+  - Does any runtime path actually instantiate createPdfLifecycleManager from src/shared/lib/qfm/pdfLifecycle.js, or is it currently only an exported helper contract?
+  - Should Try Again start a brand-new PDF generation request, or is the current behavior of only setting dlStatus back to waiting and re-polling the existing pdfKey intentional?
+  - What exact backend statuses can GET /calculator-reports-pdf/user/{userId}/status return beyond finished, failed, and unknown-message cases?
+
+status: partial

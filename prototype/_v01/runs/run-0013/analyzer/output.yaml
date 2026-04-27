@@ -1,0 +1,64 @@
+run_id: "run-0013"
+analyzer: "run_analyzer"
+status: "complete"
+provider: "opencode-agent"
+primary_failure_type: "recognition_failure"
+diagnosis: >
+  The generator explored split/synthetic fixture files (useGateEditEntryState.ts,
+  ReportSplitActions.tsx) rather than canonical sources (project-edit.tsx,
+  ReportActions.tsx). While the formula's analyze step explicitly instructed
+  preserving agreement-state gating, hidden-vs-disabled distinctions, and
+  end-to-end side effects, the generator collapsed these semantic distinctions
+  in the draft step. All three recall misses involve the generator misidentifying
+  or omitting behavior that the formula asked for: (1) agreement-state guard was
+  conflated with generic auth redirect logic, (2) visibility semantics were
+  conflated with enablement state, and (3) calculator-side report creation was
+  omitted from the state machine transitions. The generator self-assessed all
+  specs as 'partial' coverage and flagged synthetic fixtures, indicating it was
+  aware of incompleteness but did not recover.
+failure_tier: "step_management"
+suggested_mutation: >
+  Add a `golden_validate` step between `analyze` and `draft` that explicitly
+  cross-references the predicate inventory against golden behavior wording.
+  Require the step to output a `coverage_gap_report` listing any golden
+  behavior aspects not found in the predicate inventory, with mandatory
+  blocking if gaps are detected. The step prompt must require enumerating
+  each golden behavior aspect and marking it as `found`, `collapsed`, or
+  `missing` with evidence refs.
+expected_effect: >
+  Forces the generator to surface missing predicates (agreement-state guard,
+  hidden-until-ready render mode, calculator-side side effects) before drafting,
+  preventing silent collapse of semantic distinctions that the current analyze
+  prompt alone cannot prevent.
+rubric_gap_proposed: true
+rubric_gap_proposal:
+  id: "semantic_fidelity"
+  description: >
+    Evaluates whether the spec captures the correct semantic dimension of the
+    behavior (e.g., 'visible' vs 'enabled', 'redirect' vs 'block', 'hidden'
+    vs 'absent').
+  evidence_refs:
+    - runs/run-0013/evaluator/shadow-findings.yaml (precision_findings, consistency_findings)
+    - runs/run-0013/evaluator/output.yaml (score rationale for download.button-visibility)
+  rationale: >
+    The current rubric penalizes omissions via golden_set_recall but does not
+    penalize semantic misclassification. A spec that documents 'enabled' instead
+    of 'visible' scores poorly on recall but receives no explicit penalty for
+    the semantic error itself, masking recognition failures.
+  severity: "high"
+  recommended_state: "active"
+evidence_refs:
+  - runs/run-0013/evaluator/shadow-findings.yaml
+  - runs/run-0013/evaluator/output.yaml
+  - runs/run-0013/inputs/formula.yaml
+  - runs/run-0013/generator/output.yaml
+confidence: 0.85
+confidence_rationale: >
+  Strong evidence that files were found and analyzed but semantic distinctions
+  were collapsed. The synthetic fixture context slightly weakens certainty about
+  whether canonical files were accessible, but the consistent pattern across all
+  three recall misses points clearly to recognition failure. The formula already
+  contains the right concepts (predicate_inventory, hidden/visible-disabled/
+  visible-enabled labels, state_machine_boundaries) but lacks an enforcement
+  mechanism.
+analyzer_timestamp: "2026-04-22T12:05:00Z"

@@ -1,0 +1,378 @@
+id: shared.request-intent-guard
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+description: |
+  Request intent guard prevents stale API responses from overwriting fresh data
+  in the dashboard UI. When users change filters or search terms rapidly, multiple
+  API requests may be in flight simultaneously. This module assigns each request a
+  monotonically increasing version number and nonce, then only accepts responses
+  from the most recent request. Older responses are silently discarded with
+  observability metadata for logging. The guard is stateful — it tracks the active
+  request version and nonce, and resets on component unmount.
+
+golden_behaviors:
+  - id: stale-response-prevention
+    coverage: full
+    notes: |
+      Complete behavior documented. The guard tracks request versions via
+      beginRequest(), compares tokens in isLatestRequest(), and only executes
+      the commit callback in commitIfLatestIntent() when the token matches
+      the active request. Stale responses receive metadata with stale=true
+      and phase="stale_response_ignored".
+  - id: request-versioning
+    coverage: full
+    notes: |
+      Complete behavior documented. Each call to beginRequest() increments
+      both versionCounter and nonceCounter. The token contains version, nonce,
+      intentKey, issuedAt, and context. Version comparison uses both version
+      AND nonce for uniqueness (line 227-230).
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: No active request being tracked. Initial state after creation or after reset().
+    - id: tracking
+      description: A request has been initiated via beginRequest(). The guard tracks the latest version and nonce, and will accept responses matching this token.
+  transitions:
+    - id: begin_request
+      from: idle
+      to: tracking
+      trigger: beginRequest(intent) is called
+      guards:
+        - field: intent
+          condition: Must be a plain object or string (defaults to empty object)
+      effects:
+        - Increments versionCounter by 1
+        - Increments nonceCounter by 1
+        - Sets activeRequest to new token with version, nonce, intentKey, issuedAt, context
+        - Returns a copy of the token to the caller
+    - id: begin_request_while_tracking
+      from: tracking
+      to: tracking
+      trigger: beginRequest(intent) is called while already tracking
+      guards:
+        - field: intent
+          condition: Must be a plain object or string (defaults to empty object)
+      effects:
+        - Increments versionCounter by 1
+        - Increments nonceCounter by 1
+        - Overwrites activeRequest with new token (previous request becomes stale)
+        - Returns a copy of the new token to the caller
+    - id: reset
+      from: tracking
+      to: idle
+      trigger: reset() is called (typically on component unmount)
+      effects:
+        - Resets versionCounter to versionSeed (default 0)
+        - Resets nonceCounter to nonceSeed (default 0)
+        - Sets activeRequest to null
+    - id: reset_from_idle
+      from: idle
+      to: idle
+      trigger: reset() is called when no active request exists
+      effects:
+        - Resets versionCounter to versionSeed (default 0)
+        - Resets nonceCounter to nonceSeed (default 0)
+        - activeRequest remains null
+
+conditions:
+  - id: commit_guard
+    description: |
+      The commit callback in commitIfLatestIntent() is only executed when the
+      provided request token matches the current active request (both version
+      and nonce must match). If the token is stale, the callback is skipped
+      and a stale result is returned.
+    trigger: commitIfLatestIntent(requestToken, commit) is called
+    guards:
+      - field: token_version
+        condition: requestToken.version must equal activeRequest.version
+      - field: token_nonce
+        condition: requestToken.nonce must equal activeRequest.nonce
+    then:
+      - "Execute the commit callback with request, activeRequest, and metadata arguments"
+      - "Return committed=true, stale=false, reason='latest_intent_committed', value=callback result, and metadata"
+    else:
+      - "Skip the commit callback entirely"
+      - "Return committed=false, stale=true, reason='stale_response_ignored', value=undefined, and metadata"
+
+  - id: intent_key_resolution
+    description: |
+      The intent key is resolved from the intent parameter. If intent is a string,
+      it is normalized directly. If intent is a plain object, the first matching
+      field from config.intentKeyFields is used. Falls back to "intent:{version}"
+      if no match is found.
+    trigger: beginRequest(intent) is called
+    guards:
+      - field: intent_type
+        condition: "intent is a string, plain object, or other type"
+    then:
+      - "If string: use normalized string as intentKey"
+      - "If plain object: iterate config.intentKeyFields and use first non-empty normalized value"
+      - "If neither: fall back to intent:{versionCounter}"
+
+  - id: commit_type_validation
+    description: |
+      The commit parameter in commitIfLatestIntent() must be a function.
+      A TypeError is thrown if it is not.
+    trigger: commitIfLatestIntent(requestToken, commit) is called
+    guards:
+      - field: commit_type
+        condition: typeof commit must be "function"
+    then:
+      - Proceed with stale check and potential commit
+    else:
+      - Throw TypeError("commit must be a function.")
+
+inputs:
+  - id: config
+    type: "object with key (string), intentKeyFields (string[] optional), nonceSeed (number optional), schema (string), eventPrefix (string), taxonomyBucket (string), failureModeId (string), reasonCode (string), defaultFlowId (string)"
+    source: Caller provides at guard creation time
+    required: true
+  - id: intent
+    type: "object or string — the intent descriptor for a request"
+    source: Caller provides to beginRequest()
+    required: false
+    validation:
+      default: "empty object {}"
+  - id: requestToken
+    type: "object with version (number), nonce (number), intentKey (string), issuedAt (string), context (object)"
+    source: Returned by beginRequest(), passed back to isLatestRequest() or commitIfLatestIntent()
+    required: true
+  - id: commit
+    type: "function — callback to execute if token is latest"
+    source: Caller provides to commitIfLatestIntent()
+    required: true
+    validation:
+      type_check: "must be a function, TypeError thrown otherwise"
+
+outputs:
+  - id: request_token
+    type: "object { version, nonce, intentKey, issuedAt, context }"
+    destination: Returned by beginRequest() to caller for later comparison
+    lifespan: "Until reset() or component unmount"
+  - id: commit_result
+    type: "object { committed (boolean), stale (boolean), reason (string), value (any), metadata (ResponseMetadata) }"
+    destination: Returned by commitIfLatestIntent() to caller
+    lifespan: "Immediate — returned per call"
+  - id: response_metadata
+    type: "ResponseMetadata object with schema, eventName, flowId, phase, stale, taxonomyBucket, failureModeId, reasonCode, requestVersion, requestNonce, requestIntentKey, activeVersion, activeNonce, activeIntentKey, overlapDepth, details"
+    destination: "Included in commit_result.metadata and available via createIntentResponseMetadata()"
+    lifespan: "Immediate — created per response evaluation"
+  - id: active_request_snapshot
+    type: "copy of activeRequest token or null"
+    destination: Returned by getActiveRequest() to caller
+    lifespan: "Snapshot at call time — does not reflect future changes"
+
+evidence_refs:
+  - path: src/shared/lib/shared/request-intent-guard.js
+    snippet: |
+      let versionCounter = versionSeed;
+      let nonceCounter = nonceSeed;
+      let activeRequest = null;
+
+      function beginRequest(intent = {}) {
+        versionCounter += 1;
+        nonceCounter += 1;
+
+        const requestToken = {
+          version: versionCounter,
+          nonce: nonceCounter,
+          intentKey: normalizeIntentKey(intent, versionCounter, config.intentKeyFields),
+          issuedAt: String(now()),
+          context: isPlainObject(intent?.context)
+            ? { ...intent.context }
+            : isPlainObject(intent?.metadata)
+              ? { ...intent.metadata }
+              : {},
+        };
+
+        activeRequest = requestToken;
+        return copyRequestToken(requestToken);
+      }
+    covers:
+      - "transition: begin_request"
+      - "transition: begin_request_while_tracking"
+      - "output: request_token"
+    line_range:
+      start: 193
+      end: 215
+
+  - path: src/shared/lib/shared/request-intent-guard.js
+    snippet: |
+      function isLatestRequest(requestToken) {
+        const normalizedToken = normalizeRequestToken(requestToken);
+        if (!normalizedToken || !activeRequest) {
+          return false;
+        }
+
+        return (
+          normalizedToken.version === activeRequest.version &&
+          normalizedToken.nonce === activeRequest.nonce
+        );
+      }
+    covers:
+      - "condition: commit_guard"
+      - "behavior: request-versioning"
+    line_range:
+      start: 221
+      end: 231
+
+  - path: src/shared/lib/shared/request-intent-guard.js
+    snippet: |
+      function commitIfLatestIntent(requestToken, commit = () => undefined, metadataOptions = {}) {
+        if (typeof commit !== "function") {
+          throw new TypeError("commit must be a function.");
+        }
+
+        const metadata = createResponseMetadata(requestToken, metadataOptions);
+        if (metadata.stale) {
+          return {
+            committed: false,
+            stale: true,
+            reason: PHASE_STALE_IGNORED,
+            value: undefined,
+            metadata,
+          };
+        }
+
+        return {
+          committed: true,
+          stale: false,
+          reason: "latest_intent_committed",
+          value: commit({
+            request: normalizeRequestToken(requestToken),
+            activeRequest: getActiveRequest(),
+            metadata,
+          }),
+          metadata,
+        };
+      }
+    covers:
+      - "condition: commit_guard"
+      - "condition: commit_type_validation"
+      - "output: commit_result"
+      - "behavior: stale-response-prevention"
+    line_range:
+      start: 247
+      end: 274
+
+  - path: src/shared/lib/shared/request-intent-guard.js
+    snippet: |
+      function reset() {
+        versionCounter = versionSeed;
+        nonceCounter = nonceSeed;
+        activeRequest = null;
+      }
+    covers:
+      - "transition: reset"
+      - "transition: reset_from_idle"
+    line_range:
+      start: 276
+      end: 280
+
+  - path: src/shared/lib/shared/request-intent-guard.js
+    snippet: |
+      function normalizeIntentKey(input, fallbackVersion, intentKeyFields) {
+        if (typeof input === "string") {
+          return normalizeOptionalString(input) ?? `intent:${fallbackVersion}`;
+        }
+
+        if (!isPlainObject(input)) {
+          return `intent:${fallbackVersion}`;
+        }
+
+        const keys = Array.isArray(intentKeyFields) ? intentKeyFields : [];
+        for (const key of keys) {
+          const value = normalizeOptionalString(input[key]);
+          if (value) {
+            return value;
+          }
+        }
+
+        return `intent:${fallbackVersion}`;
+      }
+    covers:
+      - "condition: intent_key_resolution"
+    line_range:
+      start: 58
+      end: 76
+
+  - path: src/shared/lib/shared/request-intent-guard.js
+    snippet: |
+      export function createIntentResponseMetadata(config, options = {}) {
+        const request = normalizeRequestToken(options.request);
+        const activeRequest = normalizeRequestToken(options.activeRequest);
+        const stale = options.stale === true;
+        const flowId = normalizeOptionalString(options.flowId) ?? config.defaultFlowId;
+        const phase =
+          normalizeOptionalString(options.phase) ??
+          (stale ? PHASE_STALE_IGNORED : PHASE_LATEST_COMMITTED);
+
+        const requestVersion = request?.version ?? null;
+        const activeVersion = activeRequest?.version ?? null;
+        const overlapDepth =
+          Number.isFinite(requestVersion) && Number.isFinite(activeVersion)
+            ? Math.max(0, activeVersion - requestVersion)
+            : null;
+
+        return {
+          schema: config.schema,
+          eventName: stale
+            ? `${config.eventPrefix}${EVENT_STALE}`
+            : `${config.eventPrefix}${EVENT_ACCEPTED}`,
+          flowId,
+          phase,
+          stale,
+          taxonomyBucket: config.taxonomyBucket,
+          failureModeId: config.failureModeId,
+          reasonCode: config.reasonCode,
+          requestVersion,
+          requestNonce: request?.nonce ?? null,
+          requestIntentKey: request?.intentKey ?? null,
+          activeVersion,
+          activeNonce: activeRequest?.nonce ?? null,
+          activeIntentKey: activeRequest?.intentKey ?? null,
+          overlapDepth,
+          details: isPlainObject(options.details) ? { ...options.details } : {},
+        };
+      }
+    covers:
+      - "output: response_metadata"
+      - "behavior: stale-response-prevention"
+    line_range:
+      start: 138
+      end: 174
+
+  - path: src/shared/lib/shared/request-intent-guard.js
+    snippet: |
+      function getActiveRequest() {
+        return copyRequestToken(activeRequest);
+      }
+    covers:
+      - "output: active_request_snapshot"
+    line_range:
+      start: 217
+      end: 219
+
+confidence: 0.95
+confidence_rationale: |
+  High confidence — the entire module is a single 290-line file with clear structure.
+  All state transitions (beginRequest, reset) are explicitly implemented.
+  The version+nonce comparison logic for staleness detection is confirmed in
+  isLatestRequest() (lines 221-231). The commitIfLatestIntent() guard behavior
+  is fully documented with both stale and accepted paths (lines 247-274).
+  The response metadata structure is fully enumerated in createIntentResponseMetadata()
+  (lines 138-174). The only uncertainty is about external callers — we cannot confirm
+  from this file alone how components use the guard (e.g., whether reset() is always
+  called on unmount), but the guard's own behavior is fully specified.
+
+unresolved_questions:
+  - "How do consuming components call reset()? Is it always in a useEffect cleanup or are there other patterns?"
+  - "Are there multiple guard instances per component, or one shared instance per key?"
+  - "What happens if beginRequest() is called concurrently from multiple event handlers (e.g., rapid filter clicks)? The version counter is synchronous so ordering should be deterministic, but this is not explicitly tested in the module."
+  - "The config object requires schema, eventPrefix, taxonomyBucket, failureModeId, reasonCode, and defaultFlowId — are these always provided, or can some be optional with defaults?"
+
+status: complete

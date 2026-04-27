@@ -1,0 +1,106 @@
+run_id: "run-0012"
+mutator: "mutator-agent"
+status: "complete"
+provider: "opencode-agent"
+primary_failure_type: "search_failure"
+diagnosis_source: "analyzer-agent"
+proposed_change:
+  type: "step_management"
+  target_step: "explore"
+  current: |
+    The explore step produces trace, exploration_notes, and state_machine_boundaries.
+    It maps source files and behavior boundaries but does not validate that referenced
+    file paths actually exist in the target codebase. When a mapped path is stale or
+    renamed, the generator proceeds to analyze using the incorrect reference, leading
+    to unevidenced behavior claims and recall misses.
+  proposed: |
+    Add a reference-validation and stale-reference-recovery sub-step to the explore phase:
+
+    1. verify_references: After initial file mapping, verify every referenced file path
+       exists in the target codebase. Flag any missing paths explicitly.
+
+    2. ecosystem_recovery: For each missing path, trigger a secondary search using
+       ecosystem-specific conventions:
+       - Next.js app-router: check app/ vs pages/, route.ts vs page.tsx, [param] folders
+       - Feature restructures: check src/features/*/components/, src/app/*/, src/routes/*/
+       - Component renames: search for similar filenames, exported symbols, or route segments
+
+    3. proceed_gate: Only proceed to the analyze step once all references are resolved
+       to existing files or explicitly flagged as unrecoverable with a reason code
+       (e.g., "file_deleted", "renamed_unfound", "ecosystem_mismatch").
+
+    Add two new outputs to the explore step:
+    - verified_references: list of resolved file paths with verification status
+    - unresolved_references: list of stale/missing paths with reason codes and recovery attempts
+  expected_improvement: |
+    Eliminates recall misses caused by stale file paths. The generator will locate the
+    correct edit-flow implementation (e.g., the actual Next.js app-router edit page)
+    and accurately verify whether the TOA agreement-state guard exists in the edit flow.
+    Expected recall for auth.conditional-redirect to rise from 0.50 to >=0.90. Similar
+    recall improvements for any behavior whose evidence depends on correctly mapped
+    source files.
+  risk: |
+    Low. The change adds validation overhead but prevents cascading failures from
+    incorrect evidence refs. Minor risk of false negatives if recovery heuristics are
+    too strict and reject valid but unconventional path patterns. Risk of increased
+    token usage during the recovery search phase. If the correct file genuinely does
+    not exist, the generator will now explicitly flag "unrecoverable" instead of
+    silently using a stale ref, which improves precision even if recall remains partial.
+  rationale: |
+    The generator explicitly self-reported two stale references:
+    - src/routes/project-edit.tsx (does not exist in this Next.js app-router codebase)
+    - src/components/ReportActions.tsx (does not exist; actual file is in src/features/)
+    The evaluator independently confirmed a high-severity recall miss on
+    auth-conditional-redirect because the generator could not analyze the actual edit
+    flow. The analyzer traced the root cause to search_failure in the explore step.
+    Adding reference validation + ecosystem-aware recovery directly fixes the failure
+    mode without changing prompts, rubric, or schema.
+insanity_check:
+  method_already_failed: false
+  failed_runs:
+    - run_id: "run-0010"
+      failure_type: "rubric_gap_failure"
+      teaching_method: "prompt_tweak"
+      result: "FAILED"
+      note: "Prompt tweaks cannot fix rubric gaps; this is a different failure type and method."
+    - run_id: "n/a"
+      failure_type: "prompt_failure"
+      teaching_method: "prompt_reword_only"
+      result: "FAILED"
+      note: "Prompt rewording failed for conditional routing; different method and failure type."
+  learned_runs:
+    - run_id: "run-0003"
+      failure_type: "recognition_failure"
+      teaching_method: "step_management"
+      result: "PASSED"
+      note: "Step_management on explore succeeded previously (added state_machine_boundaries output). This validates that explore-step mutations are viable and safe."
+    - run_id: "run-0010"
+      failure_type: "rubric_gap_failure"
+      teaching_method: "rubric_candidate_proposal"
+      result: "PASSED"
+      note: "Rubric candidate proposals passed for rubric_gap_failure, confirming tier-6 mutations are viable when justified. Not directly applicable here since this is not a rubric gap."
+  justification: |
+    No prior record exists of step_management on explore failing for search_failure or
+    any failure_type. The same tier+target combo succeeded in run-0003. The failed runs
+    in lessons/failed.jsonl concern prompt_tweak and prompt_reword_only, not step_management.
+    The proposed mutation is therefore not insane and has a successful precedent.
+formula_mutation:
+  source: "frontend-derived-stale-reference-recovery (run-0012)"
+  type: "step_management"
+  target_step: "explore"
+  change: |
+    Added reference_validation sub-step to explore with ecosystem_recovery heuristics
+    and proceed_gate. Added verified_references and unresolved_references outputs.
+rubric_candidate: null
+confidence: 0.88
+confidence_rationale: |
+  High confidence because the generator explicitly self-reported the stale references,
+  and the evaluator independently confirmed the resulting recall miss. The analyzer's
+  diagnosis of search_failure is strongly grounded and points directly to a missing
+  validation step in explore. The 0.12 uncertainty stems from two unknowns: (1) whether
+  the correct edit-flow file exists elsewhere in the codebase and was simply not found,
+  or (2) whether the TOA guard is genuinely absent from the implementation. In either
+  case, the proposed mutation produces the correct outcome — either locating the evidence
+  or explicitly flagging it as unrecoverable. The successful precedent of step_management
+  on explore in run-0003 further supports viability.
+mutator_timestamp: "2026-04-22T00:00:00Z"

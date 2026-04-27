@@ -1,0 +1,134 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.client-route-guard
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth_client_route_guard
+    coverage: full
+    notes: >
+      Client-side route guard evaluates in-memory token on page mount.
+      If token exists, user is authenticated and can access protected routes.
+      If token refresh attempt succeeds, user remains authenticated.
+
+description: >
+  Client-side route protection that evaluates the in-memory authentication
+  token when the page mounts. If a valid token exists, the user is considered
+  authenticated and can access protected routes. If a token refresh attempt
+  succeeds, the user remains authenticated and the current route is allowed.
+
+state_machine:
+  initial: evaluating
+  states:
+    - id: evaluating
+      description: Route guard is evaluating authentication state.
+    - id: authenticated
+      description: User has valid token, route access permitted.
+    - id: unauthenticated
+      description: User has no valid token, redirect to /login.
+  transitions:
+    - id: token_exists
+      from: evaluating
+      to: authenticated
+      trigger: In-memory token exists on page mount.
+      guards:
+        - field: token
+          condition: getToken() returns non-null value with _id and accessToken.
+      effects:
+        - Allow route access.
+    - id: token_missing
+      from: evaluating
+      to: unauthenticated
+      trigger: No in-memory token found on page mount.
+      guards:
+        - field: token
+          condition: getToken() returns null.
+      effects:
+        - Attempt token refresh.
+        - If refresh fails, redirect to /login.
+
+conditions:
+  - id: token_exists_on_mount
+    description: >
+      Checks if an in-memory token exists when the page mounts. This determines
+      whether the user is already authenticated from a previous session.
+    trigger: Page component mounts.
+    guards:
+      - field: token
+        condition: getToken() returns non-null value.
+    then:
+      - User is authenticated, allow route access.
+    else:
+      - Attempt token refresh or redirect to /login.
+
+  - id: token_refresh_succeeds
+    description: >
+      If no token exists on mount, attempts a token refresh. If the refresh
+      succeeds, the user remains authenticated and can continue.
+    trigger: Token refresh is attempted.
+    guards:
+      - field: refresh_result
+        condition: refreshAccessToken() returns success=true.
+    then:
+      - Apply refreshed token.
+      - Allow route access.
+    else:
+      - Redirect to /login.
+
+inputs:
+  - id: current_token
+    type: "session object or null"
+    source: In-memory authSession via getToken()
+    required: false
+    validation:
+      presence: null for unauthenticated, object for authenticated
+
+outputs:
+  - id: route_decision
+    type: "allow or redirect"
+    destination: Client-side router
+    lifespan: per page mount
+
+evidence_refs:
+  - path: src/features/auth/api/authGuard.js
+    snippet: |
+      export async function authGuard(options = {}) {
+        const { pathname = "/", session = null, routes = DEFAULT_ROUTES, protectedPaths = DEFAULT_PROTECTED_PATHS } = options;
+        const resolvedSession = normalizeSession(session);
+        if (!resolvedSession) {
+          if (protectedRoute) {
+            return redirect(routes.login, "anonymous_redirect_login", false);
+          }
+          return allow("anonymous_allow_public", false);
+        }
+        if (resolvedPath === routes.login) {
+          return redirect(routes.companies, "authenticated_redirect_companies", false);
+        }
+        return allow("authenticated_allow_route", false);
+      }
+    covers:
+      - "condition:token_exists_on_mount"
+      - "transition:token_exists"
+      - "transition:token_missing"
+
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      export async function refreshAccessToken(options = {}) {
+        if (isRefreshing || refreshPromise) {
+          return refreshPromise || Promise.resolve({ success: false, error: "Refresh in progress", token: null });
+        }
+        // ... perform refresh
+      }
+    covers:
+      - "condition:token_refresh_succeeds"
+
+confidence: 0.88
+confidence_rationale: >
+  Client-side route guard logic is evidenced in authGuard.js. The token
+  existence check and refresh attempt are confirmed by the code structure.
+  The exact client-side mount evaluation is inferred from the authGuard usage.
+unresolved_questions:
+  - Whether client-side guard runs on every navigation or just initial mount.
+  - Exact refresh failure handling in client-side context.
+status: complete

@@ -1,0 +1,172 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.company-page-state
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.company_page_state
+    coverage: full
+    notes: >
+      Company page state includes search input with debounce, sort options,
+      logo load failure tracking, and runtime error messages. Local React
+      state manages page-scoped concerns while SWR handles data fetching.
+
+description: >
+  Manages company page UI state through local React state hooks. Includes
+  search input with debounce, sort selection, logo load failure tracking
+  per business ID, and runtime error messages. SWR queries are gated by
+  auth state and search parameters.
+
+state_machine:
+  initial: loading
+  states:
+    - id: loading
+      description: Initial data fetch in progress.
+    - id: ready
+      description: Data loaded, page interactive.
+    - id: empty_search
+      description: Search returned no results.
+    - id: empty_dataset
+      description: No companies exist for the user.
+    - id: error
+      description: Data fetch failed, error displayed.
+  transitions:
+    - id: data_loaded
+      from: loading
+      to: ready
+      trigger: SWR query resolves with ok=true.
+      effects:
+        - Hydrate companyList from result.businesses.
+        - Clear logo load failures.
+        - Clear runtime error.
+    - id: search_no_results
+      from: ready
+      to: empty_search
+      trigger: Search query returns empty results.
+      effects:
+        - Show "no results" message.
+    - id: fetch_error
+      from: loading
+      to: error
+      trigger: SWR query fails with non-abort error.
+      effects:
+        - Set runtimeErrorMessage.
+    - id: retry_from_error
+      from: error
+      to: loading
+      trigger: User retries or query revalidates.
+      effects:
+        - Clear error message.
+        - Restart fetch.
+
+conditions:
+  - id: search_debounce
+    description: >
+      Search input updates immediate state on keystroke but debounces
+      the API-facing query to prevent excessive requests.
+    trigger: User types in search input.
+    guards:
+      - field: searchQuery
+        condition: searchQuery.trim() !== debouncedSearchQuery.trim().
+    then:
+      - Update immediate state.
+      - Schedule debounced update.
+      - Set isLoading to true.
+    else:
+      - isLoading falls back to SWR isLoading.
+
+  - id: logo_failure_tracking
+    description: >
+      Tracks logo load failures per business ID to show fallback images.
+      Failures are cleared when new data loads.
+    trigger: Logo image fails to load.
+    guards:
+      - field: business_id
+        condition: Business ID is present.
+    then:
+      - Set logoLoadFailuresByBusinessId[businessId] = true.
+    else:
+      - No action.
+
+inputs:
+  - id: search_query
+    type: string
+    source: Search input field
+    required: false
+    validation:
+      debounce: 300ms
+
+  - id: sort_selection
+    type: "sortBy + sortOrder"
+    source: Sort controls
+    required: false
+    validation:
+      default: "updatedAt:desc"
+
+outputs:
+  - id: page_state
+    type: "local React state"
+    destination: Company page components
+    lifespan: component lifetime
+
+  - id: logo_failures
+    type: "Record<businessId, boolean>"
+    destination: Logo components
+    lifespan: until data reload
+
+evidence_refs:
+  - path: src/features/company/hooks/useCompaniesPage.ts
+    snippet: |
+      const [searchQuery, setSearchQuery] = useState("");
+      const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+      const [sortBy, setSortBy] = useState<string>(COMPANY_LIST_DEFAULT_SORT.sortBy);
+      const [sortOrder, setSortOrder] = useState<string>(COMPANY_LIST_DEFAULT_SORT.sortOrder);
+      const [runtimeErrorMessage, setRuntimeErrorMessage] = useState("");
+      const [logoLoadFailuresByBusinessId, setLogoLoadFailuresByBusinessId] = useState<Record<string, boolean>>(() => Object.create(null));
+      const [companyList, setCompanyList] = useState<readonly CompanyRecord[]>(EMPTY_COMPANY_LIST);
+    covers:
+      - "state:loading"
+      - "state:ready"
+      - "state:error"
+      - "input:search_query"
+      - "input:sort_selection"
+      - "output:page_state"
+
+  - path: src/features/company/hooks/useCompaniesPage.ts
+    snippet: |
+      useEffect(() => {
+        const result = companyListQuery.data;
+        if (!result) return;
+        if (result.ok) {
+          const businesses = Array.isArray(result.businesses) ? result.businesses : EMPTY_COMPANY_LIST;
+          setCompanyList(businesses);
+          setLogoLoadFailuresByBusinessId(Object.create(null));
+          setRuntimeErrorMessage("");
+          return;
+        }
+        setCompanyList(EMPTY_COMPANY_LIST);
+        if (result.reason !== "aborted") {
+          setRuntimeErrorMessage(result.message || "Unable to load companies.");
+        }
+      }, [companyListQuery.data]);
+    covers:
+      - "transition:data_loaded"
+      - "transition:fetch_error"
+
+  - path: src/features/company/hooks/useCompaniesPage.ts
+    snippet: |
+      const isDebouncingSearch = searchQuery.trim() !== debouncedSearchQuery.trim();
+      const isLoading = isDebouncingSearch || companyListQuery.isLoading;
+    covers:
+      - "condition:search_debounce"
+
+confidence: 0.94
+confidence_rationale: >
+  Company page state structure, debounce logic, and SWR integration are
+  directly evidenced in useCompaniesPage.ts. The state machine transitions
+  and error handling are confirmed by the code.
+unresolved_questions:
+  - Exact debounce timing constant.
+  - Whether logo failures persist across page navigation.
+status: complete

@@ -1,0 +1,17 @@
+step: draft
+step_number: 4
+status: complete
+confidence: 0.94
+summary: The spec generation phase wrote two partial behavioral specs with evidence refs, state machines, and honest stale-golden notes.
+files_analyzed:
+  - /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0010/generator/delegate/auth.conditional-redirect.yaml
+  - /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0010/generator/delegate/reports.download-button-visibility.yaml
+  - /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/schemas/spec.schema.yaml
+artifacts_produced:
+  - /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0010/generator/specs/auth.conditional-redirect.yaml
+  - /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0010/generator/specs/reports.download-button-visibility.yaml
+unresolved_questions: []
+flags_for_analyzer:
+  - auth spec splits agreement-state gating from ordinary edit handoff
+  - download spec records visible-disabled pre-100 state instead of a hidden button
+error_reason: null

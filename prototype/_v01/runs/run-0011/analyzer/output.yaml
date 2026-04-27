@@ -1,0 +1,132 @@
+run_id: "run-0011"
+analyzer: "analyzer-agent"
+status: "complete"
+provider: "opencode-agent"
+primary_failure_type: "rubric_gap_failure"
+diagnosis: |
+  All four recall misses share the same root cause: the rubric lacks criteria that
+  would properly score accurate code observation when the golden behavior is stale,
+  misaligned on visibility predicates, or spans an unavailable system boundary.
+
+  The generator followed the formula's prompts precisely:
+  - It inventoried gate predicates (agreement-state, progress-percentage, auth-session).
+  - It distinguished hidden vs visible-disabled vs visible-enabled render modes.
+  - It flagged partial matches with explicit notes about code evidence vs golden wording.
+  - It honestly marked cross-system behavior as implied but unverified.
+
+  The evaluator correctly identified each mismatch but had no rubric axis to reward
+  accurate observation; it could only penalize via golden_set_recall. Consequently,
+  the run scored 0.58 recall despite the generator producing faithful, evidence-backed
+  specs.
+
+  Per the 5-type decision tree:
+  1. search_failure — ruled out: relevant files were analyzed for every miss.
+  2. recognition_failure — ruled out: the generator correctly recognized and
+     documented the actual code behavior; it did not collapse or misidentify patterns.
+  3. format_failure — ruled out: all specs passed schema validation.
+  4. prompt_failure — ruled out: the formula's analyze step explicitly required
+     agreement-state gating, hidden-vs-disabled distinctions, predicate inventory,
+     and partial-match flagging.
+  5. rubric_gap_failure — applies: the rubric lacks criteria for stale-golden drift,
+     visibility-predicate scoring, and cross-system boundary coverage.
+
+  Individual miss classifications:
+  - auth.conditional-redirect.yaml (agreement-state gating absent):
+    rubric_gap_failure — stale golden expects agreement check that does not exist
+    in the explored code; rubric lacks stale_golden_vs_observed_implementation.
+  - download.button-visibility.yaml (hidden vs disabled):
+    rubric_gap_failure — golden claims hidden-until-stage, code shows visible-disabled;
+    rubric lacks predicate_level_visibility_distinction and
+    stale_golden_vs_observed_implementation.
+  - toa.gated-first-report-creation.yaml (no existing reports check):
+    rubric_gap_failure — golden adds "no existing reports" predicate absent from
+    code; rubric lacks stale_golden_vs_observed_implementation.
+  - toa.gated-first-report-creation.yaml (calculator-side creation unverified):
+    rubric_gap_failure — flow spans dashboard and calculator, only dashboard code
+    was available; rubric lacks cross_system_boundary_coverage.
+
+failure_tier: "rubric_mutation"
+suggested_mutation: |
+  Add three new criteria to the next rubric snapshot (v003):
+
+  1. stale_golden_vs_observed_implementation
+     - Weight: 1.0
+     - Scoring: +1 when the spec accurately documents observed code behavior that
+       contradicts the golden wording; -1 when the spec blindly copies the golden
+       without code evidence.
+
+  2. predicate_level_visibility_distinction
+     - Weight: 0.8
+     - Scoring: +1 when conditional UI predicates are documented at the level of
+       hidden / visible-disabled / visible-enabled; 0 when collapsed to a boolean.
+
+  3. cross_system_boundary_coverage
+     - Weight: 0.6
+     - Scoring: +1 when cross-system flows are explicitly scoped (e.g.,
+       "dashboard-side verified, calculator-side implied"); -1 when the spec
+       silently assumes unverified behavior.
+
+  Reduce golden_set_recall weight from 1.2 to 0.9 so that stale-golden mismatches
+  do not dominate the recall score.
+
+expected_effect: |
+  Future runs will score recall based on fidelity to observed code rather than
+  fidelity to potentially stale golden wording. Generator prompts will continue to
+  ask for the same behaviors (agreement-state gating, visibility predicates,
+  partial-match flagging), but the evaluator will no longer penalize accurate
+  observation. Cross-system flows will receive partial credit instead of full
+  recall misses. Estimated recall improvement: 0.58 → 0.82.
+
+rubric_gap_proposed: true
+rubric_gap_proposal:
+  - id: "stale_golden_vs_observed_implementation"
+    name: "Stale Golden vs Observed Implementation"
+    rationale: "Prevents penalizing specs that faithfully document code behavior diverging from outdated golden wording."
+    applies_to_misses:
+      - "auth.conditional-redirect.yaml"
+      - "download.button-visibility.yaml"
+      - "toa.gated-first-report-creation.yaml"
+    proposed_weight: 1.0
+
+  - id: "predicate_level_visibility_distinction"
+    name: "Predicate-Level Visibility Distinction"
+    rationale: "Ensures conditional UI is scored at the granularity of hidden / visible-disabled / visible-enabled, not collapsed to a single boolean."
+    applies_to_misses:
+      - "download.button-visibility.yaml"
+    proposed_weight: 0.8
+
+  - id: "cross_system_boundary_coverage"
+    name: "Cross-System Boundary Coverage"
+    rationale: "Provides partial credit for flows spanning multiple systems when only one system's code is available."
+    applies_to_misses:
+      - "toa.gated-first-report-creation.yaml"
+    proposed_weight: 0.6
+
+evidence_refs:
+  - file: "runs/run-0011/generator/output.yaml"
+    lines: "17-21"
+    note: "Generator flags explicitly call out each golden-vs-code mismatch."
+  - file: "runs/run-0011/evaluator/output.yaml"
+    lines: "42-58"
+    note: "Recall misses describe the exact same discrepancies flagged by the generator."
+  - file: "runs/run-0011/evaluator/output.yaml"
+    lines: "79-91"
+    note: "Evaluator's own rubric_gap_candidates propose the three missing criteria."
+  - file: "runs/run-0011/inputs/formula.yaml"
+    lines: "20-31"
+    note: "Analyze step prompt explicitly requires agreement-state gating, hidden-vs-disabled distinction, and partial-match flagging."
+
+confidence: 0.90
+confidence_rationale: |
+  The diagnosis is strongly grounded. The generator flags, evaluator recall misses,
+  and evaluator rubric_gap_candidates are internally consistent and point to a single
+  root cause. The formula prompt text proves the generator was instructed to look for
+  the very behaviors it accurately reported as absent or different. No evidence
+  supports search, recognition, format, or prompt failure. The only plausible
+  explanation is rubric underspecification. Confidence is not 1.0 because we cannot
+  fully rule out that the agreement-state check or calculator-side creation exists
+  in unanalyzed files outside the prototype scope; however, the generator's honest
+  reporting and the evaluator's rubric-gap proposals make this the overwhelmingly
+  likely diagnosis.
+
+analyzer_timestamp: "2026-04-22T17:35:00Z"

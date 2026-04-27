@@ -1,0 +1,105 @@
+run_id: "run-0011"
+evaluator: "evaluator-agent"
+status: "complete"
+provider: "opencode-agent"
+scored_specs:
+  - "auth.conditional-redirect.yaml"
+  - "download.button-visibility.yaml"
+  - "toa.gated-first-report-creation.yaml"
+recall_hits:
+  - spec_id: "auth.conditional-redirect.yaml"
+    golden_behavior_id: "auth-conditional-redirect"
+    coverage: "partial"
+    matched_behavior:
+      - "Captures the gated edit entry flow mechanics: query param validation, report fetch, progress route resolution, calculator redirect, and fallback redirect."
+      - "Documents the rollback gate check and the state machine for edit initialization."
+    evidence_basis:
+      - "useGateEditEntryState.ts shows rollback check and executeGateEditInitialization."
+      - "gate-edit-contract.js shows validation, progress resolution, and fallback handling."
+      - "useReportNavigation.ts and gate-finder.js show redirect mechanics."
+  - spec_id: "download.button-visibility.yaml"
+    golden_behavior_id: "download-button-visibility"
+    coverage: "partial"
+    matched_behavior:
+      - "Captures the progress-gated download affordance: button disabled when progress < 100, enabled at 100%."
+      - "Documents the loading state during active download and the upstream progress computation."
+    evidence_basis:
+      - "ReportSplitActions.tsx shows disabled/enabled branching based on progressPercentage."
+      - "ReportsTable.tsx and list-service.js show upstream progress computation and prop drilling."
+      - "report-route-progress-contract.js shows calculator-aware progress resolution."
+  - spec_id: "toa.gated-first-report-creation.yaml"
+    golden_behavior_id: "toa-gated-first-report-creation"
+    coverage: "partial"
+    matched_behavior:
+      - "Captures the TOA-gated deferred creation: when TOA not agreed, dashboard redirects to calculator introduction page instead of persisting report."
+      - "Documents the createReport API call when TOA is agreed and the subsequent gate navigation."
+      - "Documents introduction URL construction with businessId and reportName query params."
+    evidence_basis:
+      - "useReportCreation.ts shows TOA check and the two branches (redirect vs create)."
+      - "toa-contract.js and gate-finder.js show introduction URL building."
+      - "useReportNavigation.ts shows post-creation gate navigation."
+      - "user-service.js shows TOA status checking."
+recall_misses:
+  - spec_id: "auth.conditional-redirect.yaml"
+    golden_behavior_id: "auth-conditional-redirect"
+    missed_behavior: "The golden requires 'agreement state is satisfied' gating on the edit flow, but the generated spec explicitly states the edit flow does NOT check agreement/TOA state. No agreement check was found in any analyzed file for the edit/resume path."
+    severity: "high"
+  - spec_id: "download.button-visibility.yaml"
+    golden_behavior_id: "download-button-visibility"
+    missed_behavior: "The golden requires the button to 'become visible only after report progress reaches the download stage,' but the generated spec documents the button is always visible and only toggles disabled/enabled state. Conditional rendering (hidden until complete) is not implemented."
+    severity: "high"
+  - spec_id: "toa.gated-first-report-creation.yaml"
+    golden_behavior_id: "toa-gated-first-report-creation"
+    missed_behavior: "The golden states the gate applies to accounts with 'no existing reports,' but the codebase only gates on TOA status (agreedToa === true) with no explicit check for existing report count."
+    severity: "medium"
+  - spec_id: "toa.gated-first-report-creation.yaml"
+    golden_behavior_id: "toa-gated-first-report-creation"
+    missed_behavior: "The calculator-side report creation post-TOA-acceptance is implied by the redirect flow but not verified in the available dashboard source files."
+    severity: "medium"
+precision_findings:
+  - spec_id: "auth.conditional-redirect.yaml"
+    severity: "low"
+    finding: "The state machine includes states (pending_router, error) and transitions that are partially inferred rather than fully evidenced by direct code snippets. The overall flow is accurate but some state granularity is reconstructed."
+  - spec_id: "download.button-visibility.yaml"
+    severity: "low"
+    finding: "The spec is highly precise about the actual DOM behavior. Minor precision note: the 'download stage' is inferred from progressPercentage === 100 rather than explicitly named as a stage in the code."
+  - spec_id: "toa.gated-first-report-creation.yaml"
+    severity: "low"
+    finding: "The spec correctly notes the mismatch between golden wording ('no existing reports') and actual implementation. The calculator-side deferred creation behavior is honestly marked as implied but unverified."
+consistency_findings:
+  - spec_id: "auth.conditional-redirect.yaml"
+    severity: "none"
+    finding: "No material internal contradiction found. Evidence refs consistently support the described transitions, conditions, and outputs."
+  - spec_id: "download.button-visibility.yaml"
+    severity: "none"
+    finding: "No material internal contradiction found. The disabled/enabled/loading states line up across evidence refs."
+  - spec_id: "toa.gated-first-report-creation.yaml"
+    severity: "none"
+    finding: "No material internal contradiction found. The TOA gate branches, URL construction, and navigation targets are described consistently across evidence refs."
+rubric_gap_candidates:
+  - id: "predicate_level_visibility_distinction"
+    proposed_only: true
+    suspicion: "The rubric should distinguish hidden-vs-disabled visibility predicates for state-dependent button behavior."
+    rationale: "The download spec is faithful to the code but not to the stale golden wording; a rubric axis for visibility predicates would make the mismatch explicit."
+  - id: "stale_golden_vs_observed_implementation"
+    proposed_only: true
+    suspicion: "The rubric should flag when the golden behavior describes functionality that does not exist in the observed code."
+    rationale: "Both the auth and download specs document accurate code behavior that contradicts the golden behavior wording. A rubric gap around stale-golden drift would reward accurate observation rather than penalizing it as low recall."
+  - id: "cross_system_boundary_coverage"
+    proposed_only: true
+    suspicion: "The rubric should account for flows that span multiple systems (e.g., dashboard and calculator) where only one system's code is available."
+    rationale: "The TOA spec correctly documents the dashboard-side redirect but cannot verify the calculator-side report creation. The rubric should distinguish between single-system completeness and cross-system completeness."
+overall_score: 0.77
+overall_score_breakdown:
+  recall: 0.58
+  precision: 0.86
+  consistency: 0.87
+confidence: 0.80
+confidence_rationale: >
+  The evaluation is grounded in three generated specs, the frozen rubric, and the golden set.
+  Confidence is moderately high because the specs are internally coherent and evidence-backed.
+  It is not maximal because the evaluator cannot verify calculator-side behavior and because
+  the golden behavior wording appears stale in two out of three behaviors (auth agreement gate,
+  download visibility), making recall scoring partially a judgment call about whether the code
+  or the golden is authoritative.
+scoring_timestamp: "2026-04-22T10:00:00Z"

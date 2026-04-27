@@ -1,0 +1,149 @@
+run_id: run-0016
+analyzer: analyzer
+status: complete
+provider: sample-project
+
+recall_miss_diagnoses:
+  - golden_behavior_id: auth-conditional-redirect
+    failure_type: search_failure
+    diagnosis: >
+      The key golden evidence file src/routes/project-edit.tsx is absent from the
+      auth.flow delegate source_files, and no generated spec cites it. The run
+      found generic auth guard and login-routing files, but it never reached the
+      project-edit route where the edit-specific agreement gate would have been
+      evidenced. Because the relevant file was not discovered, the decision tree
+      stops at search_failure.
+    decision_tree_trace:
+      search_failure: matched because src/routes/project-edit.tsx is the cited missing evidence ref and it is absent from discovered source_files and generated spec evidence
+      recognition_failure: not reached because the relevant route file was not discovered
+      format_failure: not reached because the miss is upstream of schema/field validation
+      prompt_failure: not reached because the formula already asks for conditional flows, gate predicates, and agreement-state gating
+      rubric_gap_failure: not reached because lower-tier search failure already explains the miss
+    evidence_refs:
+      - runs/run-0016/evaluator/shadow-findings.yaml:8-18
+      - runs/run-0016/evaluator/output.yaml:11-16
+      - runs/run-0016/generator/delegate/auth.flow.yaml:28-45
+      - runs/run-0016/inputs/formula.yaml:18-33
+
+  - golden_behavior_id: download-button-visibility
+    failure_type: search_failure
+    diagnosis: >
+      The golden miss points to src/components/ReportActions.tsx, but that file
+      is absent from both pdf.lifecycle and state.management delegate source_files.
+      The run discovered adjacent PDF overlay/store behavior instead, which is why
+      the evaluator saw thematic overlap. Under the decision tree, that still
+      classifies as search_failure because the exact UI component containing the
+      progress-stage visibility gate was never discovered.
+    decision_tree_trace:
+      search_failure: matched because src/components/ReportActions.tsx is absent from discovered source_files for both affected specs
+      recognition_failure: not reached because the exact component carrying the golden behavior was not discovered
+      format_failure: not reached because the specs are structurally valid and the problem starts earlier
+      prompt_failure: not reached because the formula already requires render-mode distinctions and partial-match notes for conditional flows
+      rubric_gap_failure: not reached because lower-tier search failure already explains the miss
+    evidence_refs:
+      - runs/run-0016/evaluator/shadow-findings.yaml:20-30
+      - runs/run-0016/evaluator/output.yaml:42-48
+      - runs/run-0016/generator/delegate/pdf.lifecycle.yaml:10-24
+      - runs/run-0016/generator/delegate/state.management.yaml:3-31
+      - runs/run-0016/inputs/formula.yaml:18-33
+
+  - golden_behavior_id: toa-gated-first-report-creation
+    failure_type: search_failure
+    diagnosis: >
+      None of the three cited golden evidence files —
+      src/features/auth/contracts/toa-contract.js,
+      src/features/reports/hooks/useReportCreation.ts, and
+      src/shared/lib/routing/gate-new-contract.js — appear in the discovered
+      source_files for auth.flow or state.management, and no generated spec cites
+      them. This is the clearest step-1 search_failure case: the run never found
+      the contract, hook, and routing files that implement the full deferred
+      first-report creation flow.
+    decision_tree_trace:
+      search_failure: matched because all cited missing evidence refs are absent from discovered source_files and generated specs
+      recognition_failure: not reached because no dedicated behavioral artifact exists for this flow after discovery
+      format_failure: not reached because no validation error is reported
+      prompt_failure: not reached because the formula already asks for conditional flows, gate predicates, and side effects
+      rubric_gap_failure: not reached because lower-tier search failure already explains the miss
+    evidence_refs:
+      - runs/run-0016/evaluator/shadow-findings.yaml:32-45
+      - runs/run-0016/evaluator/output.yaml:12-16
+      - runs/run-0016/generator/delegate/auth.flow.yaml:35-45
+      - runs/run-0016/generator/delegate/state.management.yaml:23-31
+      - runs/run-0016/inputs/formula.yaml:18-33
+
+primary_failure_type: search_failure
+diagnosis: >
+  All three recall misses in run-0016 stop at step 1 of the failure decision
+  tree. The generator explored adjacent infrastructure/auth/PDF surfaces, but it
+  did not discover the golden-critical route, component, contract, hook, and
+  routing files named by the evaluator shadow findings. Because those files never
+  entered the discovered source set, the misses are search_failure rather than
+  recognition_failure, format_failure, prompt_failure, or rubric_gap_failure.
+  The formula already asks for conditional-flow analysis and predicate
+  preservation, and the rubric already contains golden_set_recall and
+  conditional_flow_documentation, so the dominant gap is file-discovery coverage
+  inside the explore stage.
+failure_tier: step_management
+
+suggested_mutation: >
+  Add a required golden-target scan inside explore before drafting. For each
+  golden behavior, seed exploration with its evidence refs plus neighboring
+  routes/components/hooks/contracts, emit a discovered_files matrix, and block
+  draft if any golden behavior has zero direct file coverage. Concretely: extend
+  explore to force targeted scans of src/routes/, src/components/,
+  src/features/reports/hooks/, src/features/auth/contracts/, and
+  src/shared/lib/routing/ when the golden set names behaviors in those surfaces.
+expected_effect: >
+  Future runs should discover project-edit.tsx, ReportActions.tsx,
+  toa-contract.js, useReportCreation.ts, and gate-new-contract.js before drafting,
+  which should materially improve golden recall and reduce substitution of nearby
+  auth/PDF infrastructure behavior for the actual target flows.
+
+rubric_gap_proposed: true
+rubric_gap_proposal:
+  secondary_only: true
+  rationale: >
+    Shadow findings surfaced rubric gaps, but they are not the primary cause for
+    this run because lower-tier search failure explains every recall miss first.
+  proposals:
+    - id: golden-evidence-ref-coverage
+      source: runs/run-0016/evaluator/shadow-findings.yaml:113-123
+      applicable_to:
+        - auth-conditional-redirect
+        - toa-gated-first-report-creation
+        - download-button-visibility
+      rationale: >
+        Useful as a secondary rubric criterion because every recall miss lacked at
+        least one cited golden evidence file in the generated specs.
+    - id: exact-behavior-vs-thematic-overlap
+      source: runs/run-0016/evaluator/shadow-findings.yaml:124-133
+      applicable_to:
+        - download-button-visibility
+      rationale: >
+        Useful as a secondary rubric criterion because pdf.lifecycle received only
+        thematic overlap credit for a different finished-state download flow.
+
+evidence_refs:
+  - runs/run-0016/evaluator/output.yaml
+  - runs/run-0016/evaluator/shadow-findings.yaml
+  - runs/run-0016/generator/output.yaml
+  - runs/run-0016/generator/delegate/auth.flow.yaml
+  - runs/run-0016/generator/delegate/pdf.lifecycle.yaml
+  - runs/run-0016/generator/delegate/state.management.yaml
+  - runs/run-0016/inputs/formula.yaml
+  - runs/run-0016/inputs/rubric.yaml
+  - prompts/shared/failure-types.md
+
+confidence: 0.93
+confidence_rationale: >
+  Confidence is high because the evaluator names the missing golden evidence
+  files explicitly, and those files are absent from the discovered source_files
+  for the affected specs. That directly satisfies the step-1 search_failure
+  signal from the decision tree. Prompt_failure is strongly ruled out because the
+  formula already requires conditional-flow and predicate analysis, and
+  format_failure is not supported by any validation finding. Small uncertainty
+  remains because we infer discovery from delegate source_files rather than a raw
+  global explore log, but the absence is consistent across all affected specs and
+  all three misses.
+
+analyzer_timestamp: "2026-04-23T07:43:50Z"

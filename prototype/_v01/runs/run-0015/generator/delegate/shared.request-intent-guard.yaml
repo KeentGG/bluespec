@@ -1,0 +1,23 @@
+spec_id: shared.request-intent-guard
+output_path: runs/run-0015/generator/specs/shared.request-intent-guard.yaml
+discovered_behaviors:
+  - id: stale-response-prevention
+    description: Prevent stale API responses from overwriting fresh data using version-based request tracking
+    priority: high
+    evidence_refs:
+      - src/shared/lib/shared/request-intent-guard.js
+  - id: request-versioning
+    description: Each request gets a version number, only latest version response is accepted
+    priority: medium
+    evidence_refs:
+      - src/shared/lib/shared/request-intent-guard.js
+source_files:
+  - src/shared/lib/shared/request-intent-guard.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - Request intent guard prevents stale responses from overwriting fresh data
+  - Version-based tracking with nonce for uniqueness
+  - Only latest version response is accepted
+  - commitIfLatestIntent runs callback only if token is latest
+  - Observable metadata for logging (accepted/stale, version info)

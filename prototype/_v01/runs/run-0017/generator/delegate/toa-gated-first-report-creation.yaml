@@ -1,0 +1,23 @@
+spec_id: toa-gated-first-report-creation
+output_path: runs/run-0017/generator/specs/toa-gated-first-report-creation.yaml
+discovered_behaviors:
+  - id: toa-gated-first-report-creation
+    description: >
+      For newly registered accounts with no TOA (Terms of Agreement) check and no existing reports,
+      any first report creation is deferred -- the dashboard does NOT persist the report until TOA is
+      accepted. Instead, the calculator handles report creation on the specified company and report name
+      after the user completes the TOA introduction/commitment flow. The dashboard redirects to the
+      calculator introduction page with businessId and reportName as query params, and the calculator
+      creates the report post-TOA-acceptance.
+    priority: high
+    category: conditional_flow
+source_files:
+  - src/features/auth/contracts/toa-contract.js
+  - src/features/reports/hooks/useReportCreation.ts
+  - src/shared/lib/routing/gate-new-contract.js
+  - src/features/auth/hooks/useAuthRedirect.ts
+  - src/features/auth/api/user-service.js
+prior_context: |
+  This is a Next.js frontend application with JWT-based authentication.
+  The TOA (Terms of Agreement) flow gates first report creation for new accounts.
+  The system checks TOA status and redirects to calculator introduction if needed.

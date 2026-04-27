@@ -1,0 +1,170 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.logout
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth_flow.logout
+    coverage: full
+    notes: >
+      Logout executes API call to /auth/logout with CSRF header, clears
+      in-memory session and cookies, broadcasts logout event to other tabs,
+      and handles API failures gracefully.
+
+description: >
+  Handles user logout by calling the /auth/logout endpoint, clearing all
+  session state (in-memory, cookies, localStorage), and broadcasting the
+  logout event to other browser tabs. The system handles API failures
+  gracefully while ensuring session cleanup completes.
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: User is logged in, logout not initiated.
+    - id: executing
+      description: Logout API call is in flight.
+    - id: cleaning_up
+      description: Session state is being cleared.
+    - id: complete
+      description: Logout finished, user redirected to /login.
+  transitions:
+    - id: logout_initiated
+      from: idle
+      to: executing
+      trigger: User clicks logout button.
+      guards:
+        - field: is_executing
+          condition: No logout is already in progress.
+      effects:
+        - Send POST /auth/logout with CSRF header.
+        - Set executing state.
+    - id: logout_success
+      from: executing
+      to: cleaning_up
+      trigger: Logout API returns success.
+      effects:
+        - Clear in-memory session.
+        - Clear user cookie.
+        - Broadcast logout to other tabs.
+    - id: logout_api_failed
+      from: executing
+      to: cleaning_up
+      trigger: Logout API returns error.
+      effects:
+        - Log error for debugging.
+        - Proceed with local cleanup anyway.
+    - id: cleanup_complete
+      from: cleaning_up
+      to: complete
+      trigger: Session cleanup finished.
+      effects:
+        - Redirect to /login.
+
+conditions:
+  - id: is_executing_guard
+    description: >
+      Prevents duplicate logout requests while one is already in flight.
+      The logout button is disabled during execution.
+    trigger: User clicks logout button.
+    guards:
+      - field: is_executing
+        condition: isExecuting is false.
+    then:
+      - Proceed with logout.
+    else:
+      - Return without action.
+
+  - id: api_failure_handling
+    description: >
+      Handles logout API failures gracefully by proceeding with local
+      session cleanup regardless of API response. This ensures the user
+      is logged out locally even if the server call fails.
+    trigger: Logout API returns error.
+    guards:
+      - field: api_response
+        condition: Response indicates error.
+    then:
+      - Log error for debugging.
+      - Continue with local session cleanup.
+    else:
+      - Proceed with normal cleanup.
+
+inputs:
+  - id: csrf_token
+    type: csrfToken cookie value
+    source: Browser cookies
+    required: false
+    validation:
+      format: non-empty string for header injection
+
+outputs:
+  - id: logout_request
+    type: POST /auth/logout HTTP request
+    destination: Backend /auth/logout endpoint
+    lifespan: per logout attempt
+
+  - id: logout_broadcast
+    type: logout event
+    destination: BroadcastChannel and localStorage
+    lifespan: until processed by other tabs
+
+  - id: session_cleanup
+    type: "state clearing actions"
+    destination: Multiple storage locations
+    lifespan: immediate
+
+evidence_refs:
+  - path: src/features/auth/api/auth-service.js
+    snippet: |
+      export async function logoutUser(options = {}) {
+        const client = getClient(options);
+        return client.post({
+          path: "/auth/logout",
+          body: null,
+          headers: applyCsrfHeaders(),
+        });
+      }
+    covers:
+      - "transition:logout_initiated"
+      - "output:logout_request"
+
+  - path: src/features/auth/api/tokenService.js
+    snippet: |
+      export function clearToken() {
+        broadcastAuthChange("logout");
+        clearAuthSession();
+        clearBrowserUserCookie();
+      }
+    covers:
+      - "transition:logout_success"
+      - "transition:logout_api_failed"
+      - "condition:api_failure_handling"
+      - "output:session_cleanup"
+
+  - path: src/features/auth/lib/authBroadcast.js
+    snippet: |
+      export function broadcastLogout() {
+        if (typeof window === "undefined") return;
+        const timestamp = Date.now();
+        broadcastMessage({
+          channelName: CHANNEL_NAME,
+          eventType: LOGOUT_EVENT,
+          data: { timestamp },
+          storageKey: `${LOGOUT_KEY_PREFIX}${timestamp}`,
+          cleanupMs: 100,
+        });
+      }
+    covers:
+      - "output:logout_broadcast"
+
+confidence: 0.94
+confidence_rationale: >
+  Logout API call, session cleanup, and cross-tab broadcast are directly
+  evidenced in auth-service.js, tokenService.js, and authBroadcast.js.
+  The graceful failure handling and duplicate request prevention are confirmed.
+unresolved_questions:
+  - Whether logout clears all cookies or just auth-related ones.
+  - Backend session invalidation logic beyond API call.
+status: complete

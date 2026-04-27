@@ -1,0 +1,192 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.signup
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth_flow.signup
+    coverage: full
+    notes: >
+      Signup form submits email and password to /auth/signup endpoint, validates
+      input fields, shows loading state during submission, and bootstraps session
+      on successful account creation.
+
+description: >
+  Handles new user registration via email and password submission. The signup
+  form validates input fields, prevents duplicate submissions during loading,
+  and processes the registration response. On success, it bootstraps the session
+  using the signup-specific envelope parser and redirects to the companies page.
+  On failure, it displays error messages and maintains form state for retry.
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: Signup form is ready for input, no submission in progress.
+    - id: submitting
+      description: Signup request is in flight, form is disabled to prevent duplicate submissions.
+    - id: success
+      description: Account creation succeeded, session is being bootstrapped and redirect is pending.
+    - id: error
+      description: Account creation failed, error message is displayed to user.
+  transitions:
+    - id: submit_signup
+      from: idle
+      to: submitting
+      trigger: User clicks signup button or presses Enter.
+      guards:
+        - field: is_email_valid
+          condition: Email field contains a valid email format after trimming.
+        - field: is_password_valid
+          condition: Password field meets minimum length requirements.
+        - field: is_not_submitting
+          condition: isLoading is false before submission starts.
+      effects:
+        - Clear any previous error message.
+        - Set isLoading to true.
+        - Send POST /auth/signup with email and password.
+    - id: signup_success
+      from: submitting
+      to: success
+      trigger: Signup response returns status 200 with valid user session.
+      guards:
+        - field: response_status
+          condition: statusCode resolves to 200.
+        - field: user_session
+          condition: payload.user contains non-empty _id and accessToken.
+      effects:
+        - Bootstrap signup session with returned credentials.
+        - Clear client data cache.
+        - Redirect to /companies.
+    - id: signup_failure
+      from: submitting
+      to: error
+      trigger: Signup response does not produce a valid session.
+      effects:
+        - Display error message from response or generic registration error.
+        - Set isLoading to false.
+    - id: retry_from_error
+      from: error
+      to: idle
+      trigger: User modifies form fields or clicks signup again.
+      effects:
+        - Clear error message.
+        - Reset form to idle state.
+
+conditions:
+  - id: email_validation
+    description: >
+      Email field must contain a valid email format after trimming whitespace.
+      Empty or malformed emails prevent form submission.
+    trigger: User submits signup form.
+    guards:
+      - field: email
+        condition: email.trim() matches basic email pattern and is non-empty.
+    then:
+      - Allow form submission to proceed.
+    else:
+      - Prevent submission, show validation error.
+
+  - id: password_validation
+    description: >
+      Password field must meet minimum length requirements for new accounts.
+      May include complexity requirements enforced by backend.
+    trigger: User submits signup form.
+    guards:
+      - field: password
+        condition: password.length meets minimum threshold.
+    then:
+      - Allow form submission to proceed.
+    else:
+      - Prevent submission, show validation error.
+
+  - id: submission_guard
+    description: >
+      Prevents duplicate form submissions while a signup request is already
+      in flight. The form ignores repeat submits until the current request
+      completes.
+    trigger: User clicks signup button.
+    guards:
+      - field: isLoading
+        condition: isLoading is false.
+    then:
+      - Proceed with signup request.
+    else:
+      - Return immediately without issuing another request.
+
+inputs:
+  - id: email
+    type: string
+    source: Signup form email input field
+    required: true
+    validation:
+      format: trimmed string matching email pattern
+      normalization: whitespace trimmed before validation
+
+  - id: password
+    type: string
+    source: Signup form password input field
+    required: true
+    validation:
+      format: string meeting minimum length requirements
+
+outputs:
+  - id: signup_request
+    type: POST /auth/signup HTTP request
+    destination: backend /auth/signup endpoint
+    lifespan: per submission
+
+  - id: error_message
+    type: UI error string
+    destination: Signup page error display
+    lifespan: until next submission clears it
+
+  - id: loading_state
+    type: boolean
+    destination: Signup form button and input disabled state
+    lifespan: during request lifecycle
+
+  - id: redirect_decision
+    type: navigation action
+    destination: Next.js router
+    lifespan: immediate on success
+
+evidence_refs:
+  - path: src/features/auth/api/sessionBootstrap.js
+    snippet: |
+      function parseSignupSuccessEnvelope(response) {
+        const payload = extractLoginEnvelopePayload(response);
+        if (!isPlainObject(payload)) return null;
+        const statusCode = toStatusCode(payload.statusCode);
+        if (statusCode !== 200) return null;
+        return toSessionPayload(payload.user);
+      }
+    covers:
+      - "transition:signup_success"
+      - "input:email"
+      - "input:password"
+
+  - path: src/features/auth/api/sessionBootstrap.js
+    snippet: |
+      async function bootstrapSession(options = {}) {
+        const { authResponse, stageSession, routes, source } = options;
+        const parseEnvelope =
+          source === "signup" ? parseSignupSuccessEnvelope : parseLoginSuccessEnvelope;
+        const sessionPayload = parseEnvelope(authResponse);
+        // ... session staging logic
+      }
+    covers:
+      - "transition:submit_signup"
+      - "output:signup_request"
+
+confidence: 0.88
+confidence_rationale: >
+  Signup envelope parsing and session bootstrap are confirmed in
+  sessionBootstrap.js. The signup form UI patterns are inferred from
+  login form patterns as they share similar structure. Password
+  validation requirements are not explicitly documented in frontend code.
+unresolved_questions:
+  - Exact password complexity requirements not specified in frontend.
+  - Whether signup requires email verification is backend-dependent.
+status: partial

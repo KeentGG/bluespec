@@ -1,0 +1,30 @@
+spec_id: toa.gated-first-report-creation.yaml
+output_path: /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0011/generator/specs/toa.gated-first-report-creation.yaml
+golden_behaviors:
+  - id: toa-gated-first-report-creation
+    description: For newly registered accounts with no TOA check and no existing reports, first report creation is deferred until the TOA flow completes
+    priority: high
+    evidence_refs:
+      - src/features/auth/contracts/toa-contract.js
+      - src/features/reports/hooks/useReportCreation.ts
+      - src/shared/lib/routing/gate-new-contract.js
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/CreateReportModal.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useCreateReportModal.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportCreation.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/user-service.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/contracts/toa-contract.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-finder.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportNavigation.ts
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - CreateReportModal collects company, calculator, and report-name inputs and submits through useCreateReportModal().
+  - useCreateReportModal delegates submission to useReportCreation.handleCreateReport().
+  - useReportCreation fetches user data first and checks userResult.data?.agreedToa === true before creating any report.
+  - If TOA is not agreed, the hook shows a success toast, builds an introduction URL from calculatorId + businessId + reportName, redirects with window.location.replace(), and returns early.
+  - The createReport() API call only happens in the hasAgreedToa branch, so dashboard-side report persistence is deferred until after TOA acceptance.
+  - buildIntroductionUrl() appends businessId and reportname query params to the calculator introduction route derived from the calculator gate path.
+  - After TOA is already agreed, the dashboard creates the report and then navigates through the edit-style gate handoff to the calculator.
+  - No direct dashboard-side check for "no existing reports" was found; the current code gates by TOA status, not explicit first-report count.
+  - The spec should capture the verified deferred-creation branch and note any golden wording that is broader or narrower than the current implementation.

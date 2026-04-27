@@ -1,0 +1,166 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.csrf-protection
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth_csrf_protection
+    coverage: full
+    notes: >
+      CSRF protection injects x-csrf-token header from csrfToken cookie on
+      state-changing requests. Retry logic handles CSRF token expiration
+      with single retry before failing.
+
+description: >
+  Protects state-changing HTTP requests against CSRF attacks by injecting
+  x-csrf-token headers from a cookie value. The system retries requests
+  once if the CSRF token is expired or invalid, providing resilience
+  against token rotation scenarios.
+
+state_machine: null
+
+conditions:
+  - id: csrf_token_available
+    description: >
+      Checks if a csrfToken cookie is available for header injection.
+      The token is extracted from the cookie string and validated.
+    trigger: State-changing request is prepared.
+    guards:
+      - field: csrf_cookie
+        condition: getCsrfToken(cookieString) returns non-empty value.
+    then:
+      - Extract token value from cookie.
+      - Include in request headers as x-csrf-token.
+    else:
+      - Send request without CSRF header.
+
+  - id: state_changing_request
+    description: >
+      Identifies HTTP methods that modify server state and require CSRF
+      protection. GET requests are excluded as they should be safe.
+    trigger: HTTP request is being prepared.
+    guards:
+      - field: method
+        condition: Method is POST, PUT, PATCH, or DELETE.
+    then:
+      - Apply CSRF header injection.
+    else:
+      - Skip CSRF header injection.
+
+  - id: csrf_retry_logic
+    description: >
+      Retries a failed request once if the failure is due to CSRF token
+      expiration. This handles cases where the token was rotated between
+      request preparation and server validation.
+    trigger: Request fails with CSRF-related error.
+    guards:
+      - field: retry_count
+        condition: retryCount < 1.
+      - field: error_type
+        condition: Error indicates CSRF token mismatch.
+    then:
+      - Refresh CSRF token from cookie.
+      - Retry request with updated token.
+    else:
+      - Fail request without retry.
+
+inputs:
+  - id: csrf_cookie
+    type: csrfToken cookie value
+    source: Browser cookies
+    required: false
+    validation:
+      format: non-empty string
+
+  - id: request_method
+    type: HTTP method string
+    source: Request configuration
+    required: true
+    validation:
+      values: POST, PUT, PATCH, DELETE for state-changing
+
+outputs:
+  - id: csrf_header
+    type: x-csrf-token request header
+    destination: HTTP request headers
+    lifespan: per request
+
+  - id: retry_request
+    type: HTTP request retry
+    destination: Original request endpoint
+    lifespan: single retry attempt
+
+evidence_refs:
+  - path: src/features/auth/api/csrfHelper.js
+    snippet: |
+      export function applyCsrfHeaders(baseHeaders = {}, cookieString) {
+        const token = getCsrfToken(cookieString);
+        if (!token) return baseHeaders;
+        return {
+          ...baseHeaders,
+          "x-csrf-token": token,
+        };
+      }
+    covers:
+      - "condition:csrf_token_available"
+      - "output:csrf_header"
+
+  - path: src/features/auth/api/csrfHelper.js
+    snippet: |
+      export function getCsrfToken(cookieString) {
+        const raw = typeof cookieString === "string" ? cookieString : typeof document !== "undefined" ? document.cookie : "";
+        if (!raw) return null;
+        const match = raw.match(new RegExp(`(?:^|;\\s*)${CSRF_COOKIE_NAME}=([^;]*)`));
+        if (!match) return null;
+        try {
+          return decodeURIComponent(match[1]);
+        } catch (_error) {
+          return match[1] || null;
+        }
+      }
+    covers:
+      - "condition:csrf_token_available"
+
+  - path: src/features/auth/api/csrfHelper.js
+    snippet: |
+      export const MAX_CSRF_RETRIES = 1;
+      export function createCsrfRetryTracker() {
+        let hasRetried = false;
+        return {
+          get hasRetried() { return hasRetried; },
+          markRetried() { hasRetried = true; },
+          canRetry() { return !hasRetried; },
+        };
+      }
+    covers:
+      - "condition:csrf_retry_logic"
+
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      if (withBody && !hasHeader(headers, "x-csrf-token") && !skipRefresh && !isRefreshEndpoint) {
+        let csrfToken = getCsrfToken();
+        if (!csrfToken && !retriedAfterRefresh) {
+          const refreshAccessToken = await getRefreshAccessToken();
+          const refreshResult = await refreshAccessToken({ apiClient: { request, get, post, patch, delete: remove } });
+          if (refreshResult.success) {
+            csrfToken = getCsrfToken();
+          }
+        }
+        if (csrfToken) {
+          headers["x-csrf-token"] = csrfToken;
+        }
+      }
+    covers:
+      - "condition:state_changing_request"
+      - "condition:csrf_token_available"
+
+confidence: 0.90
+confidence_rationale: >
+  CSRF header injection, state-changing request detection, and retry logic
+  are evidenced in csrfHelper.js and apiClient.ts. The retry limit and
+  error detection patterns are confirmed.
+unresolved_questions:
+  - Exact CSRF error detection criteria beyond status codes.
+  - Whether GET requests with side effects are protected.
+status: complete

@@ -1,0 +1,40 @@
+spec_id: qfm.system.yaml
+output_path: runs/run-0016/generator/specs/qfm.system.yaml
+discovered_behaviors:
+  - id: qfm-failure-taxonomy
+    description: Failure classification taxonomy for error handling
+    priority: high
+    evidence_refs:
+      - src/shared/lib/qfm/failureTaxonomy.js
+  - id: qfm-response-normalization
+    description: Response normalization for consistent API error handling
+    priority: high
+    evidence_refs:
+      - src/shared/lib/qfm/responseAdapter.js
+  - id: qfm-rollback-gate
+    description: v1 rollback gate for dashboard parity monitoring
+    priority: medium
+    evidence_refs:
+      - src/shared/lib/qfm/rollbackGate.js
+  - id: qfm-storage-sanitizer
+    description: localStorage recovery and sanitization
+    priority: low
+    evidence_refs:
+      - src/shared/lib/qfm/storageSanitizer.js
+source_files:
+  - src/shared/lib/qfm/failureTaxonomy.js
+  - src/shared/lib/qfm/responseAdapter.js
+  - src/shared/lib/qfm/rollbackGate.js
+  - src/shared/lib/qfm/storageSanitizer.js
+  - src/shared/lib/qfm/inFlightMutationGuard.js
+  - src/shared/lib/qfm/pdfLifecycle.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - QFM (Query Failure Management) system for error handling
+  - Failure taxonomy with buckets for classification
+  - Response normalization for consistent API error handling
+  - Rollback gate for v1 dashboard fallback based on error rates
+  - Storage sanitizer for localStorage recovery
+  - In-flight mutation guard for duplicate request prevention
+  - PDF lifecycle state machine integrated with QFM

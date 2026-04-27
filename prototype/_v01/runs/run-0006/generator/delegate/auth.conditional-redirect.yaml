@@ -1,0 +1,22 @@
+spec_id: auth.conditional-redirect.yaml
+output_path: runs/run-0006/generator/specs/auth.conditional-redirect.yaml
+golden_behaviors:
+  - id: auth-conditional-redirect
+    description: editing project routes through a gated edit flow only when agreement state is satisfied
+    priority: high
+    evidence_refs:
+      - src/routes/project-edit.tsx
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportNavigation.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-finder.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/routing/hooks/useGateEditEntryState.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/gate-edit-contract.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/routing/components/GateEditRouteEntryClient.tsx
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - The frozen golden behavior points to src/routes/project-edit.tsx, but that file does not appear in the current dashboard-v2 target.
+  - The closest implemented behavior is an edit/resume handoff flow: reports table actions call navigateToReportGate(), which resolves an edit gate URL and sends the user to a calculator gate.
+  - The gate/edit entry flow validates query params, fetches the target report, maps the saved reportProgress route to a calculator-specific resume route, and redirects there.
+  - I did not find explicit agreement-state gating in the explored files. The spec should reflect actual behavior and mark missing golden coverage if agreement gating is absent.
+  - Key evidence is in useReportNavigation.ts, gate-finder.js, useGateEditEntryState.ts, and gate-edit-contract.js.

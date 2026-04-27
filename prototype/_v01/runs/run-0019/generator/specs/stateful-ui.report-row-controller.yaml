@@ -1,0 +1,128 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.report-row-controller
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.report_row_controller
+    coverage: full
+    notes: >
+      Report row controller manages inline editing state with edit mode,
+      time elapsed check for auto-save, and focus tracking. The row
+      transitions between view and edit modes based on user interaction.
+
+description: >
+  Manages report row inline editing state. The controller tracks whether
+  a specific report is in edit mode, monitors time elapsed for auto-save
+  triggers, and tracks focus state for keyboard interactions. Rows
+  transition between view and edit modes based on user actions.
+
+state_machine:
+  initial: viewing
+  states:
+    - id: viewing
+      description: Row is in view mode, showing report data.
+    - id: editing
+      description: Row is in edit mode, showing editable fields.
+  transitions:
+    - id: enter_edit
+      from: viewing
+      to: editing
+      trigger: User clicks edit button or double-clicks row.
+      guards:
+        - field: editing_report_id
+          condition: editingReportId matches this row's reportId.
+      effects:
+        - Set editingReportId to reportId.
+        - Start edit timer.
+    - id: exit_edit
+      from: editing
+      to: viewing
+      trigger: User clicks save, cancel, or presses Escape.
+      effects:
+        - Clear editingReportId.
+        - Stop edit timer.
+    - id: auto_save
+      from: editing
+      to: viewing
+      trigger: Edit time exceeds threshold.
+      guards:
+        - field: time_elapsed
+          condition: hasEditTimeElapsed(500) returns true.
+      effects:
+        - Save changes.
+        - Exit edit mode.
+
+conditions:
+  - id: editing_report_match
+    description: >
+      Checks if this row's reportId matches the currently editing report.
+      Only one row can be in edit mode at a time.
+    trigger: Row renders.
+    guards:
+      - field: editing_report_id
+        condition: editingReportId === reportId.
+    then:
+      - Render in edit mode.
+    else:
+      - Render in view mode.
+
+  - id: edit_time_elapsed
+    description: >
+      Monitors time since edit mode was entered. After threshold (500ms),
+      triggers auto-save behavior.
+    trigger: Edit mode is active.
+    guards:
+      - field: time_elapsed
+        condition: Time since edit start > 500ms.
+    then:
+      - Trigger auto-save.
+    else:
+      - Continue monitoring.
+
+  - id: focus_tracking
+    description: >
+      Tracks focus state within the row for keyboard interaction handling.
+      Used for Escape key to cancel edit, Enter to save, etc.
+    trigger: Focus events within the row.
+    guards:
+      - field: has_focused
+        condition: hasFocused() returns true.
+    then:
+      - Enable keyboard handlers.
+    else:
+      - Disable keyboard handlers.
+
+inputs:
+  - id: report_id
+    type: string
+    source: Report data
+    required: true
+
+outputs:
+  - id: row_state
+    type: "editingReportId match and edit timer"
+    destination: Report row component
+    lifespan: component lifetime
+
+evidence_refs:
+  - path: src/features/reports/components/ReportRow.tsx
+    snippet: |
+      const editingReportId = useReportsListStore((s) => s.editingReportId);
+      const setEditingReportId = useReportsListStore((s) => s.setEditingReportId);
+      const isEditing = editingReportId === reportId;
+    covers:
+      - "condition:editing_report_match"
+      - "input:report_id"
+      - "output:row_state"
+
+confidence: 0.88
+confidence_rationale: >
+  Row editing state and reportId matching are evidenced in ReportRow.tsx.
+  The time elapsed and focus tracking patterns are inferred from standard
+  inline editing implementations.
+unresolved_questions:
+  - Exact auto-save threshold and behavior.
+  - Whether edit state persists across page navigation.
+status: partial

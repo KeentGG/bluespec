@@ -1,0 +1,131 @@
+run_id: run-0017
+mutator: mutator
+status: complete
+provider: sample-project
+
+target_failure:
+  primary: search_failure
+  secondary:
+    - recognition_failure
+
+proposal:
+  kind: formula_candidate
+  summary: >
+    Add evidence-obligation guardrails across explore, analyze, draft, and
+    verify so the pipeline cannot keep a golden behavior id when its unique
+    predicate is supported only by adjacent or inferred evidence.
+  formula_candidate_path: runs/run-0017/mutator/formula-candidate.yaml
+  rubric_candidate_path: null
+
+expected_effect: >
+  This should reduce the specific failure pattern from run-0017: discovery that
+  stops at nearby auth/UI surfaces, drafting that merges distinct render or flow
+  phases, and verification that still allows polished partial prose with zero
+  direct proof of the named predicate. If the decisive files are discoverable,
+  recall should rise from the current 0.31 aggregate without giving up the run's
+  strong precision (0.92). If they are not discoverable, future runs should emit
+  explicit mismatch or unsupported outcomes instead of thematic substitution.
+
+proposed_change:
+  type: step_management
+  target_step: multi_step
+  current: >
+    The current formula already asks analyze to preserve agreement-state gating,
+    hidden-vs-disabled differences, and exact/partial/mismatch labeling, but it
+    does not require a per-behavior evidence plan during discovery, a machine-
+    readable direct-evidence matrix during analysis, explicit split rules during
+    draft, or a verification gate that blocks retained behavior ids when the
+    distinguishing predicate has no direct citation. That leaves the pipeline
+    free to substitute adjacent behavior for the named golden claim.
+  proposed: >
+    Strengthen step management in four linked places. First, make explore emit a
+    per-behavior evidence_plan and discovered_files_matrix that start from the
+    named evidence surface, include likely renamed successors plus neighboring
+    route/component/hook/contract files, and mark required boundary proofs.
+    Second, make analyze emit a direct_evidence_matrix that labels each claimed
+    predicate as direct, adjacent, or inferred and records whether the unique
+    predicate and any redirect/deferred boundary are actually proven. Third,
+    make draft split behaviors when render mode differs (hidden vs
+    visible-disabled) or when upstream and downstream flow phases are evidenced
+    by different files, while pruning unrelated implementation noise. Fourth,
+    make verify fail retained behavior ids that lack direct proof of the unique
+    predicate, lack downstream persisted side-effect proof across redirect
+    boundaries, or introduce unsupported enumerants without citation.
+  expected_improvement: >
+    This mutation directly targets all three diagnosed misses. It should stop the
+    auth redirect spec from borrowing generic auth infrastructure when edit-route
+    agreement gating is unproven, force download visibility and enablement to be
+    represented as separate behaviors, and prevent TOA end-to-end claims from
+    surviving without calculator-side persistence evidence. The main gain should
+    be higher recall and cleaner mismatch reporting while preserving the run's
+    already strong precision and consistency.
+  risk: >
+    Medium. The stricter gates will likely reduce apparent coverage in runs where
+    decisive files are absent or hard to find, and behavior splitting will
+    increase artifact count. That is acceptable because the current failure mode
+    is overconfident substitution; conservative unsupported outputs are safer
+    than precise-looking but strategically wrong specs.
+  rationale: >
+    The analyzer marks search_failure as primary and rubric gaps as secondary
+    only. The evaluator confirms the same pattern: auth-conditional-redirect and
+    toa-gated-first-report-creation missed decisive evidence surfaces, while
+    download-button-visibility found the right area but still merged distinct UI
+    predicates into a partial match. The current formula already contains the
+    relevant concepts, so another prompt-only wording tweak would be too weak.
+    The lowest justified mutation is step_management that adds evidence
+    accounting, split decisions, and a hard verification stop when direct proof
+    is missing.
+
+insanity_check:
+  method_already_failed: false
+  failed_runs:
+    - run_id: n/a
+      method: prompt_reword_only
+      failure_type: prompt_failure
+      result: FAILED
+      note: >
+        lessons/failed.jsonl records that prompt-only rewording failed for a
+        conditional-routing problem. This proposal does not retry prompt-only
+        teaching; it adds step-management gates and machine-readable evidence
+        accounting.
+    - run_id: run-0010
+      method: prompt_tweak
+      failure_type: rubric_gap_failure
+      result: FAILED
+      note: >
+        lessons/failed.jsonl records that prompt_tweak failed for a rubric-gap
+        problem. This run is analyzer-classified as search_failure with a
+        secondary recognition issue, so rubric-focused prompt tweaking is not the
+        right retry path.
+  learned_runs: []
+  justification: >
+    No failed lesson in lessons/failed.jsonl matches the proposed combination of
+    step_management plus evidence sufficiency gating for search_failure. The
+    proposal is therefore conservative and does not repeat a known-failed method.
+
+formula_candidate:
+  id: frontend-derived-v004-evidence-obligation-gates
+  path: runs/run-0017/mutator/formula-candidate.yaml
+
+rubric_candidate: null
+
+evidence_refs:
+  - runs/run-0017/analyzer/output.yaml:6-157
+  - runs/run-0017/analyzer/output.yaml:233-359
+  - runs/run-0017/evaluator/output.yaml:6-65
+  - runs/run-0017/inputs/formula.yaml:10-58
+  - runs/run-0017/inputs/rubric.yaml:5-18
+  - lessons/failed.jsonl:1-2
+
+confidence: 0.93
+confidence_rationale: >
+  Confidence is high because the analyzer and evaluator converge on the same
+  mechanism: nearby evidence is being allowed to stand in for the named golden
+  predicate. The current formula already has predicate-oriented language, which
+  lowers uncertainty about the diagnosis and points toward missing gates rather
+  than missing concepts. Confidence is not absolute because improved discovery
+  may still find renamed or missing surfaces, but the proposed mutation produces
+  a better outcome either way: real evidence if present, explicit unsupported
+  status if absent.
+
+mutator_timestamp: "2026-04-24T00:00:00Z"

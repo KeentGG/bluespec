@@ -1,0 +1,221 @@
+id: routing.base-path
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: base-path-resolution
+    coverage: full
+    notes: >
+      Fully documented. getBasePath() reads NEXT_PUBLIC_BASE_PATH env var with
+      /dashboard default. withBasePath() prepends base path to internal routes.
+      normalizeBasePath() handles edge cases (non-string, empty, trailing slashes,
+      leading slash). No state machine — this is a pure function behavior.
+  - id: external-url-bypass
+    coverage: full
+    notes: >
+      Fully documented. isExternalDestination() checks for http/https protocol
+      or protocol-relative // prefix. withBasePath() returns external URLs unchanged.
+
+description: >
+  The dashboard application runs at a configurable sub-path (default: /dashboard)
+  to coexist with other tools on the same domain. getBasePath() resolves the base
+  path from the NEXT_PUBLIC_BASE_PATH environment variable, falling back to
+  /dashboard. withBasePath() prepends this base path to internal route strings
+  while leaving external URLs (http, https, protocol-relative) unchanged.
+  normalizeBasePath() ensures the base path is well-formed: leading slash added,
+  trailing slashes stripped, empty string returned for root "/" path.
+
+state_machine: null
+
+conditions:
+  - id: external-url-detection
+    description: >
+      External URLs bypass base path construction entirely. This allows links to
+      third-party services, API endpoints on other domains, and protocol-relative
+      URLs to pass through withBasePath() without modification.
+    trigger: withBasePath() is called with any path string
+    guards:
+      - field: path
+        condition: >
+          Matches /^https?:\/\//i (starts with http:// or https://) OR
+          starts with "//" (protocol-relative URL)
+    then:
+      - Return path unchanged, no base path prepended
+    else:
+      - Continue to base path resolution and construction logic
+
+  - id: base-path-idempotency
+    description: >
+      If the normalized path already starts with the base path, withBasePath()
+      returns it unchanged to prevent double-prefixing (e.g. /dashboard/settings
+      would not become /dashboard/dashboard/settings).
+    trigger: withBasePath() is called and path is not external
+    guards:
+      - field: normalizedPath
+        condition: >
+          Equals basePath exactly OR starts with `${basePath}/`
+    then:
+      - Return normalizedPath unchanged
+    else:
+      - Prepend basePath to normalizedPath
+
+  - id: empty-base-path-fallback
+    description: >
+      When basePath resolves to empty string (e.g. NEXT_PUBLIC_BASE_PATH="/"),
+      withBasePath() returns the normalized path without any prefix. This supports
+      running the dashboard at the domain root.
+    trigger: withBasePath() is called and basePath is empty string
+    guards:
+      - field: basePath
+        condition: "Empty string (falsy)"
+    then:
+      - Return normalizedPath without prefix
+    else:
+      - Prepend basePath to normalizedPath
+
+  - id: normalize-base-path-default
+    description: >
+      normalizeBasePath() returns DEFAULT_BASE_PATH (/dashboard) when the input
+      is not a string or is an empty/whitespace-only string. This ensures the
+      application always has a valid base path even with misconfigured env vars.
+    trigger: getBasePath() calls normalizeBasePath() with env var value
+    guards:
+      - field: value
+        condition: >
+          typeof value !== "string" OR trimmed value is empty
+    then:
+      - Return DEFAULT_BASE_PATH ("/dashboard")
+    else:
+      - Trim, normalize leading slash, strip trailing slashes
+
+inputs:
+  - id: base_path_env_var
+    type: "string (optional)"
+    source: "process.env.NEXT_PUBLIC_BASE_PATH"
+    required: false
+    validation:
+      default: "/dashboard"
+      normalization: >
+        Trimmed, leading slash ensured, trailing slashes stripped.
+        "/" becomes empty string. Non-string or empty falls back to /dashboard.
+  - id: path
+    type: "string route path"
+    source: "caller argument to withBasePath()"
+    required: true
+    validation:
+      type_check: "Must be a string; non-string or empty returns input unchanged"
+      external_bypass: "http/https/protocol-relative URLs returned as-is"
+      leading_slash: "Internal paths get leading slash if missing"
+      idempotency: "Paths already prefixed with basePath returned unchanged"
+
+outputs:
+  - id: resolved_base_path
+    type: "string path segment"
+    destination: "returned by getBasePath()"
+    lifespan: "per-call (no caching, reads env var each time)"
+  - id: prefixed_path
+    type: "string full path"
+    destination: "returned by withBasePath()"
+    lifespan: "immediate (no side effects)"
+
+evidence_refs:
+  - path: src/shared/lib/routing/basePath.js
+    snippet: |
+      const DEFAULT_BASE_PATH = "/dashboard";
+
+      function normalizeBasePath(value) {
+        if (typeof value !== "string") {
+          return DEFAULT_BASE_PATH;
+        }
+
+        const trimmed = value.trim();
+        if (!trimmed) {
+          return DEFAULT_BASE_PATH;
+        }
+
+        const normalized = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+        return normalized === "/" ? "" : normalized.replace(/\/+$/, "");
+      }
+    covers:
+      - "condition:normalize-base-path-default"
+      - "input:base_path_env_var"
+    line_range:
+      start: 16
+      end: 30
+
+  - path: src/shared/lib/routing/basePath.js
+    snippet: |
+      function isExternalDestination(path) {
+        return /^https?:\/\//i.test(path) || path.startsWith("//");
+      }
+    covers:
+      - "condition:external-url-detection"
+    line_range:
+      start: 32
+      end: 34
+
+  - path: src/shared/lib/routing/basePath.js
+    snippet: |
+      export function getBasePath() {
+        return normalizeBasePath(process.env.NEXT_PUBLIC_BASE_PATH || DEFAULT_BASE_PATH);
+      }
+    covers:
+      - "output:resolved_base_path"
+      - "input:base_path_env_var"
+    line_range:
+      start: 36
+      end: 38
+
+  - path: src/shared/lib/routing/basePath.js
+    snippet: |
+      export function withBasePath(path) {
+        if (typeof path !== "string" || path.length === 0) {
+          return path;
+        }
+
+        if (isExternalDestination(path)) {
+          return path;
+        }
+
+        const basePath = getBasePath();
+        const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+
+        if (!basePath) {
+          return normalizedPath;
+        }
+
+        if (normalizedPath === basePath || normalizedPath.startsWith(`${basePath}/`)) {
+          return normalizedPath;
+        }
+
+        return `${basePath}${normalizedPath}`;
+      }
+    covers:
+      - "condition:external-url-detection"
+      - "condition:base-path-idempotency"
+      - "condition:empty-base-path-fallback"
+      - "output:prefixed_path"
+      - "input:path"
+    line_range:
+      start: 40
+      end: 61
+
+confidence: 0.95
+confidence_rationale: >
+  All behavior is fully contained in a single 61-line pure-function module with
+  no external dependencies beyond process.env. Every code path is visible:
+  normalizeBasePath handles type validation, trimming, leading/trailing slash
+  normalization, and root path edge case. isExternalDestination covers http/https
+  and protocol-relative URLs. withBasePath covers external bypass, idempotency
+  check, empty basePath fallback, and normal prefix construction. getBasePath
+  reads env var with clear default. The only uncertainty (0.05 deducted) is
+  whether callers sometimes import DEFAULT_BASE_PATH directly or whether there
+  are other consumers of these functions not visible from this single file.
+
+unresolved_questions:
+  - "Are there other modules that import basePath utilities or duplicate this logic?"
+  - "Is NEXT_PUBLIC_BASE_PATH set in any .env files or deployment configs, and to what value?"
+  - "Does any code path call getBasePath() in a hot loop (potential perf concern since it re-reads env each call)?"
+
+status: complete

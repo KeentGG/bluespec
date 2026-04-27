@@ -1,0 +1,167 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.swr-query-layer
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.swr_query_layer
+    coverage: full
+    notes: >
+      SWR query layer provides data fetching with auth-gated enable logic,
+      loading/error/validating states, and automatic revalidation. Queries
+      are keyed by auth token and request parameters.
+
+description: >
+  Provides a consistent data fetching layer using SWR with authentication-gated
+  enable logic. Queries only run when a valid auth token is present. Loading,
+  error, and validating states are tracked for UI feedback. Automatic
+  revalidation keeps data fresh.
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: Query disabled or not yet started.
+    - id: loading
+      description: Initial data fetch in progress.
+    - id: ready
+      description: Data loaded successfully.
+    - id: validating
+      description: Revalidation in progress with stale data.
+    - id: error
+      description: Data fetch failed.
+  transitions:
+    - id: query_enabled
+      from: idle
+      to: loading
+      trigger: Auth token becomes available.
+      guards:
+        - field: has_token
+          condition: hasToken() returns true.
+      effects:
+        - Enable SWR query.
+    - id: data_loaded
+      from: loading
+      to: ready
+      trigger: SWR query resolves successfully.
+      effects:
+        - Store data.
+    - id: revalidation_started
+      from: ready
+      to: validating
+      trigger: SWR revalidation begins.
+      effects:
+        - Show validating indicator.
+    - id: revalidation_complete
+      from: validating
+      to: ready
+      trigger: SWR revalidation completes.
+      effects:
+        - Update data.
+    - id: query_error
+      from: loading
+      to: error
+      trigger: SWR query fails.
+      effects:
+        - Set error state.
+
+conditions:
+  - id: has_token
+    description: >
+      Checks if a valid auth token is available. Queries are only
+      enabled when token is present.
+    trigger: Query is evaluated.
+    guards:
+      - field: token
+        condition: getToken()?._id is non-empty string.
+    then:
+      - Enable SWR query with key.
+    else:
+      - Disable query (pass null key).
+
+  - id: is_loading
+    description: >
+      Tracks whether initial data fetch is in progress. Used for
+      loading indicators.
+    trigger: SWR query state changes.
+    guards:
+      - field: isLoading
+        condition: SWR isLoading is true.
+    then:
+      - Show loading indicator.
+    else:
+      - Hide loading indicator.
+
+  - id: is_error
+    description: >
+      Tracks whether data fetch failed. Used for error display and
+      retry logic.
+    trigger: SWR query fails.
+    guards:
+      - field: error
+        condition: SWR error is present.
+    then:
+      - Show error state.
+    else:
+      - Clear error state.
+
+  - id: is_validating
+    description: >
+      Tracks whether revalidation is in progress. Shows subtle
+      indicator that data is being refreshed.
+    trigger: SWR revalidation begins.
+    guards:
+      - field: isValidating
+        condition: SWR isValidating is true.
+    then:
+      - Show validating indicator.
+    else:
+      - Hide validating indicator.
+
+inputs:
+  - id: auth_token
+    type: "token object with _id"
+    source: Auth session
+    required: true
+
+  - id: query_params
+    type: "object with request parameters"
+    source: Query caller
+    required: false
+
+outputs:
+  - id: query_state
+    type: "SWR response with data, error, isLoading, isValidating"
+    destination: Query consumers
+    lifespan: query lifecycle
+
+evidence_refs:
+  - path: src/features/reports/hooks/useReportsListQuery.ts
+    snippet: |
+      export function useReportsListQuery(options: any = {}) {
+        const token = getToken();
+        const userId = typeof token?._id === "string" && token._id.length > 0 ? token._id : null;
+        const isEnabled = enabled && typeof userId === "string" && userId.length > 0 && typeof businessId === "string" && businessId.length > 0;
+        const queryKey = useMemo(() => ["reports.list", userId, businessId, ...], [businessId, userId, ...]);
+        const swrQuery = useSWR(isEnabled ? queryKey : null, fetchReportsListRuntime, { keepPreviousData: true });
+        return { ...swrQuery, revalidate: () => swrQuery.mutate(), pagination };
+      }
+    covers:
+      - "condition:has_token"
+      - "condition:is_loading"
+      - "condition:is_error"
+      - "condition:is_validating"
+      - "input:auth_token"
+      - "input:query_params"
+      - "output:query_state"
+
+confidence: 0.94
+confidence_rationale: >
+  SWR query layer structure, auth-gated enable logic, and state tracking
+  are directly evidenced in useReportsListQuery.ts. The keepPreviousData
+  and revalidation patterns are confirmed by the code.
+unresolved_questions:
+  - Exact revalidation strategy (focus, interval, etc.).
+  - Cache invalidation across related queries.
+status: complete

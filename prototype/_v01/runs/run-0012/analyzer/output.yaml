@@ -1,0 +1,94 @@
+run_id: run-0012
+analyzer: analyzer-agent
+status: completed
+provider: local
+
+primary_failure_type: search_failure
+diagnosis: >
+  The recall miss on auth-conditional-redirect is caused by the generator's
+  explore step relying on a stale file reference (src/routes/project-edit.tsx)
+  that does not exist in the target Next.js app-router codebase. The generator
+  self-reported this stale reference but did not recover by locating the actual
+  edit-flow file. Without the correct source file, the generator could not
+  verify whether the TOA agreement-state guard exists in the edit flow,
+  resulting in a high-severity recall miss. A second stale reference
+  (src/components/ReportActions.tsx → src/features/reports/components/ReportSplitActions.tsx)
+  confirms a systemic search pattern failure across the run.
+
+  Decision tree application:
+  1. search_failure — MATCH. The explore step mapped to a non-existent file.
+     Even though behavioral artifacts were produced, the underlying evidence
+     reference is incorrect, indicating the relevant file was not successfully
+     located in the current codebase structure.
+  2. recognition_failure — RULED OUT. The generator correctly recognized the
+     conditional-flow pattern and noted its absence; the spec section exists
+     and is not collapsed.
+  3. format_failure — RULED OUT. No schema validation errors; spec structure
+     is valid.
+  4. prompt_failure — RULED OUT. The formula's analyze step explicitly
+     requires agreement-state gating, conditional-flow enumeration, and
+     partial-match flagging. The generator followed these instructions.
+  5. rubric_gap_failure — RULED OUT. The criterion
+     `conditional_flow_documentation` is present in rubric.active_criteria
+     and successfully penalized the miss.
+
+failure_tier: step_management
+suggested_mutation: >
+  Add a reference-validation and recovery sub-step to the explore phase:
+  (1) verify every referenced file path exists in the target codebase;
+  (2) if a file is missing, trigger a secondary search using
+  ecosystem-specific conventions (e.g., Next.js app-router vs page-router
+  directory patterns, src/features/ vs src/components/ restructures);
+  (3) only proceed to analyze once all references are resolved or explicitly
+  flagged as unrecoverable.
+expected_effect: >
+  Eliminates recall misses caused by stale file paths. The generator will
+  locate the correct edit-flow implementation and accurately verify
+  conditional-flow guards, raising recall for auth-conditional-redirect and
+  similar behaviors that depend on correctly mapped source files.
+
+rubric_gap_proposed: false
+rubric_gap_proposal: ~
+
+evidence_refs:
+  - runs/run-0012/generator/output.yaml#flags_for_analyzer[0]
+  - runs/run-0012/generator/output.yaml#flags_for_analyzer[1]
+  - runs/run-0012/evaluator/output.yaml#recall_misses[0]
+  - runs/run-0012/inputs/formula.yaml#steps[explore]
+  - runs/run-0012/inputs/rubric.yaml#active_criteria
+
+confidence: 0.85
+confidence_rationale: >
+  High confidence because the generator explicitly self-reported the stale
+  evidence reference, which is a direct signal of search_failure. The
+  evaluator independently confirmed the resulting recall miss. The 0.15
+  uncertainty stems from not knowing whether the correct edit-flow file
+  exists elsewhere in the codebase and was simply not found, or whether the
+  TOA guard is genuinely absent from the implementation. In either case,
+  the generator's failure to resolve the correct file path is the root cause.
+
+analyzer_timestamp: "2026-04-22T00:00:00Z"
+
+recall_misses_diagnosed:
+  - behavior_id: auth-conditional-redirect
+    spec_id: auth.conditional-redirect
+    severity: high
+    primary_failure_type: search_failure
+    diagnosis: >
+      Stale evidence reference (src/routes/project-edit.tsx) prevented the
+      generator from analyzing the actual edit flow, making it impossible to
+      verify the TOA agreement-state guard required by the golden behavior.
+    failure_tier: step_management
+    suggested_mutation: >
+      Enhance explore step with stale-reference recovery using ecosystem
+      routing conventions.
+    expected_effect: >
+      Generator will locate the correct edit-flow file and accurately assess
+      conditional-guard coverage.
+    rubric_gap_proposed: false
+    evidence_refs:
+      - runs/run-0012/generator/output.yaml#flags_for_analyzer[0]
+      - runs/run-0012/evaluator/output.yaml#recall_misses[0]
+    confidence: 0.85
+    confidence_rationale: >
+      Generator self-reported stale reference; evaluator confirmed recall miss.

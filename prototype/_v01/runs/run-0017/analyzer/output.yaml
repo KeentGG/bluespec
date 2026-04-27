@@ -1,0 +1,386 @@
+run_id: run-0017
+analyzer: analyzer
+status: complete
+provider: sample-project
+
+spec_failure_diagnoses:
+  - spec_id: auth-conditional-redirect
+    golden_behavior_id: auth-conditional-redirect
+    achieved_coverage: none
+    primary_failure_type: search_failure
+    diagnosis: >
+      This failure starts at discovery. The delegation manifest names an
+      edit-route agreement gate, but its source_files only cover generic auth
+      guard, token, and auth-error infrastructure. The generated spec therefore
+      backfilled the golden behavior id with adjacent login-routing behavior from
+      authGuard/authErrorHandler instead of evidence from the claimed edit flow.
+      Because the evaluator's cited missing evidence surface
+      (src/routes/project-edit.tsx, or a renamed successor) never entered the
+      manifest and no spec evidence shows an agreement-state branch on the edit
+      route, the miss is best explained by search_failure, not by schema or
+      rubric issues.
+    root_causes:
+      delegation_manifest:
+        - >
+          The manifest encoded the expected conclusion ("editing project routes
+          through a gated edit flow only when agreement state is satisfied")
+          without including the route, hook, or contract files that would need
+          to prove that conclusion.
+        - >
+          It omitted any golden evidence refs, renamed-file fallback, or adjacent
+          route exploration requirements, so the generator had no explicit path
+          to src/routes/project-edit.tsx or its live replacement.
+      spec_generator:
+        - >
+          It accepted thematic auth overlap as sufficient and produced a full
+          generic auth redirect spec under the golden behavior id even after its
+          own notes said no agreement-state or edit-route branch was found.
+        - >
+          It expanded into refresh-cookie/token-refresh support paths that did
+          not sharpen the core behavior, which diluted attention away from the
+          missing edit-flow gate.
+        - >
+          It did not escalate from "partial" to "coverage none / behavior not
+          evidenced" when zero direct evidence existed for the named behavior.
+    decision_tree_trace:
+      search_failure: >
+        Matched because the evaluator names src/routes/project-edit.tsx as the
+        missing evidence surface, while the delegate source_files and generated
+        spec evidence stay entirely inside generic auth infrastructure.
+      recognition_failure: >
+        Not primary because the relevant edit-route evidence never entered the
+        discovered file set in the first place.
+      format_failure: >
+        Not primary because the spec is structurally valid; the failure is wrong
+        search scope and substitution behavior.
+      prompt_failure: >
+        Not primary because the active formula already requires agreement-state
+        gating, predicate inventory, and exact/partial/mismatch handling.
+      rubric_gap_failure: >
+        Not primary because golden_set_recall and coverage_core_behavior already
+        penalize this miss.
+    actionable_recommendations:
+      - >
+        Mutate delegate generation to require golden evidence refs plus
+        neighboring route/hook candidates for every conditional redirect
+        behavior; block delegation if the named route surface is absent.
+      - >
+        Mutate draft/verify so a spec cannot keep the golden behavior id when it
+        has zero direct evidence for the behavior's unique predicate
+        (here: edit-route + agreement-state).
+      - >
+        Mutate drafting to prune unrelated auth refresh/token details unless they
+        directly participate in the named gate.
+    evidence_refs:
+      - runs/run-0017/evaluator/output.yaml:11-18
+      - runs/run-0017/evaluator/shadow-findings.yaml:20-32
+      - runs/run-0017/generator/delegate/auth-conditional-redirect.yaml:1-20
+      - runs/run-0017/generator/specs/auth-conditional-redirect.yaml:6-25
+      - runs/run-0017/inputs/formula.yaml:18-34
+
+  - spec_id: download-button-visibility
+    golden_behavior_id: download-button-visibility
+    achieved_coverage: partial
+    primary_failure_type: recognition_failure
+    diagnosis: >
+      The generator reached the right UI neighborhood and accurately documented
+      live behavior, but it misclassified thematic overlap as partial coverage of
+      the golden behavior. The live code it cited shows two different things:
+      the row-level Download button is always rendered and merely disabled until
+      progressPercentage === 100, while a later overlay link appears after PDF
+      generation finishes. The golden behavior is stricter: button visibility
+      itself should wait for a separate download-stage gate. Because the
+      relevant UI surfaces were inspected and a dedicated spec was produced, the
+      main failure is recognition: the generator did not cleanly separate
+      "visible-but-disabled" and "later-visible" into a mismatch against the
+      golden wording.
+    root_causes:
+      delegation_manifest:
+        - >
+          The manifest pre-committed to the golden claim ("becomes visible only
+          after report progress reaches the download stage") but did not require
+          proof of which component owns visibility versus enablement, so the
+          search space mixed row actions and overlay lifecycle code.
+        - >
+          It lacked a proof obligation to find the exact render gate or else
+          explicitly declare the golden behavior unsupported by live code.
+      spec_generator:
+        - >
+          It preserved the hidden-vs-disabled distinction in narrative form, but
+          still treated the row button and the overlay link as one partially
+          matching behavior instead of escalating to a mismatch for the row-level
+          visibility claim.
+        - >
+          It widened inputs to include dlStatus="completed" even though the cited
+          UI branches do not render that state, showing drift from directly
+          evidenced behavior.
+        - >
+          It did not split the artifact into two separate behaviors: row action
+          enablement and overlay download-link visibility.
+    decision_tree_trace:
+      search_failure: >
+        Not primary because the generator inspected the relevant UI path
+        (ReportsTable, ReportSplitActions, PdfGenerationOverlay) and produced a
+        dedicated behavioral artifact.
+      recognition_failure: >
+        Matched because the generator found the files but collapsed two distinct
+        predicates into a partial match instead of classifying the golden claim
+        as a mismatch on visibility.
+      format_failure: >
+        Not primary because the schema is satisfied, although the unsupported
+        dlStatus="completed" value is a secondary precision issue.
+      prompt_failure: >
+        Not primary because the active formula explicitly says to preserve
+        hidden-vs-disabled differences and mark relation to golden wording as
+        exact, partial, or mismatch.
+      rubric_gap_failure: >
+        Not primary because the current rubric already penalizes recall and core
+        behavior mismatch here.
+    actionable_recommendations:
+      - >
+        Mutate analyze/draft to require one predicate inventory entry per render
+        surface; if one control is always visible-disabled and another appears
+        later, they must become separate behaviors rather than one merged spec.
+      - >
+        Add a verify rule: when the golden wording says "visible only after X,"
+        the artifact must either cite a direct hidden→visible render branch or
+        mark the relation as mismatch/unsupported.
+      - >
+        Tighten input extraction so unsupported enumerants like
+        dlStatus="completed" cannot appear without direct evidence.
+    evidence_refs:
+      - runs/run-0017/evaluator/output.yaml:24-32
+      - runs/run-0017/evaluator/shadow-findings.yaml:34-45
+      - runs/run-0017/evaluator/shadow-findings.yaml:57-64
+      - runs/run-0017/generator/delegate/download-button-visibility.yaml:1-18
+      - runs/run-0017/generator/specs/download-button-visibility.yaml:5-20
+      - runs/run-0017/inputs/formula.yaml:18-34
+
+  - spec_id: toa-gated-first-report-creation
+    golden_behavior_id: toa-gated-first-report-creation
+    achieved_coverage: partial
+    primary_failure_type: search_failure
+    diagnosis: >
+      The generator found the dashboard-side TOA gate, but it did not complete
+      the second half of the behavior across the redirect boundary. The manifest
+      asserts that the calculator creates the report after TOA acceptance, yet it
+      does not include calculator-side acceptance/return-path files that would
+      prove persisted post-acceptance creation. The generated spec therefore
+      documents the pre-redirect contract well but leaves the post-redirect
+      report-creation step partially inferred. Because the missing proof sits in
+      unsearched downstream files rather than in malformed output, the failure is
+      primarily search_failure.
+    root_causes:
+      delegation_manifest:
+        - >
+          The manifest mixed proven dashboard behavior and unproven calculator
+          continuation into one description, but only supplied dashboard-side
+          source_files plus a generic auth redirect hook.
+        - >
+          It omitted an explicit "both sides of redirect boundary required"
+          constraint, so the downstream calculator handoff was optional instead of
+          mandatory evidence.
+        - >
+          It did not seed likely continuation files such as the /gate/new entry
+          state hook or initialization executor referenced by the evaluator.
+      spec_generator:
+        - >
+          It responsibly called out the missing persisted calculator-side step,
+          but it still kept the end-to-end behavior bundled as one partially
+          evidenced spec rather than splitting proven dashboard gating from the
+          unproven calculator completion path.
+        - >
+          It did not trigger a discovery retry when a redirect handoff lacked a
+          proven downstream createReport persistence call.
+    decision_tree_trace:
+      search_failure: >
+        Matched because the missing live proof identified by the evaluator
+        (useGateNewEntryState and the real post-acceptance creation path) is not
+        present in the delegation manifest's source_files.
+      recognition_failure: >
+        Not primary because the generator correctly recognized and documented the
+        dashboard-side TOA gate; the main gap is the missing downstream search.
+      format_failure: >
+        Not primary because the artifact is structurally coherent and honest
+        about the unresolved handoff gap.
+      prompt_failure: >
+        Not primary because the active formula already asks for conditional-flow
+        predicates and explicit notes about partial matches.
+      rubric_gap_failure: >
+        Not primary because the current rubric already penalizes incomplete core
+        behavior and recall across the handoff.
+    actionable_recommendations:
+      - >
+        Mutate delegation to require a two-sided evidence plan for any deferred
+        flow: pre-redirect trigger, redirect payload, downstream resume/entry
+        hook, and persisted side effect.
+      - >
+        Mutate verify so full or partial end-to-end claims cannot stand without a
+        cited persistence call after the redirect boundary; otherwise the output
+        must split the behavior into "proven upstream" and "unproven
+        downstream" artifacts.
+      - >
+        Add a search retry heuristic that follows createReport, gate/new, and
+        return-path symbols whenever the manifest claims post-redirect completion.
+    evidence_refs:
+      - runs/run-0017/evaluator/output.yaml:38-48
+      - runs/run-0017/evaluator/shadow-findings.yaml:6-18
+      - runs/run-0017/evaluator/shadow-findings.yaml:66-85
+      - runs/run-0017/generator/delegate/toa-gated-first-report-creation.yaml:1-23
+      - runs/run-0017/generator/specs/toa-gated-first-report-creation.yaml:5-24
+      - runs/run-0017/inputs/formula.yaml:18-34
+
+primary_failure_type: search_failure
+diagnosis: >
+  Search scope is still the dominant failure mode in run-0017, but not the only
+  one. Two specs failed because delegation did not include the decisive evidence
+  surfaces for the named behavior (auth edit-route agreement gating and the
+  calculator-side completion of TOA-gated creation). The third spec shows a
+  secondary recognition problem: once the generator reached the right UI area, it
+  treated adjacent live behavior as a partial match instead of enforcing an exact
+  visibility-vs-enablement comparison against the golden wording. Across all
+  three, the system is too willing to draft a polished spec from nearby evidence
+  even when the unique predicate for the named behavior is unproven.
+failure_tier: step_management
+
+systemic_patterns:
+  - id: manifest-conclusion-first
+    pattern: >
+      Delegation manifests state the expected business conclusion up front, but
+      do not encode the evidence obligations required to prove or falsify it.
+    impact: >
+      Generators search too narrowly, then rationalize adjacent behavior instead
+      of testing whether the named behavior actually exists.
+  - id: no-zero-evidence-stop
+    pattern: >
+      The pipeline lacks a hard stop when a spec has zero direct evidence for its
+      unique predicate or when only one side of a redirect boundary is proven.
+    impact: >
+      The system emits high-quality partial prose for unsupported behaviors
+      instead of surfacing a discovery miss early.
+  - id: thematic-substitution
+    pattern: >
+      Nearby live behavior is allowed to substitute for the golden claim when the
+      UI domain is similar (auth redirects, download lifecycle, TOA handoff).
+    impact: >
+      Recall falls while precision stays relatively high, producing plausible but
+      strategically wrong specs.
+  - id: insufficient-surface-separation
+    pattern: >
+      Row actions, overlay actions, and pre-vs-post-redirect flows are not forced
+      into separate predicate inventories or separate artifacts.
+    impact: >
+      Distinct behaviors get blended into one spec and mismatch classification is
+      softened into partial coverage.
+
+suggested_mutation: >
+  Strengthen step management in three places. First, mutate delegate generation
+  to emit an evidence plan per golden behavior: exact target files/evidence refs,
+  adjacent fallback files, required unique predicates, and required boundary
+  proofs (for example both sides of redirects). Second, mutate analyze/verify to
+  produce a direct-evidence matrix that labels each claimed behavior element as
+  direct, adjacent, or inferred and blocks draft when the unique predicate has no
+  direct evidence. Third, mutate draft so merged behaviors are split whenever the
+  render mode differs (hidden vs visible-disabled) or when upstream and
+  downstream phases of a flow are proven by different files.
+expected_effect: >
+  Future runs should stop substituting generic auth infrastructure for edit-route
+  agreement gates, separate row-button enablement from overlay-link visibility,
+  and require downstream proof for post-TOA report creation before claiming
+  end-to-end coverage. That should raise recall without sacrificing the current
+  high precision.
+
+mutation_recommendations:
+  - id: delegate-evidence-plan
+    target_step: explore_and_delegate
+    priority: high
+    recommendation: >
+      For each golden behavior, require: named evidence refs, renamed-file
+      fallback search, neighboring route/component/hook files, and a list of
+      unique predicates that must be directly proven.
+  - id: direct-evidence-matrix
+    target_step: analyze_and_verify
+    priority: high
+    recommendation: >
+      Add a machine-readable matrix of claimed behavior elements with
+      direct/adjacent/inferred labels; fail verification if the behavior id is
+      retained with zero direct evidence for its distinguishing predicate.
+  - id: boundary-proof-requirement
+    target_step: analyze_and_verify
+    priority: high
+    recommendation: >
+      Require both sides of redirect/deferred workflows to be evidenced before an
+      artifact can claim end-to-end behavior; otherwise force split artifacts or
+      explicit unsupported status.
+  - id: render-surface-splitting
+    target_step: draft
+    priority: medium
+    recommendation: >
+      Force separate predicate sections/specs when a row action, overlay action,
+      or other UI surface has a different render mode or lifecycle trigger.
+  - id: noise-pruning
+    target_step: draft
+    priority: medium
+    recommendation: >
+      Drop supporting implementation details that do not change the named gate or
+      side effect, so the core behavior stays legible and mismatch signals are not
+      buried.
+
+rubric_gap_proposed: true
+rubric_gap_proposal:
+  secondary_only: true
+  rationale: >
+    Shadow findings surfaced useful rubric candidates, but lower-tier search and
+    recognition failures already explain this run. These proposals should inform
+    later rubric evolution, not replace the primary diagnosis.
+  proposals:
+    - id: stale-golden-evidence-ref-detection
+      source: runs/run-0017/evaluator/shadow-findings.yaml:107-118
+      applicable_to:
+        - auth-conditional-redirect
+        - download-button-visibility
+      rationale: >
+        Helpful for detecting when the golden set names files that have moved or
+        been renamed, which otherwise increases substitution pressure during
+        search.
+    - id: golden-vs-live-code-divergence-reporting
+      source: runs/run-0017/evaluator/shadow-findings.yaml:119-128
+      applicable_to:
+        - download-button-visibility
+      rationale: >
+        Helpful for separating "accurate live spec, stale golden claim" from
+        ordinary recall misses.
+    - id: redirect-boundary-end-to-end-proof
+      source: runs/run-0017/evaluator/shadow-findings.yaml:129-137
+      applicable_to:
+        - toa-gated-first-report-creation
+      rationale: >
+        Helpful as a future secondary criterion because this run showed strong
+        upstream evidence but weak downstream proof across a redirect boundary.
+
+evidence_refs:
+  - runs/run-0017/evaluator/output.yaml
+  - runs/run-0017/evaluator/shadow-findings.yaml
+  - runs/run-0017/generator/output.yaml
+  - runs/run-0017/generator/delegate/auth-conditional-redirect.yaml
+  - runs/run-0017/generator/delegate/download-button-visibility.yaml
+  - runs/run-0017/generator/delegate/toa-gated-first-report-creation.yaml
+  - runs/run-0017/generator/specs/auth-conditional-redirect.yaml
+  - runs/run-0017/generator/specs/download-button-visibility.yaml
+  - runs/run-0017/generator/specs/toa-gated-first-report-creation.yaml
+  - runs/run-0017/inputs/formula.yaml
+  - runs/run-0017/inputs/rubric.yaml
+  - prompts/analyzer.md
+  - prompts/shared/failure-types.md
+
+confidence: 0.94
+confidence_rationale: >
+  Confidence is high because every diagnosis is grounded in the evaluator notes,
+  shadow findings, delegation manifests, generated specs, and the active
+  formula/rubric snapshot. The evidence clearly shows two discovery misses and
+  one thematic-recognition miss. Uncertainty remains only around stale or renamed
+  golden evidence refs, which may change the exact file names but do not change
+  the underlying diagnosis that the current pipeline lacks stronger proof and
+  stop conditions.
+
+analyzer_timestamp: "2026-04-24T00:00:00Z"

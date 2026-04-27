@@ -1,0 +1,24 @@
+status: complete
+specs_written: 3
+specs:
+  - id: auth.conditional-redirect
+    golden_behaviors_covered: 1
+    coverage: partial
+    confidence: 0.85
+    unresolved_questions: 4
+  - id: download.button-visibility
+    golden_behaviors_covered: 1
+    coverage: full
+    confidence: 0.95
+    unresolved_questions: 2
+  - id: toa.gated-first-report-creation
+    golden_behaviors_covered: 1
+    coverage: full
+    confidence: 0.92
+    unresolved_questions: 4
+overall_confidence: 0.91
+flags_for_analyzer:
+  - "auth-conditional-redirect: 'agreement state satisfied' guard (TOA check) is ABSENT from the edit flow — only exists in create flow"
+  - "auth-conditional-redirect: evidence_ref src/routes/project-edit.tsx is stale (does not exist in this Next.js app-router codebase)"
+  - "download-button-visibility: evidence_ref src/components/ReportActions.tsx is stale (does not exist); actual file is src/features/reports/components/ReportSplitActions.tsx"
+  - "toa-gated-first-report-creation: full coverage, but wiring between introduction-page redirect and eventual gate-new execution is not fully visible in provided files"

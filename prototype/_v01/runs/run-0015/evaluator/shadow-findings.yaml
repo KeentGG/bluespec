@@ -1,0 +1,171 @@
+run_id: run-0015
+evaluator: evaluator
+status: complete
+provider: sample-project
+
+recall_hits:
+  - golden_behavior_id: toa-gated-first-report-creation
+    spec_id: auth.toa-gated-report-creation
+    coverage: full
+    evidence_quality: high
+    notes: >
+      All 3 golden set evidence refs covered: toa-contract.js (resolveToaStatus,
+      buildIntroductionUrl), useReportCreation.ts (hasAgreedToa check, toast,
+      redirect with 2s delay), gate-finder.js (resolveGatePathForCalculator,
+      buildIntroductionUrl). The TOA gate check, redirect flow, and deferred
+      report creation are fully documented with direct code snippets.
+
+recall_misses:
+  - golden_behavior_id: auth-conditional-redirect
+    severity: high
+    description: >
+      No spec covers the project-edit.tsx gated edit flow with agreement state
+      checking. routing.gate-navigation covers gate-edit-flow (validates query
+      params, fetches report, redirects to calculator) but does not document
+      agreement state as a gate condition. auth.toa-gated-report-creation covers
+      TOA agreement checking but for report creation, not project editing. The
+      specific behavior "editing project routes through a gated edit flow only
+      when agreement state is satisfied" from src/routes/project-edit.tsx is
+      not evidenced in any spec.
+    evidence_ref_missing: src/routes/project-edit.tsx
+    affected_specs:
+      - routing.gate-navigation
+      - auth.toa-gated-report-creation
+
+  - golden_behavior_id: download-button-visibility
+    severity: high
+    description: >
+      No spec covers the ReportActions.tsx download button visibility gating
+      based on report progress. reports.progress-tracking provides progress
+      percentage calculation (route-to-percentage mapping for 4 calculators)
+      but does not document how progress values gate UI element visibility.
+      pdf.lifecycle handles PDF download lifecycle (polling, state machine)
+      but does not cover the download button's conditional rendering logic.
+      The specific behavior "download button becomes visible only after report
+      progress reaches the download stage" from src/components/ReportActions.tsx
+      is not evidenced in any spec.
+    evidence_ref_missing: src/components/ReportActions.tsx
+    affected_specs:
+      - reports.progress-tracking
+      - pdf.lifecycle
+
+precision_findings:
+  - spec_id: auth.toa-gated-report-creation
+    finding: >
+      Calculator-side report creation (post-TOA-acceptance) is documented from
+      prior_context, not from source files in the manifest. The
+      gate-new-contract.js file is referenced in the golden set evidence_refs
+      but is not in this spec's evidence_refs. The transition from
+      redirected_to_introduction -> toa_accepted -> report_created is inferred
+      rather than evidenced by code in scope.
+    severity: medium
+    rubric_criterion: coverage_core_behavior
+
+  - spec_id: pdf.lifecycle
+    finding: >
+      pdfLifecycle.js is not imported by PdfGenerationOverlay.tsx. The overlay
+      imports useDownloadStore and getPdfStatus but not pdfLifecycle.js. The
+      lifecycle module may be a parallel implementation, a planned replacement,
+      or used by a different component. This creates uncertainty about whether
+      the documented state machine is the active implementation.
+    severity: medium
+    rubric_criterion: coverage_core_behavior
+
+  - spec_id: qfm.storage-sanitizer
+    finding: >
+      Different default values for questionnaireSteps between storageSanitizer.js
+      (defaults to []) and storage-contract.js (defaults to
+      ['step-1', 'step-2', 'step-3', 'step-4']). The STORAGE_VALIDATORS in
+      storage-contract.js have their own normalization logic that differs from
+      the sanitizer's validators. This may indicate drift between the two modules.
+    severity: low
+    rubric_criterion: consistency_cross_refs
+
+  - spec_id: routing.gate-navigation
+    finding: >
+      The actual createReport API call in gate-new-flow is an injected callback
+      (not visible in scope). The spec documents the flow but the API contract
+      and response shape are opaque. hydrateFromImport and hydrateDefaults are
+      also injected callbacks not visible in the source files.
+    severity: low
+    rubric_criterion: completeness_inputs_outputs
+
+  - spec_id: auth.error-handling
+    finding: >
+      The 100ms isAuthErrorHandling cooldown may not be sufficient for slow
+      redirects. If the redirect takes longer, a second auth error could be
+      missed. The flag is reset via setTimeout in the finally block.
+    severity: low
+    rubric_criterion: coverage_core_behavior
+
+consistency_findings:
+  - spec_id: qfm.storage-sanitizer
+    finding: >
+      STORAGE_VALIDATORS in storage-contract.js have their own normalization
+      logic (normalizeIdentityString, parseJsonOrNull) that differs from the
+      sanitizer's validators. The sanitizer covers 7 keys but the contract
+      defines 9 (user, rememberMe, isClassificationFinished are not sanitized).
+      Are the cookie-based keys intentionally excluded?
+    severity: low
+    cross_spec_refs:
+      - qfm.rollback-gate (also references STORAGE_KEY_CONTRACTS)
+
+  - spec_id: auth.route-protection
+    finding: >
+      DEFAULT_PROTECTED_PATHS in authGuard.js only includes /companies, but
+      /reports protection is mentioned in prior_context. The /reports route
+      may be protected elsewhere or may be missing from the guard.
+    severity: low
+    cross_spec_refs:
+      - auth.session-management (handleLogoutEvent checks /reports)
+
+  - spec_id: reports.data-fetching
+    finding: >
+      The rollback redirect in useReportBusinessSelection.ts calls
+      resolveRollbackRouteContract from shared/lib/qfm, which is the same
+      module documented in qfm.rollback-gate. Both specs reference this module
+      but from different angles (consumer vs implementation). The cross-reference
+      is consistent.
+    severity: info
+    cross_spec_refs:
+      - qfm.rollback-gate
+
+rubric_gap_candidates:
+  - proposed_only: true
+    candidate: golden-behavior-coverage-threshold
+    description: >
+      Add a rubric criterion that requires minimum recall coverage of golden
+      set behaviors. Current rubric has golden_set_recall (weight 1.2) but no
+      minimum threshold. A threshold of 0.5 would flag runs where fewer than
+      2 of 3 golden behaviors are covered.
+    rationale: >
+      12 of 15 specs have 0.0 recall, indicating the generator produces
+      high-quality infrastructure specs but misses golden-set-prioritized
+      behaviors. Only 1 of 3 golden behaviors is fully covered. A threshold
+      would force the generator to prioritize golden behaviors over peripheral
+      infrastructure.
+
+  - proposed_only: true
+    candidate: evidence-ref-completeness
+    description: >
+      Add a rubric criterion that checks whether golden set evidence_refs are
+      present in spec evidence_refs. Currently, 2 of 3 golden set evidence_refs
+      (project-edit.tsx, ReportActions.tsx) are not covered by any spec's
+      evidence_refs section.
+    rationale: >
+      The golden set defines evidence_refs as the ground truth files. If specs
+      don't reference these files, they cannot be verified against the golden
+      set. This criterion would measure evidence alignment, not just behavioral
+      coverage.
+
+  - proposed_only: true
+    candidate: cross-spec-contradiction-detection
+    description: >
+      Add a rubric criterion that detects contradictions between specs (e.g.,
+      different default values for the same data structure, conflicting state
+      machine transitions). Currently, qfm.storage-sanitizer and
+      storage-contract.js have different questionnaireSteps defaults.
+    rationale: >
+      Cross-spec contradictions can cause runtime bugs when different modules
+      assume different defaults. Detecting these early prevents integration
+      failures.

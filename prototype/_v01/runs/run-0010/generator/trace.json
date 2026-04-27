@@ -1,0 +1,162 @@
+{
+  "run_id": "run-0010",
+  "generator": "run_generator",
+  "analysis": {
+    "behavior_map": {
+      "auth-conditional-redirect": {
+        "live_surfaces": [
+          "useReportCreation.ts + toa-contract.js + user-service.js",
+          "useReportNavigation.ts + gate-finder.js + gate-edit-contract.js"
+        ],
+        "summary": "TOA agreement gating lives in report creation; ordinary edit/resume routing is separate and does not check agreement state."
+      },
+      "download-button-visibility": {
+        "live_surfaces": [
+          "ReportsTable.tsx + ReportSplitActions.tsx",
+          "useReportRowController.ts + useReportActions.ts + useDownloadStore.ts",
+          "report-route-progress-contract.js"
+        ],
+        "summary": "The Download button is always mounted, disabled until progress reaches 100, and starts PDF generation when enabled."
+      }
+    },
+    "predicate_inventory": {
+      "auth-conditional-redirect": [
+        {
+          "predicate": "userData.agreedToa === false",
+          "render_mode": "visible-enabled",
+          "relation_to_golden": "partial",
+          "note": "The control remains visible; the code redirects to the introduction/commitment page instead of hiding or disabling the action."
+        },
+        {
+          "predicate": "userData.agreedToa === true",
+          "render_mode": "visible-enabled",
+          "relation_to_golden": "partial",
+          "note": "Agreement-state gating is real, but it guards report creation rather than the stale edit-route wording from the golden."
+        },
+        {
+          "predicate": "resolveGateHandoffRoute(intent: \"edit\")",
+          "render_mode": "visible-enabled",
+          "relation_to_golden": "mismatch",
+          "note": "This is an ordinary handoff for edit navigation; it has target/calculator/gate-path validation but no agreement-state predicate."
+        }
+      ],
+      "download-button-visibility": [
+        {
+          "predicate": "progressPercentage < 100",
+          "render_mode": "visible-disabled",
+          "relation_to_golden": "partial",
+          "note": "The button is not hidden before the download stage; it is mounted and disabled instead."
+        },
+        {
+          "predicate": "progressPercentage === 100",
+          "render_mode": "visible-enabled",
+          "relation_to_golden": "partial",
+          "note": "The threshold matches the download-ready point, but the golden wording says the control becomes visible only then, which is not how the code behaves."
+        },
+        {
+          "predicate": "isDownloading === true",
+          "render_mode": "visible-disabled",
+          "relation_to_golden": "mismatch",
+          "note": "A separate in-flight lock keeps the control visible but disabled while the PDF generation request is running."
+        }
+      ]
+    }
+  },
+  "delegation": {
+    "manifests": [
+      "/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0010/generator/delegate/auth.conditional-redirect.yaml",
+      "/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0010/generator/delegate/reports.download-button-visibility.yaml"
+    ],
+    "task_ids": [
+      {
+        "task_id": "bg_cf2b5a51",
+        "spec_id": "auth.conditional-redirect.yaml",
+        "agent": "oracle",
+        "status": "cancelled"
+      },
+      {
+        "task_id": "bg_a83cea81",
+        "spec_id": "reports.download-button-visibility.yaml",
+        "agent": "oracle",
+        "status": "cancelled"
+      }
+    ]
+  },
+  "draft": {
+    "specs_written": [
+      "/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0010/generator/specs/auth.conditional-redirect.yaml",
+      "/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0010/generator/specs/reports.download-button-visibility.yaml"
+    ],
+    "coverage": {
+      "auth-conditional-redirect": "partial",
+      "download-button-visibility": "partial"
+    }
+  },
+  "verification": {
+    "yaml_diagnostics": {
+      "auth.conditional-redirect.yaml": "clean",
+      "reports.download-button-visibility.yaml": "clean",
+      "delegate manifests": "clean",
+      "step outputs": "clean"
+    },
+    "schema_validation": {
+      "spec.schema.yaml": {
+        "auth.conditional-redirect.yaml": "valid",
+        "reports.download-button-visibility.yaml": "valid"
+      }
+    },
+    "cross_refs": [
+      {
+        "from": "auth.conditional-redirect.yaml",
+        "to": "reports.download-button-visibility.yaml",
+        "relation": "same dashboard reports surface; distinct conditional branches"
+      },
+      {
+        "from": "reports.download-button-visibility.yaml",
+        "to": "auth.conditional-redirect.yaml",
+        "relation": "same dashboard surface; separate gate semantics"
+      }
+    ]
+  },
+  "background_cleanup": {
+    "cancelled_tasks": [
+      {
+        "task_id": "bg_cf2b5a51",
+        "session_id": "ses_24bd444b2ffeMyt7GhQb9kSV1Y",
+        "description": "Write auth spec"
+      },
+      {
+        "task_id": "bg_a83cea81",
+        "session_id": "ses_24bd4e907ffeUubdYM9aWtMdbr",
+        "description": "Write download spec"
+      }
+    ]
+  },
+  "tool_trace": [
+    {
+      "step": 1,
+      "tools": ["read", "glob", "grep"],
+      "summary": "Explored run inputs and live dashboard surfaces for auth agreement gating and report download visibility."
+    },
+    {
+      "step": 2,
+      "tools": ["read", "grep"],
+      "summary": "Built a behavior_map and predicate_inventory for the two frozen goldens."
+    },
+    {
+      "step": 3,
+      "tools": ["apply_patch", "call_omo_agent"],
+      "summary": "Wrote delegation manifests and launched two spec-generator subagents."
+    },
+    {
+      "step": 4,
+      "tools": ["apply_patch"],
+      "summary": "Wrote the two schema-complete behavioral specs with evidence refs."
+    },
+    {
+      "step": 5,
+      "tools": ["bash", "lsp_diagnostics"],
+      "summary": "Validated both specs against schema and re-ran YAML diagnostics."
+    }
+  ]
+}

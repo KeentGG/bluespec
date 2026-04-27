@@ -1,0 +1,356 @@
+id: qfm.in-flight-mutation-guard
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: duplicate-mutation-prevention
+    coverage: full
+    notes: >
+      Complete behavior documented. The guard tracks active mutation keys in a
+      Set and rejects duplicate begin() calls for the same normalized key while
+      a previous identical request is still in flight. Key normalization handles
+      whitespace trimming, null/empty fallback, and scope prefixing.
+  - id: mutation-guard-lifecycle
+    coverage: full
+    notes: >
+      Complete lifecycle documented. begin() adds key to active set and returns
+      started/duplicate status. end() removes key from active set. Additional
+      query methods (isInFlight, getActiveCount, getActiveKeys) and reset()
+      are also present.
+
+description: >
+  Prevents duplicate API mutations (create, update, delete) from being sent
+  while a previous identical request is still in flight. The guard acts as a
+  simple mutex keyed by a normalized string. Callers invoke begin() before
+  sending a mutation; if the key is already active, the guard returns a
+  duplicate flag and the caller skips the request. After the mutation completes
+  (success or failure), the caller invokes end() to release the key. The guard
+  tracks active operation count and keys for observability.
+
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: No mutations are currently in flight. The active set is empty.
+    - id: active
+      description: One or more mutations are in flight. The active set contains one or more normalized keys.
+  transitions:
+    - id: begin_new
+      from: idle
+      to: active
+      trigger: "begin() called with a key not in the active set"
+      guards:
+        - field: activeActionKeys
+          condition: "does not contain the normalized action key"
+      effects:
+        - "Normalized key is added to the active set"
+        - "Guard result returned with started=true, duplicate=false"
+    - id: begin_duplicate
+      from: active
+      to: active
+      trigger: "begin() called with a key already in the active set"
+      guards:
+        - field: activeActionKeys
+          condition: "already contains the normalized action key"
+      effects:
+        - "Guard result returned with started=false, duplicate=true"
+        - "Key is NOT added again (Set prevents duplicates)"
+    - id: end_last
+      from: active
+      to: idle
+      trigger: "end() called for the last remaining active key"
+      guards:
+        - field: activeActionKeys
+          condition: "size becomes 0 after removing the key"
+      effects:
+        - "Key is removed from the active set"
+        - "Guard result returned with reason=ended"
+    - id: end_remaining
+      from: active
+      to: active
+      trigger: "end() called while other keys remain active"
+      guards:
+        - field: activeActionKeys
+          condition: "size remains > 0 after removing the key"
+      effects:
+        - "Key is removed from the active set"
+        - "Guard result returned with reason=ended"
+    - id: end_not_active
+      from: active
+      to: active
+      trigger: "end() called with a key not in the active set"
+      guards:
+        - field: activeActionKeys
+          condition: "does not contain the normalized action key"
+      effects:
+        - "Guard result returned with reason=not_active"
+        - "Active set is unchanged"
+
+conditions:
+  - id: key-normalization
+    description: >
+      Action keys are normalized before use. Whitespace is trimmed, empty/null
+      values fall back to "{scope}:default". This ensures consistent key
+      matching regardless of caller input quality.
+    trigger: "begin() or end() called with an action key"
+    guards:
+      - field: actionKey
+        condition: "Must be a non-empty string after trimming"
+    then:
+      - "Trimmed string is used as the normalized key"
+    else:
+      - "Fallback key '{scope}:default' is used (scope defaults to 'mutation')"
+  - id: metadata-passthrough
+    description: >
+      Metadata object passed to begin() is included in the guard result for
+      observability. If metadata is not a plain object, an empty object is used.
+    trigger: "begin() called with metadata argument"
+    guards:
+      - field: metadata
+        condition: "Is a non-null object (typeof === 'object')"
+    then:
+      - "Metadata is included verbatim in the guard result"
+    else:
+      - "Empty object {} is used as metadata in the guard result"
+
+inputs:
+  - id: actionKey
+    type: "string — normalized mutation identifier (e.g. 'delete-report-123')"
+    source: "Caller of begin() or end()"
+    required: true
+    validation:
+      normalized: "trim() + null check via normalizeOptionalString"
+      fallback: "{scope}:default if null/empty after normalization"
+  - id: metadata
+    type: "plain object — arbitrary observability data"
+    source: "Caller of begin()"
+    required: false
+    validation:
+      type_check: "Must be a plain object; defaults to {} if not"
+  - id: options.scope
+    type: "string — scope prefix for fallback key generation"
+    source: "createInFlightMutationGuard() constructor options"
+    required: false
+    validation:
+      default: "mutation"
+      normalized: "normalizeOptionalString() applied"
+
+outputs:
+  - id: guardResult
+    type: "GuardResult object with schema, started, duplicate, key, reason, activeCount, metadata"
+    destination: "Returned by begin() and end() to the caller"
+    lifespan: "Ephemeral — returned per call, not persisted"
+  - id: activeKeys
+    type: "string[] — snapshot of currently active mutation keys"
+    destination: "Returned by getActiveKeys()"
+    lifespan: "Snapshot at call time — reflects live state"
+  - id: activeCount
+    type: "number — count of currently active mutations"
+    destination: "Returned by getActiveCount() and included in guardResult"
+    lifespan: "Snapshot at call time — reflects live state"
+
+evidence_refs:
+  - path: src/shared/lib/qfm/inFlightMutationGuard.js
+    snippet: |
+      function begin(actionKey, metadata = {}) {
+        const normalizedActionKey = normalizeActionKey(actionKey, guardScope);
+
+        if (activeActionKeys.has(normalizedActionKey)) {
+          return createGuardResult({
+            started: false,
+            duplicate: true,
+            key: normalizedActionKey,
+            reason: "duplicate_in_flight",
+            activeCount: activeActionKeys.size,
+            metadata,
+          });
+        }
+
+        activeActionKeys.add(normalizedActionKey);
+
+        return createGuardResult({
+          started: true,
+          duplicate: false,
+          key: normalizedActionKey,
+          reason: "started",
+          activeCount: activeActionKeys.size,
+          metadata,
+        });
+      }
+    covers:
+      - "transition:begin_new"
+      - "transition:begin_duplicate"
+      - "condition:key-normalization"
+      - "input:actionKey"
+      - "output:guardResult"
+    line_range:
+      start: 54
+      end: 78
+
+  - path: src/shared/lib/qfm/inFlightMutationGuard.js
+    snippet: |
+      function end(actionKey) {
+        const normalizedActionKey = normalizeActionKey(actionKey, guardScope);
+        const ended = activeActionKeys.delete(normalizedActionKey);
+
+        return createGuardResult({
+          started: false,
+          duplicate: false,
+          key: normalizedActionKey,
+          reason: ended ? "ended" : "not_active",
+          activeCount: activeActionKeys.size,
+        });
+      }
+    covers:
+      - "transition:end_last"
+      - "transition:end_remaining"
+      - "transition:end_not_active"
+      - "input:actionKey"
+      - "output:guardResult"
+    line_range:
+      start: 80
+      end: 91
+
+  - path: src/shared/lib/qfm/inFlightMutationGuard.js
+    snippet: |
+      function normalizeActionKey(actionKey, fallbackPrefix = "mutation") {
+        const normalizedActionKey = normalizeString(actionKey);
+        if (normalizedActionKey) {
+          return normalizedActionKey;
+        }
+
+        const normalizedFallbackPrefix = normalizeString(fallbackPrefix) ?? "mutation";
+        return `${normalizedFallbackPrefix}:default`;
+      }
+    covers:
+      - "condition:key-normalization"
+      - "input:actionKey"
+      - "input:options.scope"
+    line_range:
+      start: 27
+      end: 35
+
+  - path: src/shared/lib/qfm/inFlightMutationGuard.js
+    snippet: |
+      export function createInFlightMutationGuard(options = {}) {
+        const activeActionKeys = new Set();
+        const guardScope = normalizeString(options.scope) ?? "mutation";
+        ...
+        return {
+          schema: IN_FLIGHT_MUTATION_GUARD_SCHEMA,
+          scope: guardScope,
+          begin,
+          end,
+          isInFlight,
+          getActiveCount,
+          getActiveKeys,
+          reset,
+        };
+      }
+    covers:
+      - "state:idle"
+      - "state:active"
+      - "input:options.scope"
+      - "output:activeKeys"
+      - "output:activeCount"
+    line_range:
+      start: 50
+      end: 119
+
+  - path: src/shared/lib/qfm/inFlightMutationGuard.js
+    snippet: |
+      function createGuardResult(overrides = {}) {
+        return {
+          schema: IN_FLIGHT_MUTATION_GUARD_SCHEMA,
+          started: overrides.started === true,
+          duplicate: overrides.duplicate === true,
+          key: overrides.key ?? null,
+          reason: overrides.reason ?? "unknown",
+          activeCount: Number.isFinite(overrides.activeCount) ? overrides.activeCount : 0,
+          metadata:
+            overrides.metadata && typeof overrides.metadata === "object" ? overrides.metadata : {},
+        };
+      }
+    covers:
+      - "output:guardResult"
+      - "condition:metadata-passthrough"
+    line_range:
+      start: 37
+      end: 48
+
+  - path: src/shared/lib/qfm/inFlightMutationGuard.js
+    snippet: |
+      function isInFlight(actionKey) {
+        const normalizedActionKey = normalizeActionKey(actionKey, guardScope);
+        return activeActionKeys.has(normalizedActionKey);
+      }
+
+      function getActiveCount() {
+        return activeActionKeys.size;
+      }
+
+      function getActiveKeys() {
+        return [...activeActionKeys];
+      }
+
+      function reset() {
+        activeActionKeys.clear();
+      }
+    covers:
+      - "output:activeKeys"
+      - "output:activeCount"
+      - "state:idle"
+    line_range:
+      start: 93
+      end: 108
+
+  - path: src/shared/lib/utils/normalization.js
+    snippet: |
+      export function normalizeOptionalString(value) {
+        if (typeof value !== "string") {
+          return null;
+        }
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : null;
+      }
+    covers:
+      - "condition:key-normalization"
+      - "input:actionKey"
+    line_range:
+      start: 63
+      end: 69
+
+  - path: src/shared/lib/qfm/index.js
+    snippet: |
+      // --- Duplicate mutation prevention ---
+      export {
+        IN_FLIGHT_MUTATION_GUARD_SCHEMA,
+        createInFlightMutationGuard,
+      } from "./inFlightMutationGuard";
+    covers:
+      - "output:guardResult"
+    line_range:
+      start: 17
+      end: 21
+
+confidence: 0.95
+confidence_rationale: >
+  High confidence. The source file (120 lines) is fully read and all public
+  APIs are documented with exact code snippets. The state machine is inferred
+  from the Set-based begin/end pattern — states are implicit (Set empty vs
+  non-empty) rather than explicit enum values, but the transitions are clear
+  from the code. Key normalization behavior is confirmed via the imported
+  normalizeOptionalString utility. The only uncertainty is about callers —
+  no usage sites or test files were found in the repository to confirm the
+  intended calling pattern (try/finally as shown in the JSDoc). The guard
+  result schema is fully documented from createGuardResult(). Schema version
+  constant (qfm.in-flight-mutation-guard.v1) is confirmed.
+
+unresolved_questions:
+  - "No test files found for inFlightMutationGuard — edge cases (concurrent begin/end interleaving, reset during active mutations) are not verified by tests in the repo."
+  - "No consumer usage sites found in the codebase — the intended try/finally calling pattern is documented in JSDoc but not confirmed by actual callers."
+  - "The guard is purely in-memory (JavaScript Set) — no persistence or cross-tab coordination. Is this intentional for the frontend ecosystem scope?"
+  - "reset() clears all active keys without any guard or callback — is this safe to call mid-mutation, or is it only for teardown/cleanup?"
+
+status: complete

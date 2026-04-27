@@ -1,0 +1,35 @@
+spec_id: api.client.yaml
+output_path: runs/run-0016/generator/specs/api.client.yaml
+discovered_behaviors:
+  - id: api-client-request-flow
+    description: Centralized HTTP client with automatic JWT and CSRF injection
+    priority: high
+    evidence_refs:
+      - src/shared/lib/api/apiClient.ts
+  - id: api-client-token-refresh
+    description: Automatic token refresh on 401 response with request retry
+    priority: high
+    evidence_refs:
+      - src/shared/lib/api/apiClient.ts
+  - id: api-client-response-normalization
+    description: QFM response normalization for consistent error handling
+    priority: medium
+    evidence_refs:
+      - src/shared/lib/api/apiClient.ts
+      - src/shared/lib/qfm/responseAdapter.js
+source_files:
+  - src/shared/lib/api/apiClient.ts
+  - src/shared/lib/qfm/responseAdapter.js
+  - src/shared/lib/contracts/api-contract.ts
+  - src/features/auth/api/csrfHelper.js
+  - src/features/auth/api/authErrorHandler.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - Centralized API client wrapping Fetch API
+  - Automatic JWT token injection via Authorization header
+  - CSRF token injection via x-csrf-token header for POST/PATCH/DELETE
+  - Automatic token refresh on 401 response with request retry
+  - QFM response normalization for consistent error handling
+  - Support for AbortController for request cancellation
+  - Credentials included for cookie-based auth

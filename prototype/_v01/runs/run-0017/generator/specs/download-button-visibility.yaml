@@ -1,0 +1,471 @@
+id: download-button-visibility
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: download-button-visibility
+    coverage: partial
+    notes: >-
+      The reports table always renders a primary Download button and disables it until
+      progressPercentage reaches 100. A separate download link inside the PDF
+      generation overlay is only rendered after generation finishes and the temporary
+      success animation ends. The listed files do not show a distinct named
+      report-progress "download stage" beyond the 100% guard.
+description: >-
+  The reports feature exposes download behavior in two layers. In each table row, the
+  primary Download action is always present but remains disabled until the row's
+  reportProgressPercentage equals 100. After the user starts PDF generation, a global
+  overlay enters a waiting state, polls backend status by user key, shows a 5-second
+  success animation when generation finishes, and only then renders the final download
+  link for the generated file.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: No PDF-generation overlay is shown because isGenerating is false.
+    - id: waiting_for_pdf
+      description: The overlay is visible and the client is polling for PDF generation to finish.
+    - id: success_animation
+      description: PDF generation has finished, but the UI is still showing the temporary celebration animation instead of the final download link.
+    - id: ready_to_download
+      description: The overlay shows the final download link for the generated PDF.
+    - id: failed
+      description: The overlay shows a failure message with retry and close actions.
+  transitions:
+    - id: start_download_request
+      from: idle
+      to: waiting_for_pdf
+      trigger: User clicks the row-level Download action and startDownload begins.
+      guards:
+        - field: report.reportId and report.calculatorId
+          condition: A report row is selected and passed into the download handler.
+      effects:
+        - Set isGenerating to true.
+        - Set dlStatus to waiting.
+        - Persist pdfKey, cid, currentReportId, and an empty publicUrl in the download store.
+    - id: poll_reports_ready
+      from: waiting_for_pdf
+      to: success_animation
+      trigger: Polling receives a finished status or a publicUrl from getPdfStatus.
+      effects:
+        - Set dlStatus to finished.
+        - Store the returned publicUrl or fallback '#'.
+        - Start the success-animation timer.
+    - id: animation_reveals_download
+      from: success_animation
+      to: ready_to_download
+      trigger: The 5-second ANIMATION_DURATION timer completes after dlStatus becomes finished.
+      effects:
+        - Set showAnimation to false.
+        - Replace the celebration view with the final download link.
+    - id: poll_reports_failure
+      from: waiting_for_pdf
+      to: failed
+      trigger: Polling detects a failed or unknown status, exceeds MAX_ATTEMPTS, or startDownload fails.
+      effects:
+        - Set dlStatus to failed.
+        - Keep the overlay open in its failure view.
+    - id: retry_generation
+      from: failed
+      to: waiting_for_pdf
+      trigger: User clicks Try Again in the failure view.
+      effects:
+        - Set dlStatus back to waiting.
+    - id: close_overlay
+      from: ready_to_download
+      to: idle
+      trigger: User clicks the final download link or the close button.
+      effects:
+        - Reset the download store.
+        - Clear persisted localStorage download state.
+    - id: dismiss_failed_overlay
+      from: failed
+      to: idle
+      trigger: User clicks Close in the failure view.
+      effects:
+        - Reset the download store.
+        - Clear persisted localStorage download state.
+conditions:
+  - id: row-download-availability
+    description: The row-level Download button stays visible for every report row but is only enabled when the row progress reaches 100 percent.
+    trigger: ReportsTable renders ReportSplitActions for a report row.
+    guards:
+      - field: progressPercentage
+        condition: progressPercentage === 100
+    then:
+      - Enable the primary Download button.
+      - Set the button title to "Download report".
+    else:
+      - Keep the primary Download button rendered but disabled.
+      - Set the button title to "Report must be 100% complete to download".
+      - Apply the reduced-opacity disabled styling.
+  - id: overlay-download-link-visibility
+    description: The final overlay download link is only rendered after PDF generation finishes and the celebration animation has ended.
+    trigger: PdfGenerationOverlay renders while download state is active.
+    guards:
+      - field: isGenerating
+        condition: isGenerating is true
+      - field: dlStatus
+        condition: dlStatus === "finished"
+      - field: showAnimation
+        condition: showAnimation === false
+    then:
+      - Render the anchor-based download control with the generated file URL and download attribute.
+    else:
+      - Render no overlay download link while generation is waiting, failed, or still showing the success animation.
+inputs:
+  - id: progress_percentage
+    type: number
+    source: report row data passed into ReportsTable and forwarded to ReportSplitActions
+    required: true
+  - id: report_id
+    type: string
+    source: selected report row passed into the download handlers and persisted as currentReportId
+    required: true
+  - id: calculator_id
+    type: string
+    source: selected report row calculatorId, with "1" as fallback in download handlers
+    required: true
+  - id: pdf_generation_status
+    type: enum("", waiting, finished, failed, completed)
+    source: Zustand download store updated by startDownload and getPdfStatus polling
+    required: true
+  - id: public_download_url
+    type: string
+    source: getPdfStatus response raw.data.publicUrl stored in useDownloadStore
+    required: false
+outputs:
+  - id: row_download_button
+    type: rendered button with enabled or disabled state
+    destination: report row actions area in ReportSplitActions
+    lifespan: while the report row is rendered
+  - id: pdf_generation_overlay
+    type: full-screen modal overlay with waiting, success, ready, or failed content
+    destination: reports page overlay layer
+    lifespan: until reset is called
+  - id: overlay_download_link
+    type: anchor element with download attribute and generated file href
+    destination: PdfGenerationOverlay success view
+    lifespan: while state_machine:ready_to_download remains active
+evidence_refs:
+  - path: src/features/reports/components/ReportsTable.tsx
+    line_range:
+      start: 110
+      end: 126
+    covers:
+      - condition:row-download-availability
+      - input:progress_percentage
+      - output:row_download_button
+    snippet: |
+      <div className="flex justify-center relative">
+        <ReportSplitActions
+          reportName={report.name}
+          progressPercentage={report.reportProgressPercentage}
+          isDownloading={rowController.isDownloading(report.reportId)}
+          isRenaming={rowController.isRenaming(report.reportId)}
+          isDeleting={rowController.isDeleting(report.reportId)}
+          isEmailing={rowController.isEmailing(report.reportId)}
+          onDownload={(e) => {
+            e.stopPropagation();
+            rowController.handleDownload(report);
+          }}
+          onEditReport={() => rowController.handleEdit(report)}
+          onRename={() => rowController.startRename(report.reportId, report.name)}
+          onEmailPdf={() => rowController.handleEmail(report.reportId)}
+          onDelete={() => rowController.handleDelete(report)}
+        />
+      </div>
+  - path: src/features/reports/components/ReportSplitActions.tsx
+    line_range:
+      start: 40
+      end: 64
+    covers:
+      - condition:row-download-availability
+      - output:row_download_button
+    snippet: |
+      const anyActionInProgress = isDownloading || isRenaming || isDeleting || isEmailing;
+      const canDownload = progressPercentage === 100;
+
+      return (
+        <div className="inline-flex items-stretch rounded-md overflow-visible shadow-sm">
+          <Button
+            type="button"
+            onClick={onDownload}
+            disabled={isDownloading || !canDownload}
+            title={canDownload ? "Download report" : "Report must be 100% complete to download"}
+            variant="primary"
+            size="sm"
+            className={`rounded-r-none border-r border-brand-dark ${
+              isDownloading || !canDownload ? "opacity-75" : ""
+            }`}
+          >
+            {isDownloading ? (
+              <>
+                <Spinner size="sm" className="mr-1" />
+                Downloading...
+              </>
+            ) : (
+              "Download"
+            )}
+          </Button>
+  - path: src/features/reports/hooks/useReportActions.ts
+    line_range:
+      start: 127
+      end: 149
+    covers:
+      - transition:start_download_request
+      - input:report_id
+      - input:calculator_id
+    snippet: |
+      const handleDownloadReport = useCallback(
+        async (params: { reportId: string; calculatorId: string }) => {
+          const { reportId, calculatorId } = params;
+
+          try {
+            const token = getToken();
+            const success = await startDownload({
+              userId: token?._id,
+              reportId,
+              cid: calculatorId || "1",
+            });
+
+            if (!success) {
+              toast.error("Failed to start PDF generation.");
+            }
+
+            return { success };
+          } catch (err: any) {
+            toast.error(err.message || "PDF generation failed.");
+            return { success: false };
+          }
+        },
+        [startDownload]
+      );
+  - path: src/features/pdf/store/useDownloadStore.ts
+    line_range:
+      start: 107
+      end: 133
+    covers:
+      - state:waiting_for_pdf
+      - transition:start_download_request
+      - transition:poll_reports_failure
+      - input:pdf_generation_status
+      - output:pdf_generation_overlay
+    snippet: |
+      startDownload: async ({ userId, reportId, cid, email }) => {
+        try {
+          // Set generating state first
+          get().setIsGenerating(true);
+          get().setDlStatus("waiting");
+          get().setPdfKey(userId);
+          get().setCid(cid);
+          get().setCurrentReportId(reportId);
+          get().setPublicUrl("");
+
+          // Call API to start generation
+          const response = await startPdfGeneration({ userId, reportId, email });
+
+          // Fix: response.data contains userId directly, not nested under .data
+          if (response.ok && response.data?.userId) {
+            // Generation started successfully
+            return true;
+          } else {
+            // API returned error
+            get().setDlStatus("failed");
+            return false;
+          }
+        } catch (error) {
+          console.error("Failed to start PDF generation:", error);
+          get().setDlStatus("failed");
+          return false;
+        }
+      },
+  - path: src/features/pdf/components/PdfGenerationOverlay.tsx
+    line_range:
+      start: 96
+      end: 157
+    covers:
+      - state:waiting_for_pdf
+      - transition:poll_reports_ready
+      - transition:poll_reports_failure
+      - input:public_download_url
+    snippet: |
+      useEffect(() => {
+        if (dlStatus === "finished") {
+          setShowAnimation(true);
+          const timer = setTimeout(() => {
+            setShowAnimation(false);
+          }, ANIMATION_DURATION);
+          return () => clearTimeout(timer);
+        } else {
+          setShowAnimation(false);
+        }
+      }, [dlStatus]);
+
+      useEffect(() => {
+        if (!isGenerating || !pdfKey) return;
+        if (dlStatus === "finished" || dlStatus === "failed") return;
+
+        let attempts = 0;
+
+        const poll = async () => {
+          try {
+            const status = await getPdfStatus({ userId: pdfKey });
+            const statusData = status?.raw?.data;
+
+            if (statusData?.status === "finished" || statusData?.publicUrl) {
+              setDlStatus("finished");
+              setPublicUrl(statusData.publicUrl || "#");
+              return true;
+            }
+
+            if (statusData?.status === "failed" || statusData?.status?.includes("failed")) {
+              setDlStatus("failed");
+              return true;
+            }
+
+            if (status?.raw?.message?.includes("Unknown")) {
+              setDlStatus("failed");
+              return true;
+            }
+
+            return false;
+          } catch {
+            return false;
+          }
+        };
+
+        const intervalId = setInterval(async () => {
+          attempts++;
+
+          if (attempts >= MAX_ATTEMPTS) {
+            clearInterval(intervalId);
+            setDlStatus("failed");
+            return;
+          }
+
+          const shouldStop = await poll();
+          if (shouldStop) {
+            clearInterval(intervalId);
+          }
+        }, POLL_INTERVAL);
+
+        return () => clearInterval(intervalId);
+      }, [isGenerating, pdfKey, dlStatus, setDlStatus, setPublicUrl]);
+  - path: src/features/pdf/components/PdfGenerationOverlay.tsx
+    line_range:
+      start: 159
+      end: 226
+    covers:
+      - state:idle
+      - state:success_animation
+      - state:ready_to_download
+      - condition:overlay-download-link-visibility
+      - transition:animation_reveals_download
+      - transition:close_overlay
+      - output:overlay_download_link
+    snippet: |
+      if (!isGenerating) return null;
+
+      const isFinished = dlStatus === "finished";
+      const isFailed = dlStatus === "failed";
+      const isWaiting = dlStatus === "waiting";
+
+      return (
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.3 }}
+            className="fixed inset-0 z-50 bg-gray-800/80 backdrop-blur-md"
+          >
+            <div className="m-auto h-full max-w-[960px] w-full md:w-[780px] lg:w-full flex">
+              <div className="px-5 w-full flex flex-col items-center justify-center text-center text-white">
+                {isFinished && showAnimation && (
+                  <div className="mt-5 flex flex-col items-center">
+                    <Image
+                      src={Yehey}
+                      alt="Success"
+                      width={100}
+                      height={100}
+                      className="mb-[55px]"
+                      unoptimized
+                    />
+                    <p className="text-center">
+                      Your report is ready! Click the button above to download and dive into your
+                      customized insights. We&apos;re excited for you to check it out.
+                    </p>
+                  </div>
+                )}
+
+                {isFinished && !showAnimation && (
+                  <div className="mt-5 flex flex-col items-center">
+                    <a
+                      onClick={handleClose}
+                      className="my-5 inline-block text-white font-bold py-4 px-4 rounded-full transition duration-300 hover:scale-105"
+                      target="_blank"
+                      href={`${process.env.NEXT_PUBLIC_APP_API_URL}/calculator-reports/get-file?source=${publicUrl}&id=${tool}`}
+                      download
+                    >
+                      <ArrowDownTrayIcon className="w-[50px] h-[50px] text-green-400 hover:text-cyan-400" />
+                    </a>
+                    <p className="text-center">
+                      Your report is ready! Click the button above to download and dive into your
+                      customized insights.
+                    </p>
+                  </div>
+                )}
+  - path: src/features/pdf/components/PdfGenerationOverlay.tsx
+    line_range:
+      start: 228
+      end: 275
+    covers:
+      - state:failed
+      - transition:retry_generation
+      - transition:dismiss_failed_overlay
+      - output:pdf_generation_overlay
+    snippet: |
+      {isFailed && (
+        <div className="mt-5 flex flex-col items-center">
+          <ExclamationCircleIcon className="animate-bounce w-[50px] h-[50px] text-[#D44950] mb-4" />
+          <div className="font-bold my-1">Report Generation Failed</div>
+          <p className="max-w-md">
+            We encountered an issue while generating your report. Please try again or contact
+            support if the problem persists.
+          </p>
+          <div className="flex gap-3 mt-6">
+            <Button
+              type="button"
+              variant="unstyled"
+              size="none"
+              onClick={handleRetry}
+              className="px-4 py-2 bg-white text-gray-800 rounded font-medium hover:bg-white/90 transition flex items-center gap-2"
+            >
+              <RefreshIcon className="w-4 h-4" />
+              Try Again
+            </Button>
+            <Button
+              type="button"
+              variant="unstyled"
+              size="none"
+              onClick={handleClose}
+              className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded transition"
+            >
+              Close
+            </Button>
+          </div>
+        </div>
+      )}
+confidence: 0.83
+confidence_rationale: >-
+  The row-level availability guard and overlay visibility states are directly confirmed in
+  ReportSplitActions, ReportsTable, useReportActions, useDownloadStore, and
+  PdfGenerationOverlay. Confidence is reduced because the listed files do not show where
+  reportProgressPercentage is computed, do not define a named report-progress "download
+  stage," and include an unused "completed" dlStatus value whose behavior is not rendered.
+unresolved_questions:
+  - Where reportProgressPercentage is computed, and whether 100 always corresponds to a business-defined "download stage," is not shown in the analyzed files.
+  - The download store includes a dlStatus value of "completed", but the analyzed UI only handles waiting, finished, failed, and the empty string.
+  - getPdfStatus polls by pdfKey/userId rather than currentReportId, so the behavior for multiple simultaneous PDF generations by the same user is not clear from the available code.
+status: partial

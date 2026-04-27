@@ -1,0 +1,92 @@
+run_id: "run-0013"
+mutator: "run_mutator"
+status: "complete"
+provider: "opencode-agent"
+proposed_change:
+  type: step_management
+  target_step: "formula root"
+  current: >
+    Formula steps flow directly from analyze (produces predicate_inventory) to
+    draft (produces spec_set). There is no explicit validation that every golden
+    behavior aspect is accounted for in the predicate inventory before drafting
+    begins. The analyze step instructions alone are insufficient to prevent the
+    generator from collapsing semantic distinctions.
+  proposed: >
+    Insert a new step `golden_validate` between `analyze` and `draft`.
+    Prompt: "Cross-reference the predicate_inventory against every golden
+    behavior aspect. For each aspect: (a) mark as found / collapsed / missing,
+    (b) cite the matching predicate_id or explain the collapse, (c) list
+    evidence_refs from both code and golden set. Output a coverage_gap_report.
+    If any aspect is marked missing, STOP and surface the gap; do not proceed
+    to draft until the gap is resolved or explicitly flagged as unrecoverable."
+    Outputs: coverage_gap_report, golden_cross_ref_map.
+  expected_improvement: >
+    Prevents silent collapse of semantic distinctions (agreement-state guard
+    conflated with auth redirect, visible conflated with enabled, calculator-side
+    report creation omitted) by forcing explicit golden-to-predicate mapping
+    before drafting. Surfaces recognition failures as blockers rather than
+    letting them propagate into drafted specs.
+  risk: medium
+  rationale: >
+    The analyzer identified that the generator collapsed semantic distinctions
+    despite the analyze step's explicit instructions to preserve them. A
+    verification_crosscheck step mandates explicit mapping, making any collapse
+    visible and blocking. The lesson index shows verification_crosscheck
+    previously PASSED for recognition_failure on conditional UI visibility,
+    indicating this teaching method is effective for this failure type.
+insanity_check:
+  method_already_failed: false
+  failed_runs: []
+  learned_runs:
+    - run_id: null
+      teaching_method: verification_crosscheck
+      scenario: conditional UI visibility missed
+      result: PASSED
+rubric_candidate:
+  id: semantic_fidelity
+  description: >
+    Evaluates whether the spec captures the correct semantic dimension of the
+    behavior (e.g., "visible" vs "enabled", "redirect" vs "block", "hidden"
+    vs "absent").
+  source: rubric_gap_failure
+  discovered_in_run: run-0013
+  rationale: >
+    The current rubric penalizes omissions via golden_set_recall but does not
+    penalize semantic misclassification. A spec that documents "enabled" instead
+    of "visible" scores poorly on recall but receives no explicit penalty for
+    the semantic error itself, masking recognition failures.
+  evidence_refs:
+    - runs/run-0013/evaluator/shadow-findings.yaml
+    - runs/run-0013/evaluator/output.yaml
+    - runs/run-0013/inputs/formula.yaml
+    - runs/run-0013/generator/output.yaml
+  source_run: run-0013
+  evaluator_score: 0.57
+  failure_type: recognition_failure
+  analyzer_confidence: 0.85
+  recall_misses_triggered:
+    - auth-conditional-redirect
+    - download-button-visibility
+    - toa-gated-first-report-creation
+  scored_specs_examined:
+    - auth.conditional-redirect
+    - download.button-visibility
+    - toa.gated-first-report-creation
+  evidence_count: 1
+  first_observed_run: run-0013
+  last_observed_run: run-0013
+  precision_concern: >
+    Conflates "visible" with "enabled". Golden set specifies that the button
+    becomes visible only after report progress reaches the download stage; the
+    spec documents an enable/disable state transition instead.
+  weight_recommendation: 1.0
+  probation_runs_remaining: 3
+  created_at: "2026-04-22T15:53:00Z"
+confidence: 0.85
+confidence_rationale: >
+  Strong alignment with analyzer diagnosis. The verification_crosscheck pattern
+  has prior success for recognition_failure. Step management is the appropriate
+  tier per analyzer. Risk is medium because inserting a step changes formula
+  structure and may increase token usage, but the expected improvement is high
+  given the consistent pattern of semantic collapse across all three recall misses.
+mutator_timestamp: "2026-04-22T15:53:00Z"

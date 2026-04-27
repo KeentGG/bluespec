@@ -1,0 +1,143 @@
+run_id: run-0016
+evaluator: evaluator
+status: complete
+provider: sample-project
+
+recall_hits: []
+
+recall_misses:
+  - golden_behavior_id: auth-conditional-redirect
+    severity: high
+    description: >
+      No spec documents the specific project-edit gated flow where edit routing
+      depends on agreement state being satisfied. auth.flow covers generic route
+      protection and redirect behavior, but it does not cover the edit-specific
+      conditional flow or the cited src/routes/project-edit.tsx evidence.
+    evidence_ref_missing: src/routes/project-edit.tsx
+    affected_specs:
+      - auth.flow
+
+  - golden_behavior_id: download-button-visibility
+    severity: high
+    description: >
+      pdf.lifecycle covers a finished-state download action inside the PDF
+      overlay, but no spec captures the golden behavior that the ReportActions
+      download button becomes visible only after report progress reaches the
+      download stage. This is thematic overlap, not direct behavior coverage.
+    evidence_ref_missing: src/components/ReportActions.tsx
+    affected_specs:
+      - pdf.lifecycle
+      - state.management
+
+  - golden_behavior_id: toa-gated-first-report-creation
+    severity: high
+    description: >
+      No spec covers the full first-report TOA gate: defer creation for new
+      accounts without TOA, redirect with businessId/reportName query params,
+      and create the report only after calculator-side TOA acceptance. None of
+      the cited golden evidence refs appear in the generated specs.
+    evidence_refs_missing:
+      - src/features/auth/contracts/toa-contract.js
+      - src/features/reports/hooks/useReportCreation.ts
+      - src/shared/lib/routing/gate-new-contract.js
+    affected_specs:
+      - auth.flow
+      - state.management
+
+precision_findings:
+  - spec_id: state.management
+    finding: >
+      The spec is materially broader than a single coherent behavior surface and
+      mixes shared state, SWR fetching, local component state, login UI, and PDF
+      lifecycle into one artifact. That breadth lowers precision relative to the
+      rubric's coverage_core_behavior and completeness_inputs_outputs criteria.
+    severity: medium
+    rubric_criterion: coverage_core_behavior
+
+  - spec_id: state.management
+    finding: >
+      Many evidence refs use absolute paths outside the run workspace. That makes
+      the spec harder to reproduce and validate in isolation, even if the copied
+      snippets are plausible.
+    severity: medium
+    rubric_criterion: completeness_inputs_outputs
+
+  - spec_id: pdf.lifecycle
+    finding: >
+      The spec blends strongly evidenced overlay/store behavior with a
+      qfm/pdfLifecycle.js helper that is not shown as the active runtime path in
+      the same artifact. This weakens confidence that the documented lifecycle is
+      exactly the one users experience.
+    severity: medium
+    rubric_criterion: coverage_core_behavior
+
+  - spec_id: qfm.system
+    finding: >
+      Several claims are reconstructed from embedded, prior-captured source
+      snippets because the original implementation files are not clearly present
+      in the current checkout. That is useful context, but it is less precise
+      than direct fresh evidence from the run workspace.
+    severity: medium
+    rubric_criterion: consistency_cross_refs
+
+consistency_findings:
+  - spec_id: pdf.lifecycle
+    finding: >
+      The artifact marks itself partial and explicitly questions whether
+      qfm/pdfLifecycle.js is canonical or dead code. That honesty is good, but it
+      also confirms unresolved uncertainty between the helper contract and the
+      live overlay/store implementation.
+    severity: medium
+    cross_spec_refs:
+      - qfm.system
+
+  - spec_id: state.management
+    finding: >
+      The spec duplicates the PDF waiting/finished/failed lifecycle already
+      described in pdf.lifecycle instead of clearly referencing that artifact as
+      the canonical behavioral spec. The overlap is directionally consistent but
+      increases drift risk.
+    severity: low
+    cross_spec_refs:
+      - pdf.lifecycle
+
+  - spec_id: auth.flow
+    finding: >
+      auth.flow and api.client are mutually consistent on refresh, CSRF, and
+      redirect handling. The main issue is omission of the golden TOA/edit flows,
+      not contradiction between the two specs.
+    severity: info
+    cross_spec_refs:
+      - api.client
+
+rubric_gap_candidates:
+  - proposed_only: true
+    candidate: golden-evidence-ref-coverage
+    description: >
+      Add a rubric check that requires each golden behavior's evidence_refs to be
+      represented directly in at least one generated spec.
+    rationale: >
+      This run produced mostly solid infrastructure specs, but none of the golden
+      evidence refs for behaviors #1 and #3 were covered, and behavior #2 lacked
+      the cited ReportActions.tsx file.
+
+  - proposed_only: true
+    candidate: exact-behavior-vs-thematic-overlap
+    description: >
+      Add a rubric criterion that separates exact behavioral recall from loose
+      thematic similarity.
+    rationale: >
+      pdf.lifecycle overlaps the idea of a download action becoming available,
+      but it does not evidence the actual progress-based button visibility rule in
+      the golden set. A dedicated criterion would prevent over-crediting this kind
+      of near match.
+
+  - proposed_only: true
+    candidate: reproducible-evidence-paths
+    description: >
+      Add a rubric criterion that penalizes evidence_refs which point outside the
+      workspace or rely on prior captured snippets instead of current readable
+      source files.
+    rationale: >
+      state.management and qfm.system both lose verifiability because a reviewer
+      cannot fully reproduce the evidence chain from the run workspace alone.

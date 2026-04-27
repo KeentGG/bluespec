@@ -1,0 +1,26 @@
+spec_id: reports.download-button-visibility.yaml
+output_path: runs/run-0006/generator/specs/reports.download-button-visibility.yaml
+golden_behaviors:
+  - id: download-button-visibility
+    description: download button becomes visible only after report progress reaches the download stage
+    priority: high
+    evidence_refs:
+      - src/components/ReportActions.tsx
+source_files:
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportSplitActions.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsTable.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportRowController.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportActions.ts
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/api/list-service.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/routing/report-route-progress-contract.js
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/pdf/components/PdfGenerationOverlay.tsx
+  - /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/pdf/store/useDownloadStore.ts
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - The frozen golden behavior points to src/components/ReportActions.tsx, but the current dashboard-v2 target uses ReportSplitActions.tsx and ReportsTable.tsx instead.
+  - ReportsTable passes report.reportProgressPercentage into ReportSplitActions.
+  - ReportSplitActions computes canDownload = progressPercentage === 100 and disables the Download button until that threshold is reached.
+  - reportProgressPercentage is derived in list-service.js through resolveCalculatorAwareProgressPercentage(), which maps each reportProgress route to a percentage in report-route-progress-contract.js.
+  - Some calculators treat terminal routes such as /summary, /value-estimate, /net-proceeds-overview, /thankyou, or optional-questions routes as 100% complete.
+  - Clicking Download starts PDF generation through useReportActions/useDownloadStore, then PdfGenerationOverlay shows waiting/finished/failed states and exposes the final download link only after generation finishes.

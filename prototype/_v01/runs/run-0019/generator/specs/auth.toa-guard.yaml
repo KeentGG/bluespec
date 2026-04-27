@@ -1,0 +1,157 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: auth.toa-guard
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth_flow.toa_guard
+    coverage: full
+    notes: >
+      TOA (Terms of Agreement) guard checks if user has accepted terms
+      before allowing certain actions. Calculator type determines which
+      terms apply. Defers report creation until TOA acceptance.
+
+description: >
+  Guards actions that require Terms of Agreement acceptance. The system checks
+  if the user has accepted the relevant TOA based on their calculator type.
+  For new users without TOA acceptance, report creation is deferred until
+  terms are accepted, with business and report details passed via URL params.
+
+state_machine:
+  initial: checking
+  states:
+    - id: checking
+      description: Evaluating TOA acceptance status.
+    - id: accepted
+      description: User has accepted TOA, action allowed.
+    - id: deferred
+      description: TOA not accepted, action deferred to post-acceptance flow.
+  transitions:
+    - id: toa_accepted
+      from: checking
+      to: accepted
+      trigger: User has accepted required TOA.
+      guards:
+        - field: user_id
+          condition: hasAgreedToa(userId) returns true.
+      effects:
+        - Allow requested action.
+    - id: toa_not_accepted
+      from: checking
+      to: deferred
+      trigger: User has not accepted required TOA.
+      effects:
+        - Defer action to post-TOA flow.
+        - Pass action parameters via URL.
+        - Redirect to TOA introduction page.
+
+conditions:
+  - id: has_agreed_toa
+    description: >
+      Checks if the user has accepted the Terms of Agreement. The check
+      is based on user ID and may vary by calculator type.
+    trigger: TOA-guarded action is attempted.
+    guards:
+      - field: user_id
+        condition: User ID is present.
+      - field: toa_status
+        condition: User has accepted required TOA.
+    then:
+      - Allow action to proceed.
+    else:
+      - Defer action to post-TOA flow.
+
+  - id: calculator_type_routing
+    description: >
+      Different calculator types may require different TOA versions.
+      The calculator type determines which terms apply to the user.
+    trigger: TOA check is performed.
+    guards:
+      - field: calculator_type
+        condition: Calculator type is identified.
+    then:
+      - Check TOA acceptance for specific calculator type.
+    else:
+      - Use default TOA check.
+
+inputs:
+  - id: user_id
+    type: string
+    source: Auth session
+    required: true
+
+  - id: calculator_type
+    type: string
+    source: Route or context
+    required: false
+    validation:
+      values: calculator-specific type identifiers
+
+outputs:
+  - id: toa_check_result
+    type: "boolean or deferred action"
+    destination: Action guard logic
+    lifespan: per action attempt
+
+  - id: deferred_action_params
+    type: "URL parameters"
+    destination: TOA introduction page redirect
+    lifespan: until TOA acceptance
+
+evidence_refs:
+  - path: src/features/auth/contracts/toa-contract.js
+    snippet: |
+      export function hasAgreedToa(userId) {
+        return toaStatusCache.get(userId) === true;
+      }
+    covers:
+      - "condition:has_agreed_toa"
+      - "input:user_id"
+
+  - path: src/shared/lib/routing/gate-new-contract.js
+    snippet: |
+      export function gateNewContract({ userId, calculatorType, action }) {
+        if (hasAgreedToa(userId)) {
+          return { allowed: true };
+        }
+        return {
+          allowed: false,
+          deferTo: `/toa/introduction`,
+          params: { calculatorType, ...action },
+        };
+      }
+    covers:
+      - "transition:toa_accepted"
+      - "transition:toa_not_accepted"
+      - "condition:calculator_type_routing"
+      - "output:toa_check_result"
+      - "output:deferred_action_params"
+
+  - path: src/features/reports/hooks/useReportCreation.ts
+    snippet: |
+      export function useReportCreation() {
+        const createReport = async (businessId, reportName) => {
+          const guard = gateNewContract({ userId, calculatorType: "tax", action: { businessId, reportName } });
+          if (!guard.allowed) {
+            router.push(`${guard.deferTo}?businessId=${businessId}&reportName=${encodeURIComponent(reportName)}`);
+            return;
+          }
+          // ... proceed with report creation
+        };
+        return { createReport };
+      }
+    covers:
+      - "transition:deferred"
+      - "output:deferred_action_params"
+
+confidence: 0.88
+confidence_rationale: >
+  TOA guard logic, user acceptance check, and deferred action pattern are
+  evidenced in toa-contract.js, gate-new-contract.js, and useReportCreation.ts.
+  The exact TOA cache mechanism and calculator type routing are inferred.
+unresolved_questions:
+  - How toaStatusCache is populated and invalidated.
+  - Whether different calculator types have different TOA versions.
+  - TOA acceptance persistence mechanism.
+status: partial

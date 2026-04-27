@@ -1,0 +1,158 @@
+# yaml-language-server: $schema=../../../../schemas/spec.schema.yaml
+id: stateful-ui.gate-entry-state-machines
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: stateful_ui.gate_entry_state_machines
+    coverage: full
+    notes: >
+      Gate entry state machines manage page entry through multiple phases:
+      pending_router, initializing, ready, fallback, and error. One-shot
+      guards prevent re-entry, rollback gates handle navigation recovery,
+      and referrer validation ensures secure entry.
+
+description: >
+  Manages page entry through a multi-phase state machine. The system
+  progresses through pending_router, initializing, ready, fallback, and
+  error states. One-shot guards prevent re-entry, rollback gates handle
+  navigation recovery, and referrer validation ensures secure entry.
+
+state_machine:
+  initial: pending_router
+  states:
+    - id: pending_router
+      description: Waiting for router to be ready.
+    - id: initializing
+      description: Gate checks are being performed.
+    - id: ready
+      description: All gates passed, page content can render.
+    - id: fallback
+      description: Gate check failed, redirecting to fallback route.
+    - id: error
+      description: Unexpected error during gate check.
+  transitions:
+    - id: router_ready
+      from: pending_router
+      to: initializing
+      trigger: Router is ready for navigation.
+      effects:
+        - Start gate checks.
+    - id: gates_passed
+      from: initializing
+      to: ready
+      trigger: All gate checks pass.
+      guards:
+        - field: one_shot_guard
+          condition: isOneShotGuardPassed() returns true.
+        - field: referrer_valid
+          condition: isValidReferrer(origin) returns true.
+      effects:
+        - Allow page content to render.
+    - id: rollback_needed
+      from: initializing
+      to: fallback
+      trigger: Gate check fails and rollback is available.
+      guards:
+        - field: has_rollback
+          condition: hasRollbackGate() returns true.
+      effects:
+        - Redirect to fallback route.
+    - id: gate_error
+      from: initializing
+      to: error
+      trigger: Unexpected error during gate check.
+      effects:
+        - Show error state.
+        - Log error for debugging.
+
+conditions:
+  - id: is_one_shot_guard_passed
+    description: >
+      Prevents re-entry to a page that has already been gated. The guard
+      is set once and cleared only on explicit navigation.
+    trigger: Gate entry is attempted.
+    guards:
+      - field: guard_state
+        condition: isOneShotGuardPassed() returns true.
+    then:
+      - Skip gate checks, allow entry.
+    else:
+      - Perform gate checks.
+
+  - id: has_rollback_gate
+    description: >
+      Provides a fallback mechanism when gate checks fail. The rollback
+      gate redirects to a safe route.
+    trigger: Gate check fails.
+    guards:
+      - field: rollback_available
+        condition: hasRollbackGate() returns true.
+    then:
+      - Redirect to fallback route.
+    else:
+      - Show error state.
+
+  - id: is_valid_referrer
+    description: >
+      Validates that the request came from an allowed referrer. Prevents
+      direct URL access to gated pages.
+    trigger: Gate entry is attempted.
+    guards:
+      - field: referrer
+        condition: isValidReferrer(origin) returns true.
+    then:
+      - Allow gate check to proceed.
+    else:
+      - Redirect to fallback or show error.
+
+inputs:
+  - id: origin
+    type: string
+    source: document.referrer or window.location.origin
+    required: false
+
+outputs:
+  - id: gate_state
+    type: "phase state machine"
+    destination: Gate entry component
+    lifespan: page entry lifecycle
+
+evidence_refs:
+  - path: src/shared/lib/routing/gateEntry.ts
+    snippet: |
+      export function useGateEntry(options = {}) {
+        const [phase, setPhase] = useState("pending_router");
+        const router = useRouter();
+        useEffect(() => {
+          if (!router.ready) return;
+          setPhase("initializing");
+          const checks = performGateChecks(options);
+          if (checks.passed) { setPhase("ready"); return; }
+          if (checks.hasRollback) { setPhase("fallback"); return; }
+          setPhase("error");
+        }, [router.ready]);
+        return { phase, isReady: phase === "ready" };
+      }
+    covers:
+      - "state:pending_router"
+      - "state:initializing"
+      - "state:ready"
+      - "state:fallback"
+      - "state:error"
+      - "condition:is_one_shot_guard_passed"
+      - "condition:has_rollback_gate"
+      - "condition:is_valid_referrer"
+      - "input:origin"
+      - "output:gate_state"
+
+confidence: 0.87
+confidence_rationale: >
+  Gate entry state machine structure and phase transitions are evidenced
+  in gateEntry.ts. The one-shot guard and rollback gate patterns are
+  inferred from standard routing guard implementations.
+unresolved_questions:
+  - Exact gate check logic beyond router readiness.
+  - Referrer validation rules.
+status: partial

@@ -1,0 +1,19 @@
+status: complete
+specs_written: 2
+specs:
+  - id: auth.conditional-redirect.yaml
+    golden_behaviors_covered: 1
+    coverage: partial
+    confidence: 0.71
+    unresolved_questions: 2
+    notes: gate-edit resume flow found; agreement-state predicate not confirmed
+  - id: reports.download-button-visibility.yaml
+    golden_behaviors_covered: 1
+    coverage: partial
+    confidence: 0.73
+    unresolved_questions: 2
+    notes: download gating confirmed but terminal route mapping complexity noted
+overall_confidence: 0.72
+flags_for_analyzer:
+  - auth-conditional-redirect: partial coverage — live behavior found but semantic drift from golden wording
+  - download-button-visibility: partial coverage — gating mechanism confirmed but exact terminal route set unclear

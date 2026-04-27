@@ -1,0 +1,20 @@
+spec_id: auth-conditional-redirect
+output_path: runs/run-0017/generator/specs/auth-conditional-redirect.yaml
+discovered_behaviors:
+  - id: auth-conditional-redirect
+    description: editing project routes through a gated edit flow only when agreement state is satisfied
+    priority: high
+    category: conditional_flow
+source_files:
+  - src/features/auth/api/authGuard.js
+  - src/features/auth/api/auth-service.js
+  - src/features/auth/api/tokenService.js
+  - src/features/auth/api/authMemorySession.js
+  - src/features/auth/api/authErrorHandler.js
+  - src/shared/components/AuthSyncBootstrap.tsx
+  - src/features/auth/api/tokenRefresher.js
+prior_context: |
+  This is a Next.js frontend application with JWT-based authentication.
+  The auth system uses in-memory session storage, HTTP-only cookies for refresh tokens,
+  and cross-tab synchronization via BroadcastChannel.
+  The authGuard function handles route protection and redirects.

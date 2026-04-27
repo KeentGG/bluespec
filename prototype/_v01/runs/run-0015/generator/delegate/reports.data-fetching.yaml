@@ -1,0 +1,28 @@
+spec_id: reports.data-fetching
+output_path: runs/run-0015/generator/specs/reports.data-fetching.yaml
+discovered_behaviors:
+  - id: reports-list-query
+    description: SWR-based reports list fetching with pagination, search, sort, and calculator filter
+    priority: high
+    evidence_refs:
+      - src/features/reports/hooks/useReportsListQuery.ts
+      - src/features/reports/controllers/useReportsPageController.ts
+  - id: reports-business-selection
+    description: Report business selection from URL hash, localStorage, or default with validation
+    priority: medium
+    evidence_refs:
+      - src/features/reports/hooks/useReportBusinessSelection.ts
+      - src/shared/lib/routing/entryContracts.js
+source_files:
+  - src/features/reports/hooks/useReportsListQuery.ts
+  - src/features/reports/controllers/useReportsPageController.ts
+  - src/features/reports/hooks/useReportBusinessSelection.ts
+  - src/shared/lib/routing/entryContracts.js
+ecosystem: frontend
+prior_context: |
+  Main agent exploration notes:
+  - Reports list fetched via SWR with pagination (5 items per page)
+  - Search, sort, and calculator filter supported
+  - Business selection from URL hash, localStorage, or default "0" (all)
+  - Report list state: idle, loading, ready, empty, error
+  - Load more pagination with hasMore flag

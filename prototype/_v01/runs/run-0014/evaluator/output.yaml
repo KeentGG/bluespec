@@ -1,0 +1,83 @@
+run_id: run-0014
+evaluator: evaluator-agent
+status: completed
+provider: local
+
+rubric_version: v002
+golden_set_id: sample-project
+
+scored_specs:
+  - spec_id: toa-gated-first-report-creation
+    golden_behavior_id: toa-gated-first-report-creation
+    recall: 0.90
+    precision: 0.95
+    consistency: 0.95
+    weighted_score: 0.92
+    score_breakdown:
+      coverage_core_behavior: 0.95
+      completeness_inputs_outputs: 0.95
+      consistency_cross_refs: 0.95
+      golden_set_recall: 0.90
+      conditional_flow_documentation: 0.90
+    notes: >
+      Strong coverage of the TOA gate check, dashboard redirect, introduction URL
+      construction, and calculator-side report creation via gate-new contract.
+      State machine captures all key transitions. Two unresolved questions remain
+      about the exact trigger from introduction page to gate-new initialization,
+      slightly lowering recall.
+
+  - spec_id: download.button-visibility.yaml
+    golden_behavior_id: download-button-visibility
+    recall: 0.65
+    precision: 0.90
+    consistency: 0.90
+    weighted_score: 0.76
+    score_breakdown:
+      coverage_core_behavior: 0.70
+      completeness_inputs_outputs: 0.90
+      consistency_cross_refs: 0.90
+      golden_set_recall: 0.55
+      conditional_flow_documentation: N/A
+    notes: >
+      The spec accurately documents the actual code behavior (interactivity toggle:
+      disabled/enabled with tooltip and opacity), but the golden behavior claims a
+      visibility toggle (hidden -> visible) which does not exist. The prop chain
+      from ReportsTable through ReportSplitActions is fully traced. Unresolved
+      questions about server-side workflow stages and backend enforcement lower
+      completeness confidence.
+
+  - spec_id: auth-conditional-redirect
+    golden_behavior_id: auth-conditional-redirect
+    recall: 0.55
+    precision: 0.90
+    consistency: 0.90
+    weighted_score: 0.68
+    score_breakdown:
+      coverage_core_behavior: 0.60
+      completeness_inputs_outputs: 0.90
+      consistency_cross_refs: 0.90
+      golden_set_recall: 0.45
+      conditional_flow_documentation: 0.85
+    notes: >
+      The gated edit flow (validation, fetch, progress mapping, redirect, fallback)
+      is fully documented, but the golden behavior's central claim — "only when
+      agreement state is satisfied" — is absent from the code. No TOA/agreement
+      check exists in the edit flow. The stale evidence ref
+      src/routes/project-edit.tsx further undermines golden-set recall.
+
+overall_score: 0.79
+overall_score_breakdown:
+  recall: 0.70
+  precision: 0.92
+  consistency: 0.92
+
+confidence: 0.85
+confidence_rationale: >
+  All source evidence, rubric, and golden set files were available and readable.
+  Specs were well-structured with explicit coverage annotations. Remaining
+  uncertainty stems from (1) frontend-only visibility into potentially
+  server-side stage definitions, (2) ambiguous trigger paths between calculator
+  pages not fully evidenced in provided files, and (3) one stale golden-set
+  evidence reference.
+
+scoring_timestamp: 2026-04-23T00:00:00Z

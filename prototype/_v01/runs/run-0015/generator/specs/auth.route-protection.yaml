@@ -1,0 +1,606 @@
+id: auth.route-protection
+version: "1.0"
+type: spec
+ecosystem: frontend
+
+golden_behaviors:
+  - id: auth-guard-route-protection
+    coverage: full
+    notes: >
+      Anonymous users are redirected from protected routes (/companies and sub-routes)
+      to /login. Authenticated users on /login are redirected to /companies. Public
+      routes are accessible without authentication. The guard is a pure function
+      (authGuard.js) that returns allow/redirect decisions based on session + pathname.
+  - id: auth-redirect-hook
+    coverage: full
+    notes: >
+      useAuthRedirect hook checks in-memory token via getToken(), attempts refresh
+      if token missing, and redirects to /login on failure. Supports configurable
+      redirectTo, attemptTokenRefresh flag, and minLoadingDelay for UX.
+  - id: auth-dashboard-layout-protection
+    coverage: full
+    notes: >
+      Dashboard layout (src/app/(dashboard)/layout.tsx) wraps all authenticated
+      routes with AuthGuard component, which renders loading state during auth
+      check and children + AuthSyncBootstrap after verification completes.
+
+description: >
+  Protects dashboard routes by verifying authentication state before rendering
+  page content. Anonymous users accessing protected routes (/companies and
+  sub-routes) are redirected to /login. Authenticated users on /login are
+  redirected to /companies. The root / page routes authenticated users to
+  /companies and anonymous users to an external tools URL. Protection is
+  enforced at the layout level via AuthGuard component, which uses useAuthRedirect
+  hook to check in-memory token, attempt refresh if needed, and redirect on
+  failure. A pure function authGuard.js provides the routing decision logic.
+
+state_machine:
+  initial: checking
+  states:
+    - id: checking
+      description: AuthGuard mounted, useAuthRedirect executing token check and potential refresh
+    - id: authenticated
+      description: Valid token found (in-memory or via refresh). Page content rendered.
+    - id: anonymous
+      description: No valid token and refresh failed or not attempted. Redirect to /login.
+    - id: redirecting_to_login
+      description: Redirect in progress to /login (via window.location.replace or router)
+    - id: redirecting_to_companies
+      description: Redirect in progress to /companies (authenticated user was on /login)
+  transitions:
+    - id: token_valid
+      from: checking
+      to: authenticated
+      trigger: getToken() returns object with non-empty _id and accessToken
+      guards:
+        - field: token
+          condition: token._id is non-empty string AND token.accessToken is non-empty string
+      effects:
+        - setIsAuthenticated(true)
+        - setIsChecking(false)
+        - Render children + AuthSyncBootstrap
+    - id: token_missing_refresh_success
+      from: checking
+      to: authenticated
+      trigger: refreshAccessToken() returns success with new token
+      guards:
+        - field: refresh_result
+          condition: refreshResult.success is true AND refreshResult.token is non-null
+      effects:
+        - setIsAuthenticated(true)
+        - setIsChecking(false)
+        - Render children + AuthSyncBootstrap
+    - id: token_missing_refresh_failure
+      from: checking
+      to: redirecting_to_login
+      trigger: refreshAccessToken() fails or returns no success
+      guards:
+        - field: refresh_result
+          condition: refreshResult.success is false OR refreshResult is null
+      effects:
+        - handleAuthError called with redirectUrl=/login, reason=session_expired
+        - setIsAuthenticated(false)
+        - setError(refreshResult.error or "Session expired")
+    - id: token_missing_no_refresh
+      from: checking
+      to: redirecting_to_login
+      trigger: attemptTokenRefresh is false and no valid token
+      effects:
+        - window.location.replace(redirectTo) where redirectTo defaults to /login
+        - setIsAuthenticated(false)
+    - id: auth_check_error
+      from: checking
+      to: redirecting_to_login
+      trigger: Exception thrown during auth check
+      effects:
+        - setError(err.message or "Auth check failed")
+        - setIsAuthenticated(false)
+        - window.location.replace(redirectTo)
+    - id: anonymous_on_protected_route
+      from: checking
+      to: redirecting_to_login
+      trigger: authGuard receives null session on protected path
+      guards:
+        - field: protected_route
+          condition: pathname matches /companies or /companies/*
+      effects:
+        - Return redirect action with destination=/login and reason=anonymous_redirect_login
+    - id: authenticated_on_login
+      from: checking
+      to: redirecting_to_companies
+      trigger: authGuard receives valid session on /login path
+      guards:
+        - field: current_path
+          condition: pathname equals /login
+      effects:
+        - Return redirect action with destination=/companies and reason=authenticated_redirect_companies
+
+conditions:
+  - id: protected-route-check
+    description: >
+      Determines if a given pathname is protected by checking against a list of
+      protected paths. Uses prefix matching so /companies/123 matches /companies.
+    trigger: authGuard called with pathname and protectedPaths
+    guards:
+      - field: pathname
+        condition: "pathname starts with any entry in protectedPaths (default: ['/companies'])"
+    then:
+      - Return redirect to /login if session is null
+      - Allow access if session is valid
+    else:
+      - Allow access regardless of session state (public route)
+
+  - id: authenticated-login-redirect
+    description: >
+      When an authenticated user is on /login, redirect to /companies to prevent
+      authenticated users from seeing the login page.
+    trigger: authGuard called with pathname=/login and valid session
+    guards:
+      - field: current_path
+        condition: pathname equals /login
+      - field: session
+        condition: session is non-null with valid _id
+    then:
+      - Return redirect action with destination=/companies
+    else:
+      - Allow normal page rendering
+
+  - id: root-page-routing
+    description: >
+      Root / page routes based on auth state: authenticated users go to /companies,
+      anonymous users go to external tools URL. Token parse failures also redirect
+      to external tools URL.
+    trigger: resolveRootHomeRedirect called (typically on / page load)
+    guards:
+      - field: token_parse_failed
+        condition: tokenParseFailed is true
+    then:
+      - Return external tools URL with reason=token_parse_failed
+    else:
+      - If hasAuthToken(token) is true: return /companies with reason=authenticated_companies_redirect
+      - If hasAuthToken(token) is false: return external tools URL with reason=anonymous_external_redirect
+
+  - id: min-loading-delay
+    description: >
+      Enforces minimum loading delay for UX consistency. If auth check completes
+      faster than minLoadingDelay, setIsChecking is deferred by the remaining time.
+    trigger: useAuthRedirect finally block executes after auth check
+    guards:
+      - field: elapsed_time
+        condition: (Date.now() - startTime) < minLoadingDelay
+    then:
+      - setTimeout(() => setIsChecking(false), remainingDelay)
+    else:
+      - setIsChecking(false) immediately
+
+inputs:
+  - id: pathname
+    type: "string URL path"
+    source: "Next.js router or window.location.pathname"
+    required: true
+    validation:
+      format: "Must start with / or will be prefixed"
+
+  - id: session
+    type: "session object with _id, email, accessToken fields"
+    source: "in-memory authSession variable (authMemorySession.js)"
+    required: false
+    validation:
+      _id: "non-empty string required for valid session"
+      email: "string (optional, defaults to empty)"
+      accessToken: "string (optional, defaults to empty)"
+
+  - id: protected_paths
+    type: "array of path strings"
+    source: "DEFAULT_PROTECTED_PATHS constant in authGuard.js"
+    required: false
+    validation:
+      default: '["/companies"]'
+
+  - id: routes
+    type: "object with login and companies keys"
+    source: "DEFAULT_ROUTES constant in authGuard.js"
+    required: false
+    validation:
+      default: '{ login: "/login", companies: "/companies" }'
+
+  - id: token
+    type: "in-memory token object from getToken()"
+    source: "authMemorySession.js via tokenService.getToken()"
+    required: true
+    validation:
+      _id: "non-empty string"
+      accessToken: "non-empty string"
+
+  - id: attempt_token_refresh
+    type: "boolean"
+    source: "useAuthRedirect options (default: true)"
+    required: false
+    validation:
+      default: "true"
+
+  - id: redirect_to
+    type: "string URL path"
+    source: "useAuthRedirect options (default: /login)"
+    required: false
+    validation:
+      default: "/login"
+
+  - id: min_loading_delay
+    type: "number in milliseconds"
+    source: "useAuthRedirect options (default: 0)"
+    required: false
+    validation:
+      default: "0"
+
+outputs:
+  - id: guard_decision
+    type: "object with action, destination, reason, clearSessionCookie"
+    source: "authGuard.js return value"
+    destination: "AuthGuard.tsx and calling components"
+    lifespan: "per-invocation"
+
+  - id: redirect_to_login
+    type: "HTTP redirect to /login"
+    source: "window.location.replace or router.push"
+    destination: "browser navigation"
+    lifespan: "immediate"
+
+  - id: redirect_to_companies
+    type: "HTTP redirect to /companies"
+    source: "window.location.replace or router.push"
+    destination: "browser navigation"
+    lifespan: "immediate"
+
+  - id: auth_check_result
+    type: "object with isChecking, isAuthenticated, error"
+    source: "useAuthRedirect hook return value"
+    destination: "AuthGuard.tsx component"
+    lifespan: "per-render"
+
+  - id: loading_state
+    type: "React component (spinner)"
+    source: "AuthGuard.tsx"
+    destination: "DOM (shown while isChecking is true)"
+    lifespan: "until auth check completes"
+
+evidence_refs:
+  - path: src/features/auth/api/authGuard.js
+    snippet: |
+      const DEFAULT_ROUTES = Object.freeze({
+        login: "/login",
+        companies: "/companies",
+      });
+
+      const DEFAULT_PROTECTED_PATHS = Object.freeze([DEFAULT_ROUTES.companies]);
+
+      function pathMatches(pathname, candidate) {
+        if (pathname === candidate) {
+          return true;
+        }
+        return pathname.startsWith(`${candidate}/`);
+      }
+
+      function isProtectedRoute(pathname, protectedPaths) {
+        return protectedPaths.some((candidate) => pathMatches(pathname, candidate));
+      }
+    covers:
+      - "condition:protected-route-check"
+      - "input:protected_paths"
+      - "input:routes"
+    line_range:
+      start: 3
+      end: 28
+
+  - path: src/features/auth/api/authGuard.js
+    snippet: |
+      function normalizeSession(session) {
+        if (!isPlainObject(session)) {
+          return null;
+        }
+
+        if (typeof session._id !== "string" || session._id.length === 0) {
+          return null;
+        }
+
+        return {
+          _id: session._id,
+          email: typeof session.email === "string" ? session.email : "",
+          accessToken: typeof session.accessToken === "string" ? session.accessToken : "",
+        };
+      }
+    covers:
+      - "input:session"
+      - "transition:anonymous_on_protected_route"
+      - "transition:authenticated_on_login"
+    line_range:
+      start: 30
+      end: 44
+
+  - path: src/features/auth/api/authGuard.js
+    snippet: |
+      export async function authGuard(options = {}) {
+        const {
+          pathname = "/",
+          session = null,
+          routes = DEFAULT_ROUTES,
+          protectedPaths = DEFAULT_PROTECTED_PATHS,
+        } = options;
+
+        const resolvedPath = normalizePathname(pathname);
+        const resolvedSession = normalizeSession(session);
+        const protectedRoute = isProtectedRoute(resolvedPath, protectedPaths);
+        const clearSessionCookie = false;
+
+        if (!resolvedSession) {
+          if (protectedRoute) {
+            return redirect(routes.login, "anonymous_redirect_login", clearSessionCookie);
+          }
+
+          return allow("anonymous_allow_public", clearSessionCookie);
+        }
+
+        if (resolvedPath === routes.login) {
+          return redirect(routes.companies, "authenticated_redirect_companies", clearSessionCookie);
+        }
+
+        return allow("authenticated_allow_route", clearSessionCookie);
+      }
+    covers:
+      - "transition:anonymous_on_protected_route"
+      - "transition:authenticated_on_login"
+      - "condition:protected-route-check"
+      - "condition:authenticated-login-redirect"
+      - "output:guard_decision"
+    line_range:
+      start: 69
+      end: 95
+
+  - path: src/features/auth/components/AuthGuard.tsx
+    snippet: |
+      export function AuthGuard({ children }: AuthGuardProps) {
+        const { isChecking } = useAuthRedirect();
+
+        if (isChecking) {
+          return (
+            <main className="min-h-screen bg-surface-page flex flex-col items-center justify-center">
+              <div className="flex flex-col items-center gap-4">
+                <div className="w-8 h-8 border-4 border-brand-primary border-t-transparent rounded-full animate-spin" />
+                <p className="text-text-muted">Verifying session...</p>
+              </div>
+            </main>
+          );
+        }
+
+        return (
+          <>
+            <AuthSyncBootstrap />
+            {children}
+          </>
+        );
+      }
+    covers:
+      - "output:loading_state"
+      - "output:auth_check_result"
+      - "state:checking"
+      - "state:authenticated"
+    line_range:
+      start: 10
+      end: 30
+
+  - path: src/features/auth/hooks/useAuthRedirect.ts
+    snippet: |
+      export function useAuthRedirect(options: UseAuthRedirectOptions = {}): UseAuthRedirectResult {
+        const { redirectTo = "/login", attemptTokenRefresh = true, minLoadingDelay = 0 } = options;
+
+        const router = useRouter();
+        const [isChecking, setIsChecking] = useState(true);
+        const [isAuthenticated, setIsAuthenticated] = useState(false);
+        const [error, setError] = useState<string | null>(null);
+
+        useEffect(() => {
+          let cancelled = false;
+          const startTime = Date.now();
+
+          async function checkAuth() {
+            try {
+              const token = getToken();
+              const hasValidToken = token?._id && token?.accessToken;
+
+              if (hasValidToken) {
+                if (!cancelled) {
+                  setIsAuthenticated(true);
+                  setIsChecking(false);
+                }
+                return;
+              }
+    covers:
+      - "state:checking"
+      - "transition:token_valid"
+      - "input:token"
+      - "input:redirect_to"
+      - "input:attempt_token_refresh"
+      - "input:min_loading_delay"
+    line_range:
+      start: 32
+      end: 55
+
+  - path: src/features/auth/hooks/useAuthRedirect.ts
+    snippet: |
+              if (attemptTokenRefresh) {
+                const refreshAccessToken = await getRefreshAccessToken();
+                const refreshResult = await refreshAccessToken();
+
+                if (refreshResult.success && refreshResult.token) {
+                  if (!cancelled) {
+                    setIsAuthenticated(true);
+                    setIsChecking(false);
+                  }
+                  return;
+                }
+
+                await handleAuthError({
+                  redirectUrl: withBasePath(redirectTo),
+                  reason: "session_expired",
+                  skipRedirect: false,
+                });
+
+                if (!cancelled) {
+                  setIsAuthenticated(false);
+                  setError(refreshResult.error || "Session expired");
+                }
+                return;
+              }
+
+              const redirectUrl = withBasePath(redirectTo);
+              if (typeof window !== "undefined" && window.location.pathname !== redirectUrl) {
+                window.location.replace(redirectUrl);
+              }
+
+              if (!cancelled) {
+                setIsAuthenticated(false);
+              }
+    covers:
+      - "transition:token_missing_refresh_success"
+      - "transition:token_missing_refresh_failure"
+      - "transition:token_missing_no_refresh"
+      - "output:redirect_to_login"
+    line_range:
+      start: 57
+      end: 89
+
+  - path: src/features/auth/hooks/useAuthRedirect.ts
+    snippet: |
+            } catch (err) {
+              if (!cancelled) {
+                setError(err instanceof Error ? err.message : "Auth check failed");
+                setIsAuthenticated(false);
+
+                const redirectUrl = withBasePath(redirectTo);
+                if (typeof window !== "undefined") {
+                  window.location.replace(redirectUrl);
+                }
+              }
+            } finally {
+              if (!cancelled) {
+                const elapsed = Date.now() - startTime;
+                const remainingDelay = Math.max(0, minLoadingDelay - elapsed);
+
+                if (remainingDelay > 0) {
+                  setTimeout(() => setIsChecking(false), remainingDelay);
+                } else {
+                  setIsChecking(false);
+                }
+              }
+            }
+    covers:
+      - "transition:auth_check_error"
+      - "condition:min-loading-delay"
+      - "output:auth_check_result"
+    line_range:
+      start: 90
+      end: 111
+
+  - path: src/app/(dashboard)/layout.tsx
+    snippet: |
+      export default function DashboardLayout({
+        children,
+      }: {
+        children: React.ReactNode;
+      }) {
+        return (
+          <AuthGuard>
+            <DashboardShell>{children}</DashboardShell>
+          </AuthGuard>
+        );
+      }
+    covers:
+      - "state:checking"
+      - "state:authenticated"
+    line_range:
+      start: 4
+      end: 14
+
+  - path: src/shared/lib/routing/entryContracts.js
+    snippet: |
+      export function resolveRootHomeRedirect(options = {}) {
+        const {
+          token = null,
+          tokenParseFailed = false,
+          query = null,
+          companiesRoute = COMPANIES_ROUTE,
+          externalToolsUrl = EXTERNAL_TOOLS_URL,
+        } = options;
+
+        const normalizedCompaniesDestination = normalizeInAppRoute(companiesRoute, COMPANIES_ROUTE);
+        const companiesDestination = withSupportedCreateQuery(normalizedCompaniesDestination, query);
+        const externalDestination = normalizeExternalToolsUrl(externalToolsUrl);
+
+        if (tokenParseFailed) {
+          return {
+            destination: externalDestination,
+            isExternal: true,
+            reason: "token_parse_failed",
+          };
+        }
+
+        if (hasAuthToken(token)) {
+          return {
+            destination: companiesDestination,
+            isExternal: false,
+            reason: "authenticated_companies_redirect",
+          };
+        }
+
+        return {
+          destination: externalDestination,
+          isExternal: true,
+          reason: "anonymous_external_redirect",
+        };
+      }
+    covers:
+      - "condition:root-page-routing"
+      - "output:redirect_to_companies"
+    line_range:
+      start: 106
+      end: 140
+
+  - path: src/shared/lib/routing/entryContracts.js
+    snippet: |
+      function hasAuthToken(token) {
+        const accessToken = normalizeString(token?.accessToken);
+        const email = normalizeString(token?.email);
+
+        return Boolean(accessToken && email);
+      }
+    covers:
+      - "condition:root-page-routing"
+      - "input:token"
+    line_range:
+      start: 82
+      end: 87
+
+confidence: 0.88
+confidence_rationale: >
+  All three discovered behaviors are fully evidenced across 5 source files with
+  direct code snippets. Route protection logic confirmed in authGuard.js (pure
+  function with normalizeSession, isProtectedRoute, allow/redirect decisions).
+  Auth redirect hook confirmed in useAuthRedirect.ts (token check, refresh attempt,
+  redirect on failure, minLoadingDelay). Dashboard layout protection confirmed in
+  layout.tsx (AuthGuard wraps all dashboard routes). Root page routing confirmed in
+  entryContracts.js (resolveRootHomeRedirect with authenticated/anonymous/parse-failure
+  branches). Deducted 0.12 because: (1) the actual login API response shape is not
+  visible (getToken() returns from authMemorySession.js which is in another spec),
+  (2) the AuthSyncBootstrap cross-tab listener initialization is in another spec,
+  (3) the exact behavior of withBasePath() for sub-path routing is not in these files,
+  (4) the default protected paths list only includes /companies but /reports protection
+  is mentioned in prior_context without code evidence in these files.
+
+unresolved_questions:
+  - "Is /reports also a protected route? The prior_context mentions it but DEFAULT_PROTECTED_PATHS in authGuard.js only includes /companies. The /reports protection may be handled elsewhere or may be missing."
+  - "What does withBasePath() do? useAuthRedirect calls withBasePath(redirectTo) but the implementation is in shared/lib/routing/basePath.ts which is not in scope."
+  - "How does AuthSyncBootstrap interact with route protection? It's rendered after auth check but its cross-tab logout listener may trigger additional redirects not captured here."
+  - "What happens if the refresh token cookie is expired? The useAuthRedirect hook calls refreshAccessToken() but the actual HTTP call and cookie validation are in tokenRefresher.js (covered by session-management spec)."
+  - "Does the minLoadingDelay apply on error paths? The finally block runs after catch, so the delay would apply even on auth check errors."
+
+status: complete
