@@ -1,7 +1,16 @@
 #!/usr/bin/env node
 
 const path = require('path');
-const { acquireLock, releaseLock, getCheckpoint, getCurrentState, timestamp } = require('./scripts/lib/common');
+const { spawn } = require('child_process');
+const {
+  acquireLock,
+  releaseLock,
+  getCheckpoint,
+  getCurrentState,
+  timestamp,
+  fileExists,
+  readYamlFile,
+} = require('./scripts/lib/common');
 
 const WORKSPACE_ROOT = path.resolve(__dirname);
 
@@ -23,24 +32,19 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  console.log(`Usage: node start [--run-id run-0003] [--resume] [--opencode-bin opencode]
+  console.log(`Usage: node start [--run-id run-0018] [--resume]
 
-Launches the Blueprint Harness OpenCode agent for one bounded evolution cycle.
+Launches the formula-driven orchestrator for one bounded evolution cycle.
 
 Options:
   --run-id <id>       Run ID to prepare or resume. Defaults to next_run_id from state/current.yaml.
   --resume            Resume an interrupted run instead of starting fresh.
-  --opencode-bin      Path to opencode binary. Defaults to 'opencode'.
   --no-lock           Skip lock acquisition (for recovery from stale locks).
   --help              Show this message.
 
 One bounded cycle:
-  init → freeze → generator → evaluator → analyzer → mutator → register
+  init → freeze → generate → evaluate → analyze → mutate → register
   Then STOP. advance_formula and promote_rubric_snapshot are governed steps.
-
-The agent reads state/checkpoints/<run-id>.yaml to resume from the last
-completed phase. Run 'node scripts/cli.js resume_run --run-id <id>' to
-inspect the checkpoint before launching.
 `);
 }
 
@@ -55,7 +59,6 @@ async function main() {
   const args = parseArgs(argv);
   const resume = !!args.resume;
   const skipLock = !!args['no-lock'];
-  const opencodeBin = args['opencode-bin'] || 'opencode';
 
   let runId;
 
@@ -67,7 +70,7 @@ async function main() {
     runId = args['run-id'];
     const checkpoint = getCheckpoint(runId);
     if (!checkpoint) {
-      console.error(`No checkpoint found for ${runId}. Cannot resume. Run init_run and freeze_inputs first.`);
+      console.error(`No checkpoint found for ${runId}. Cannot resume.`);
       process.exit(1);
     }
     console.log(`[start] Resuming run ${runId} from checkpoint: phase=${checkpoint.phase} status=${checkpoint.status}`);
@@ -81,83 +84,48 @@ async function main() {
     }
   }
 
-  const skillPath = path.join(WORKSPACE_ROOT, '.opencode', 'skills', 'blueprint-harness', 'SKILL.md');
-
   if (!skipLock) {
     try {
       acquireLock(runId);
       console.log(`[start] Lock acquired: ${runId}`);
     } catch (err) {
       console.error(`[start] Lock acquisition failed: ${err.message}`);
-      console.error(`[start] To recover, run: node scripts/cli.js release_lock --run-id ${runId}`);
       process.exit(1);
     }
   }
 
-  const bootstrap = `[start] Blueprint Harness Agent
-[start] ==============================
-[start] workspace : ${WORKSPACE_ROOT}
-[start] run-id    : ${runId}
-[start] mode      : ${resume ? 'resume' : 'new'}
-[start] skill     : ${skillPath}
-[start] opencode  : ${opencodeBin}
-[start] launched  : ${timestamp()}
-[start] ==============================
+  const state = getCurrentState();
+  const formula = readYamlFile(path.join(WORKSPACE_ROOT, state.current_formula_ref));
 
-The agent will now execute one bounded evolution cycle by calling CLI commands.
-After the register phase, the agent will stop. Do NOT restart it manually —
-launch a new 'node start' session for the next cycle.
+  console.log(`[start] Blueprint Mode v2 — Formula-Driven Orchestrator`);
+  console.log(`[start] Run: ${runId}`);
+  console.log(`[start] Formula: ${formula.id} v${formula.version}`);
+  console.log(`[start] Workspace: ${WORKSPACE_ROOT}\n`);
 
-To watch progress: tail -f prototype/_v01/state/checkpoints/${runId}.yaml
-To inspect state  : node prototype/_v01/scripts/cli.js resume_run --run-id ${runId}
-To recover lock    : node prototype/_v01/scripts/cli.js release_lock --run-id ${runId}
-`;
+  try {
+    const orchestratorPath = path.join(WORKSPACE_ROOT, 'scripts', 'orchestrator.js');
 
-  console.log(bootstrap);
+    const child = spawn('node', [orchestratorPath, '--run-id', runId], {
+      stdio: 'inherit',
+      cwd: WORKSPACE_ROOT,
+      env: { ...process.env },
+    });
 
-  const bootstrapMessage = `You are the Blueprint Harness agent. Execute one bounded evolution cycle using the blueprint-harness skill.
+    child.on('exit', (code) => {
+      if (!skipLock) {
+        releaseLock(runId);
+        console.log(`[start] Lock released: ${runId}`);
+      }
+      process.exit(code || 0);
+    });
 
-Run the skill:
-  skill({ name: "blueprint-harness" })
-
-Then follow the skill's workflow:
-  init → freeze → generator → evaluator → analyzer → mutator → register
-  Then STOP. Do NOT call advance_formula or promote_rubric_snapshot.
-
-Run ID: ${runId}
-Workspace: ${WORKSPACE_ROOT}
-`;
-
-  const opencodeArgs = [
-    opencodeBin,
-    'run',
-    bootstrapMessage,
-    '--dir', WORKSPACE_ROOT,
-  ];
-
-  const { spawn } = require('child_process');
-
-  const child = spawn(opencodeArgs[0], opencodeArgs.slice(1), {
-    stdio: 'inherit',
-    cwd: WORKSPACE_ROOT,
-    env: { ...process.env },
-  });
-
-  child.on('exit', (code) => {
+  } catch (err) {
+    console.error(`[start] Fatal: ${err.message}`);
     if (!skipLock) {
-      releaseLock(runId);
-      console.log(`[start] Lock released: ${runId}`);
-    }
-    process.exit(code || 0);
-  });
-
-  child.on('error', (err) => {
-    console.error(`[start] Failed to launch opencode: ${err.message}`);
-    if (!skipLock) {
-      releaseLock(runId);
+      try { releaseLock(runId); } catch (_) {}
     }
     process.exit(1);
-  });
+  }
 }
 
 main().catch((err) => {
