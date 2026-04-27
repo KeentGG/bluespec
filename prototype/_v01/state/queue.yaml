@@ -1,9 +1,17 @@
 pending_runs: []
 pending_promotions:
   formulas:
-    - frontend-derived-state-boundaries
-    - frontend-derived-draft-state-transitions
-  rubric_criteria: []
+    - frontend-derived-stale-reference-recovery
+    - frontend-derived-v004-predicate-universality
+    - run-0016-step-management-explore
+    - frontend-derived-v004-evidence-obligation-gates
+  rubric_criteria:
+    - stale_golden_vs_observed_implementation
+    - rubric-v003-enriched
 pending_reviews:
-  - formula:frontend-derived-state-boundaries
-  - formula:frontend-derived-draft-state-transitions
+  - rubric:stale_golden_vs_observed_implementation
+  - formula:frontend-derived-stale-reference-recovery
+  - rubric:rubric-v003-enriched
+  - formula:frontend-derived-v004-predicate-universality
+  - formula:run-0016-step-management-explore
+  - formula:frontend-derived-v004-evidence-obligation-gates

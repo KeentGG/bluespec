@@ -1,10 +1,12 @@
-current_formula_ref: formulas/promoted/frontend-derived.yaml
+current_formula_ref: formulas/promoted/frontend-derived-v004.yaml
 current_rubric_snapshot_ref: rubrics/snapshots/v002/rubric.yaml
 current_project_ref: config/projects/sample-project.yaml
 current_golden_set_ref: goldens/projects/sample-project/behaviors.yaml
-next_run_id: run-0005
+next_run_id: run-0021
 mode: official
 notes:
-  - prototype bootstrapped
-  - rubric discovery remains diagnose-only until shadow scoring is added
-last_prepared_run_id: run-0004
+  - orchestrator v2: formula-driven execution
+  - agents scoped to formula steps only
+  - node scripts/orchestrator.js replaces agentic orchestrator
+  - SKILL.md deprecated
+last_prepared_run_id: run-0020
