@@ -1,0 +1,68 @@
+id: frontend-derived-draft-state-transitions
+version: v002
+ecosystem: frontend
+parent: frontend-derived
+fine_tune_run: run-0004
+behavior_shapes:
+  - stateful_ui
+  - conditional_flow
+  - data_dashboard_layout
+compatible_rubric_snapshots:
+  - v002
+steps:
+  - id: explore
+    name: Explore structure and dependencies
+    prompt: prompts/generator.md
+    outputs:
+      - trace
+      - exploration_notes
+  - id: analyze
+    name: Analyze discovered behavior
+    outputs:
+      - behavior_map
+  - id: draft
+    name: Draft specs with explicit states, transitions, guards, and side effects
+    outputs:
+      - spec_set
+      - state_transition_map
+  - id: verify
+    name: Verify schema and reference consistency
+    outputs:
+      - verification_report
+  - id: cross_ref
+    name: Link related specs and evidence
+    outputs:
+      - reference_map
+validations:
+  - schema_valid
+  - references_resolve
+  - no_internal_contradictions
+mutation_tiers:
+  - prompt_tweak
+  - step_management
+  - parent_guideline
+  - schema_change
+  - tool_change
+  - rubric_mutation
+specializations:
+  - component_state_tracking
+  - conditional_rendering_checks
+  - accessibility_review
+  - layout_intent_capture
+  - data_table_behavior
+  - explicit_state_transition_enumeration
+status: active
+discovered_in_run: run-0004
+mutation_source:
+  run_id: run-0004
+  analyzer_failure_type: recognition_failure
+  proposed_change_type: prompt_tweak
+  target_step: draft
+  rationale: Require explicit enumeration of states, transition triggers, guard
+    conditions, and side effects to improve recall on state-machine boundary
+    behaviors.
+created_at: 2026-04-21T09:15:18.510Z
+promoted_at: 2026-04-22T09:24:05.701Z
+governance_notes: Advances prompt_tweak mutation from run-0004 analyzer. Adds
+  state_transition_map output to draft step for explicit state transition
+  enumeration. Non-overlapping with state-boundaries mutation.

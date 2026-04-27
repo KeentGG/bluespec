@@ -1,0 +1,66 @@
+id: frontend-derived-state-boundaries
+version: v002
+ecosystem: frontend
+parent: frontend-derived
+fine_tune_run: run-0003
+behavior_shapes:
+  - stateful_ui
+  - conditional_flow
+  - data_dashboard_layout
+compatible_rubric_snapshots:
+  - v002
+steps:
+  - id: explore
+    name: Explore structure, dependencies, and state-machine boundaries
+    prompt: prompts/generator.md
+    outputs:
+      - trace
+      - exploration_notes
+      - state_machine_boundaries
+  - id: analyze
+    name: Analyze discovered behavior
+    outputs:
+      - behavior_map
+  - id: draft
+    name: Draft specs
+    outputs:
+      - spec_set
+  - id: verify
+    name: Verify schema and reference consistency
+    outputs:
+      - verification_report
+  - id: cross_ref
+    name: Link related specs and evidence
+    outputs:
+      - reference_map
+validations:
+  - schema_valid
+  - references_resolve
+  - no_internal_contradictions
+mutation_tiers:
+  - prompt_tweak
+  - step_management
+  - parent_guideline
+  - schema_change
+  - tool_change
+  - rubric_mutation
+specializations:
+  - component_state_tracking
+  - conditional_rendering_checks
+  - accessibility_review
+  - data_table_behavior
+  - state_machine_boundary_detection
+status: active
+discovered_in_run: run-0003
+mutation_source:
+  run_id: run-0003
+  analyzer_failure_type: recognition_failure
+  proposed_change_type: step_management
+  target_step: explore
+  rationale: Add explicit state-machine boundary detection before analyze to
+    improve recall on stateful UI behaviors.
+created_at: 2026-04-21T04:04:30.517Z
+promoted_at: 2026-04-22T09:23:58.976Z
+governance_notes: Advances step_management mutation from run-0003 analyzer. Adds
+  state_machine_boundaries output to explore step for better stateful UI
+  boundary detection. Non-overlapping with other pending formula.
