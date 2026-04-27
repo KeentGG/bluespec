@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const path = require('path');
+const { spawn } = require('child_process');
 const YAML = require('yaml');
 
 const {
@@ -16,7 +17,6 @@ const {
   loadProvider,
   parseArgs,
   phasesFrom,
-  readJsonLines,
   readYamlFile,
   readText,
   releaseLock,
@@ -30,7 +30,67 @@ const {
   writeText,
   writeYamlFile,
 } = require('./lib/common');
+const { findLessons, refreshLessonIndex, summarizeLessonsForFailureType } = require('./lib/lessons');
 const { validateArtifactsForRun, validateFile } = require('./lib/validation');
+
+/**
+ * Spawns an OpenCode agent session for a bounded task.
+ * The agent uses read/write tools to read input files and write output files.
+ * The CLI waits for the process to exit and verifies the output file was written.
+ * Retries up to maxRetries times if the agent exits 0 but the output file is missing
+ * (handles transient OpenAI server errors that interrupt the agent mid-session).
+ */
+function spawnAgent({ role, workspace, prompt, outputPath, maxRetries = 3, retryDelayMs = 5000 }) {
+  return new Promise((resolve, reject) => {
+    let attempt = 0;
+
+    function attemptSpawn() {
+      attempt += 1;
+      console.log(`[${role}] Spawning OpenCode agent (attempt ${attempt}/${maxRetries})...`);
+
+      const child = spawn('opencode', ['run', prompt, '--dir', workspace], {
+        stdio: 'inherit',
+        cwd: workspace,
+        env: { ...process.env },
+      });
+
+      child.on('exit', (code) => {
+        if (code === 0) {
+          if (fileExists(outputPath)) {
+            console.log(`[${role}] Done. Output written to ${outputPath}`);
+            resolve({ ok: true, outputPath });
+          } else if (attempt < maxRetries) {
+            console.error(`[${role}] Agent exited 0 but output file missing. Retrying in ${retryDelayMs / 1000}s...`);
+            setTimeout(attemptSpawn, retryDelayMs);
+          } else {
+            console.error(`[${role}] Agent exited 0 but output file not found after ${maxRetries} attempts: ${outputPath}`);
+            reject(new Error(`${role} agent exited 0 but did not write output to ${outputPath} after ${maxRetries} attempts`));
+          }
+        } else {
+          if (attempt < maxRetries) {
+            console.error(`[${role}] Agent exited ${code}. Retrying in ${retryDelayMs / 1000}s...`);
+            setTimeout(attemptSpawn, retryDelayMs);
+          } else {
+            console.error(`[${role}] Agent exited with code ${code} after ${maxRetries} attempts`);
+            reject(new Error(`${role} agent exited with code ${code} after ${maxRetries} attempts`));
+          }
+        }
+      });
+
+      child.on('error', (err) => {
+        if (attempt < maxRetries) {
+          console.error(`[${role}] Spawn error: ${err.message}. Retrying in ${retryDelayMs / 1000}s...`);
+          setTimeout(attemptSpawn, retryDelayMs);
+        } else {
+          console.error(`[${role}] Failed to spawn agent after ${maxRetries} attempts: ${err.message}`);
+          reject(err);
+        }
+      });
+    }
+
+    attemptSpawn();
+  });
+}
 
 function usage() {
   console.log(`Usage:
@@ -537,8 +597,6 @@ async function runGenerator(args) {
   const inputsDir = path.join(runRoot, 'inputs');
 
   const formula = readYamlFile(path.join(inputsDir, 'formula.yaml'));
-  const rubric = readYamlFile(path.join(inputsDir, 'rubric.yaml'));
-  const goldenSet = readYamlFile(path.join(inputsDir, 'golden-set.yaml'));
   const project = readYamlFile(path.join(inputsDir, 'project.yaml'));
   const config = readYamlFile(resolveWorkspacePath('config/prototype.yaml'));
 
@@ -564,11 +622,9 @@ Ecosystem: ${formula.ecosystem}
 Codebase: ${project.codebase_path || 'not specified'}
 Excluded paths: ${(project.excluded_paths || []).join(', ') || 'none'}
 
-Active rubric criteria:
-${(rubric.active_criteria || []).map((c) => `  - ${c}`).join('\n')}
-
-Golden set behaviors (primary anchor):
-${(goldenSet.behaviors || []).map((b) => `  - ${b.id}: ${b.description}`).join('\n')}
+IMPORTANT: You do NOT have access to the golden set or rubric.
+Explore the codebase freely and produce specs for behaviors you discover.
+The golden set is a hidden test — the Evaluator will check coverage after you finish.
 `;
 
   const trace = {
@@ -815,88 +871,109 @@ async function runEvaluator(args) {
   if (!runId) throw new Error('--run-id is required');
 
   const runRoot = resolveWorkspacePath(path.posix.join('runs', runId));
-  const manifest = readYamlFile(path.join(runRoot, 'manifest.yaml'));
-  const inputsDir = path.join(runRoot, 'inputs');
   const evaluatorDir = path.join(runRoot, 'evaluator');
   ensureDir(evaluatorDir);
 
-  const formula = readYamlFile(path.join(inputsDir, 'formula.yaml'));
-  const rubric = readYamlFile(path.join(inputsDir, 'rubric.yaml'));
-  const goldenSet = readYamlFile(path.join(inputsDir, 'golden-set.yaml'));
-  const project = readYamlFile(path.join(inputsDir, 'project.yaml'));
+  const formula = readYamlFile(path.join(runRoot, 'inputs', 'formula.yaml'));
+  const rubric = readYamlFile(path.join(runRoot, 'inputs', 'rubric.yaml'));
+  const goldenSet = readYamlFile(path.join(runRoot, 'inputs', 'golden-set.yaml'));
+  const project = readYamlFile(path.join(runRoot, 'inputs', 'project.yaml'));
   const genOutput = readYamlFile(path.join(runRoot, 'generator', 'output.yaml'));
-  const evaluatorPrompt = readText(resolveWorkspacePath('prompts/evaluator.md'));
-  const config = readYamlFile(resolveWorkspacePath('config/prototype.yaml'));
-
-  const provider = loadProvider(config.providers?.default || 'local');
-
   const specFiles = listDir(path.join(runRoot, 'generator', 'specs'))
-    .filter((f) => f.endsWith('.yaml'))
-    .map((f) => readYamlFile(path.join(runRoot, 'generator', 'specs', f)));
+    .filter((f) => f.endsWith('.yaml'));
 
-  const specSummary = specFiles.map((s) => `- ${s.id}: ${JSON.stringify(s)}`).join('\n');
+  const officialOutputPath = path.join(evaluatorDir, 'output.yaml');
+  const shadowFindingsPath = path.join(evaluatorDir, 'shadow-findings.yaml');
 
-  const systemPrompt = `${evaluatorPrompt}
+  const prompt = `You are the Evaluator agent. Score the generated specs against the frozen rubric and golden set.
 
-Project: ${project.name || project.id}
-Ecosystem: ${formula.ecosystem}
+WORKSPACE: ${resolveWorkspacePath('')}
+RUN_ID: ${runId}
 
-Active rubric criteria (official scoring channel):
-${(rubric.active_criteria || []).map((c) => `  - ${c}`).join('\n')}
+## Your task
+1. Read all spec files from: ${path.join(runRoot, 'generator', 'specs')}
+2. Read the rubric from: ${path.join(runRoot, 'inputs', 'rubric.yaml')}
+3. Read the golden set from: ${path.join(runRoot, 'inputs', 'golden-set.yaml')}
+4. Read the generator output from: ${path.join(runRoot, 'generator', 'output.yaml')}
+5. Score each spec against the rubric criteria and golden set behaviors
+6. Write the official score report to: ${officialOutputPath}
+7. Write the shadow findings artifact to: ${shadowFindingsPath}
 
-Golden set behaviors (primary anchor — recall only):
-${(goldenSet.behaviors || []).map((b) => `  - ${b.id}: ${b.description}`).join('\n')}
+## Project context
+- Project: ${project.name || project.id}
+- Ecosystem: ${formula.ecosystem}
+- Generator overall confidence: ${genOutput.overall_confidence || 'unknown'}
+- Generator flags: ${(genOutput.flags_for_analyzer || []).join(', ') || 'none'}
+- Specs discovered: ${specFiles.join(', ') || 'none'}
 
-Scoring policy: Candidate rubric criteria must NOT affect official scores.`;
+## Official score report requirements
+Produce ${officialOutputPath} with these fields:
+- run_id: "${runId}"
+- evaluator: "run_evaluator"
+- status: "complete"
+- provider: "opencode-agent"
+- scored_specs: per-spec score data for each spec found in the specs directory
+- overall_score: weighted 0.0-1.0
+- overall_score_breakdown: recall/precision/consistency sub-scores
+- confidence: 0.0-1.0
+- confidence_rationale: why this confidence
+- scoring_timestamp: ISO timestamp
 
-  const userPrompt = `###ROLE### evaluator
-Evaluator: score the generated specs against the frozen rubric and golden set.
+## Shadow findings requirements
+Produce ${shadowFindingsPath} with these fields:
+- run_id: "${runId}"
+- evaluator: "run_evaluator"
+- status: "complete"
+- provider: "opencode-agent"
+- recall_hits: spec-by-spec coverage of golden set behaviors
+- recall_misses: what was not covered
+- precision_findings: hallucinated or unsupported claims
+- consistency_findings: internal contradictions
+- rubric_gap_candidates: suspected rubric gaps (PROPOSED ONLY — do not activate)
 
-Generated specs (${specFiles.length}):
-${specSummary}
+## Rules
+- rubric_gap_candidates live in the shadow findings artifact only. Do NOT activate.
+- Be honest about coverage (partial is not full).
+- The official report must stay machine-comparable and should not carry the qualitative finding lists.
+- Both output files must be valid YAML.
 
-Overall generator confidence: ${genOutput.overall_confidence}
-Generator flags for analyzer: ${(genOutput.flags_for_analyzer || []).join(', ') || 'none'}
-Generator unresolved questions: ${(genOutput.unresolved_questions || []).join(', ') || 'none'}
-
-Produce:
-1. recall_hits — golden set behaviors captured by specs
-2. recall_misses — golden set behaviors missing from specs
-3. precision_findings — hallucinated or unsupported claims
-4. consistency_findings — internal spec contradictions
-5. rubric_gap_candidates — suspected rubric gaps (NOT activated, only proposed)
-6. overall_score — weighted average
-
-Format as structured YAML.`;
+## Output
+Write the official score report to: ${officialOutputPath}
+Write the shadow findings artifact to: ${shadowFindingsPath}
+`;
 
   try {
-    const response = await provider.generate([
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ], { model: config.providers?.default || 'local' });
+    await spawnAgent({
+      role: 'Evaluator',
+      workspace: resolveWorkspacePath(''),
+      prompt,
+      outputPath: officialOutputPath,
+    });
 
-    const parsed = YAML.parse(response.content);
+    const checks = [
+      validateFile(path.posix.join('runs', runId, 'evaluator', 'output.yaml'), 'schemas/evaluator-output.schema.yaml', `evaluator official output ${runId}`),
+      validateFile(path.posix.join('runs', runId, 'evaluator', 'shadow-findings.yaml'), 'schemas/evaluator-shadow-findings.schema.yaml', `evaluator shadow findings ${runId}`),
+    ];
 
-    const outputYaml = {
-      run_id: runId,
-      evaluator: 'run_evaluator',
-      status: 'complete',
-      provider: config.providers?.default || 'local',
-      confidence: parsed.confidence || 0.75,
-      ...parsed,
-      scored_specs: specFiles.map((s) => s.id),
-      scoring_timestamp: timestamp(),
-      tokens_used: response.usage?.total_tokens || 0,
-    };
+    let failures = 0;
 
-    writeYamlFile(path.join(evaluatorDir, 'output.yaml'), outputYaml);
-    writeText(path.join(evaluatorDir, 'trace.json'), JSON.stringify({
-      run_id: runId,
-      request: { systemPrompt, userPrompt },
-      response: { content: response.content, usage: response.usage },
-    }, null, 2));
+    checks.forEach((check) => {
+      if (check.ok) {
+        console.log(`✓ ${check.label}`);
+        return;
+      }
 
-    console.log(`[Evaluator] Done. Overall score: ${parsed.overall_score || 'N/A'}`);
+      failures += 1;
+      console.log(`✗ ${check.label}`);
+      check.errors.forEach((error) => console.log(`  - ${error}`));
+    });
+
+    if (failures > 0) {
+      process.exitCode = 1;
+      return;
+    }
+
+    console.log(`[Evaluator] Done. Official output written to ${officialOutputPath}; shadow findings written to ${shadowFindingsPath}`);
   } catch (err) {
     console.error(`[Evaluator] Failed: ${err.message}`);
     process.exitCode = 1;
@@ -908,186 +985,79 @@ async function runAnalyzer(args) {
   if (!runId) throw new Error('--run-id is required');
 
   const runRoot = resolveWorkspacePath(path.posix.join('runs', runId));
-  const inputsDir = path.join(runRoot, 'inputs');
   const analyzerDir = path.join(runRoot, 'analyzer');
   ensureDir(analyzerDir);
 
-  const formula = readYamlFile(path.join(inputsDir, 'formula.yaml'));
-  const rubric = readYamlFile(path.join(inputsDir, 'rubric.yaml'));
-  const evaluatorOutput = readYamlFile(path.join(runRoot, 'evaluator', 'output.yaml'));
-  const genOutput = readYamlFile(path.join(runRoot, 'generator', 'output.yaml'));
-  const lessons = readJsonLines(resolveWorkspacePath('lessons/learned.jsonl'));
-  const analyzerPrompt = readText(resolveWorkspacePath('prompts/analyzer.md'));
-  const failureTypes = readText(resolveWorkspacePath('prompts/shared/failure-types.md'));
-  const config = readYamlFile(resolveWorkspacePath('config/prototype.yaml'));
-  const provider = loadProvider(config.providers?.default || 'local');
+  const officialEvaluatorOutput = readYamlFile(path.join(runRoot, 'evaluator', 'output.yaml'));
+  const evaluatorShadowFindings = readYamlFile(path.join(runRoot, 'evaluator', 'shadow-findings.yaml'));
+  const outputPath = path.join(analyzerDir, 'output.yaml');
+  const evaluatorScore = typeof officialEvaluatorOutput.overall_score === 'number' ? officialEvaluatorOutput.overall_score : 'unknown';
+  const shadowRecallMisses = Array.isArray(evaluatorShadowFindings.recall_misses) ? evaluatorShadowFindings.recall_misses : [];
+  const shadowPrecisionFindings = Array.isArray(evaluatorShadowFindings.precision_findings) ? evaluatorShadowFindings.precision_findings : [];
+  const shadowConsistencyFindings = Array.isArray(evaluatorShadowFindings.consistency_findings) ? evaluatorShadowFindings.consistency_findings : [];
+  const shadowRubricGapCandidates = normalizeRubricGapCandidates(evaluatorShadowFindings.rubric_gap_candidates);
 
-  // Load all generator step outputs for phase-level tracing
-  const genStepsDir = path.join(runRoot, 'generator', 'steps');
-  const genStepFiles = listDir(genStepsDir).filter((f) => f.endsWith('.yaml'));
-  const genSteps = genStepFiles
-    .map((f) => readYamlFile(path.join(genStepsDir, f)))
-    .sort((a, b) => (a.step_number || 0) - (b.step_number || 0));
+  const prompt = `You are the Analyzer agent. Diagnose WHY the formula missed or hallucinated behavior by applying the 5-type failure decision tree.
 
-  const systemPrompt = `${analyzerPrompt}
+WORKSPACE: ${resolveWorkspacePath('')}
+RUN_ID: ${runId}
 
-Failure types — apply the decision tree in order. Stop at the first match:
+## Your task
+1. Read the official evaluator score report: ${path.join(runRoot, 'evaluator', 'output.yaml')}
+2. Read the evaluator shadow findings: ${path.join(runRoot, 'evaluator', 'shadow-findings.yaml')}
+3. Read the generator output: ${path.join(runRoot, 'generator', 'output.yaml')}
+4. Read the formula: ${path.join(runRoot, 'inputs', 'formula.yaml')}
+5. Read the rubric: ${path.join(runRoot, 'inputs', 'rubric.yaml')}
+6. Read the failure types decision tree: ${resolveWorkspacePath('prompts/shared/failure-types.md')}
+7. Apply the decision tree to each recall miss from the shadow findings
+8. Write your diagnosis to: ${outputPath}
 
-${failureTypes}
+## Evaluator context
+- Official evaluator score: ${evaluatorScore}
+- Shadow findings summary: ${shadowRecallMisses.length} recall misses, ${shadowPrecisionFindings.length} precision findings, ${shadowConsistencyFindings.length} consistency findings, ${shadowRubricGapCandidates.length} rubric-gap candidates
 
-Rules:
-- rubric_gap_failure is only valid when steps 1–4 are exhausted and the criterion is absent from rubric.active_criteria
-- Do NOT use rubric_gap_failure as a default diagnosis
-- Exhaust lower-tier explanations before proposing rubric gaps`;
+## The 5-Type Failure Decision Tree (apply in order — stop at first match)
 
-  // Build structured context for 5-type routing
-  const scoredSpecs = (evaluatorOutput.scored_specs || []).join(', ') || 'none';
-  const recallHits = evaluatorOutput.recall_hits || [];
-  const recallMisses = evaluatorOutput.recall_misses || [];
-  const precisionFindings = evaluatorOutput.precision_findings || [];
-  const rubricGapCandidates = evaluatorOutput.rubric_gap_candidates || [];
-  const genFlags = (genOutput.flags_for_analyzer || []).join(', ') || 'none';
+1. **search_failure** — Did the explore step fail to find relevant files in the codebase?
+2. **recognition_failure** — Did explore find files but draft/analyze fail to recognize the behavior as spec-worthy?
+3. **format_failure** — Did the spec fail schema validation (missing fields, invalid structure)?
+4. **prompt_failure** — Does the formula's own step prompts never ask for this behavior?
+5. **rubric_gap_failure** — Is the criterion ABSENT from rubric.active_criteria AND was surfaced in evaluator shadow findings?
 
-  // Formula step outputs (explore = step 1, draft = step 3 — most diagnostic for 5-type)
-  const exploreStep = genSteps.find((s) => s.step === 'explore');
-  const draftStep = genSteps.find((s) => s.step === 'draft');
-  const verifyStep = genSteps.find((s) => s.step === 'verify');
+## Key rules
+- rubric_gap_failure is ONLY valid when steps 1-4 are FULLY exhausted AND the criterion doesn't appear in rubric.active_criteria
+- Do NOT use rubric_gap_failure as a default — exhaust all other types first
+- If rubric_gap_failure: also produce a rubric_gap_proposal object
+- rubric_gap_proposal is PROPOSED ONLY — governance handles activation
 
-  const userPrompt = `###ROLE### analyzer
+## Output YAML fields
+- run_id: "${runId}"
+- analyzer: "run_analyzer"
+- status: "complete"
+- provider: "opencode-agent"
+- primary_failure_type: (search_failure | recognition_failure | format_failure | prompt_failure | rubric_gap_failure)
+- diagnosis: causal chain explaining what happened
+- failure_tier: (prompt_tweak | step_management | tool_change | schema_change | parent_guideline | rubric_mutation)
+- suggested_mutation: concrete recommendation
+- expected_effect: what this would improve
+- rubric_gap_proposed: (true | false)
+- rubric_gap_proposal: (null | { id, description, evidence_refs, rationale, severity, recommended_state })
+- evidence_refs: list of files/steps that support this diagnosis
+- confidence: 0.0-1.0
+- confidence_rationale: why this confidence
+- analyzer_timestamp: ISO timestamp
 
-You must diagnose WHY the formula missed behavior by applying the failure-type decision tree.
-
----
-
-## Evaluation Results
-
-Recall hits (what was covered):
-${recallHits.length > 0
-    ? recallHits.map((h) => `  - ${h.criterion} → ${h.spec} (weight ${h.weight})`).join('\n')
-    : '  (none)'}
-
-Recall misses (what was missed):
-${recallMisses.length > 0
-    ? recallMisses.map((m) => `  - ${m.criterion}: ${m.gap} (severity: ${m.severity})`).join('\n')
-    : '  (none)'}
-
-Precision findings (false positives):
-${precisionFindings.length > 0
-    ? precisionFindings.map((p) => `  - ${p.spec}: ${p.concern} (${p.severity})`).join('\n')
-    : '  (none)'}
-
-Evaluator rubric gap candidates (criteria the evaluator flagged as potentially absent from rubric):
-${rubricGapCandidates.length > 0
-    ? rubricGapCandidates.map((c) => `  - ${c.criterion}: ${c.gap}`).join('\n')
-    : '  (none)'}
-
-Overall score: ${evaluatorOutput.overall_score}
-Scored specs: ${scoredSpecs}
-
----
-
-## Active Rubric (${rubric.rubric_version})
-
-Active criteria:
-${(rubric.active_criteria || []).map((c) => `  - ${c}`).join('\n')}
-
-Weights:
-${Object.entries(rubric.weights || {}).map(([k, v]) => `  - ${k}: ${v}`).join('\n')}
-
----
-
-## Formula Steps
-
-Explore step (step 1 — what was found):
-${exploreStep ? `
-  Files analyzed: ${(exploreStep.files_analyzed || []).join(', ') || 'none'}
-  Artifacts produced: ${(exploreStep.artifacts_produced || []).join(', ') || 'none'}
-  Confidence: ${exploreStep.confidence}
-  Flags: ${(exploreStep.flags_for_analyzer || []).join(', ') || 'none'}
-  Unresolved: ${(exploreStep.unresolved_questions || []).join('; ') || 'none'}
-` : '  (no explore step found)'}
-
-Draft step (step 3 — what was produced):
-${draftStep ? `
-  Specs produced: ${(draftStep.artifacts_produced || []).join(', ') || 'none'}
-  Confidence: ${draftStep.confidence}
-  Flags: ${(draftStep.flags_for_analyzer || []).join(', ') || 'none'}
-  Unresolved: ${(draftStep.unresolved_questions || []).join('; ') || 'none'}
-` : '  (no draft step found)'}
-
-Verify step (step 4 — schema validation):
-${verifyStep ? `
-  Status: ${verifyStep.status}
-  Confidence: ${verifyStep.confidence}
-` : '  (no verify step found)'}
-
-Generator flags for analyzer: ${genFlags}
-Generator overall confidence: ${genOutput.overall_confidence}
-Generator unresolved questions: ${(genOutput.unresolved_questions || []).join('; ') || 'none'}
-
----
-
-## Formula Structure
-
-Formula: ${formula.id} (${formula.version})
-Steps: ${(formula.steps || []).map((s) => s.id).join(' → ')}
-Validations: ${(formula.validations || []).join(', ')}
-Behavior shapes: ${(formula.behavior_shapes || []).join(', ')}
-
----
-
-## Prior Lessons (insanity prevention — do not retry failed methods)
-
-${lessons.length > 0
-    ? lessons.map((l) => `  - [${l.failure_type}] ${l.teaching_method} → ${l.result}`).join('\n')
-    : '  (no prior lessons)'}
-
----
-
-## Your Task
-
-Apply the failure-type decision tree:
-
-1. **search_failure** — Did the explore step fail to find relevant files?
-2. **recognition_failure** — Did explore find files but draft collapse/miss the pattern?
-3. **format_failure** — Did the spec fail schema validation?
-4. **prompt_failure** — Does the formula's own step prompts ask for this behavior?
-5. **rubric_gap_failure** — Does the criterion NOT appear in rubric.active_criteria AND appear in evaluator's rubric_gap_candidates?
-
-Produce these fields:
-1. **primary_failure_type** — exact label (search_failure | recognition_failure | format_failure | prompt_failure | rubric_gap_failure)
-2. **diagnosis** — causal chain explaining which step failed and why
-3. **failure_tier** — mutation tier to address it
-4. **suggested_mutation** — concrete change recommendation
-5. **expected_effect** — what measurable improvement to expect
-6. **rubric_gap_proposed** — true only if steps 1-4 are exhausted and criterion is absent from rubric
-7. **rubric_gap_proposal** — null, or { id, description, evidence_refs, rationale }
-8. **evidence_refs** — which generator step files support this diagnosis
-
-Format as structured YAML.`;
+## Output
+Write the diagnosis YAML to: ${outputPath}
+`;
 
   try {
-    const response = await provider.generate([
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ], { model: config.providers?.default || 'local' });
-
-    const parsed = YAML.parse(response.content);
-
-    const outputYaml = {
-      run_id: runId,
-      analyzer: 'run_analyzer',
-      status: 'complete',
-      provider: config.providers?.default || 'local',
-      confidence: parsed.confidence || 0.71,
-      ...parsed,
-      analyzer_timestamp: timestamp(),
-      tokens_used: response.usage?.total_tokens || 0,
-    };
-
-    writeYamlFile(path.join(analyzerDir, 'output.yaml'), outputYaml);
-
-    console.log(`[Analyzer] Done. Failure type: ${parsed.primary_failure_type}, Tier: ${parsed.failure_tier}`);
+    await spawnAgent({
+      role: 'Analyzer',
+      workspace: resolveWorkspacePath(''),
+      prompt,
+      outputPath,
+    });
   } catch (err) {
     console.error(`[Analyzer] Failed: ${err.message}`);
     process.exitCode = 1;
@@ -1099,142 +1069,178 @@ async function runMutator(args) {
   if (!runId) throw new Error('--run-id is required');
 
   const runRoot = resolveWorkspacePath(path.posix.join('runs', runId));
-  const inputsDir = path.join(runRoot, 'inputs');
   const mutatorDir = path.join(runRoot, 'mutator');
   ensureDir(mutatorDir);
 
-  const formula = readYamlFile(path.join(inputsDir, 'formula.yaml'));
   const analyzerOutput = readYamlFile(path.join(runRoot, 'analyzer', 'output.yaml'));
-  const evaluatorOutput = readYamlFile(path.join(runRoot, 'evaluator', 'output.yaml'));
-  const lessons = readJsonLines(resolveWorkspacePath('lessons/failed.jsonl'));
-  const mutatorPrompt = readText(resolveWorkspacePath('prompts/mutator.md'));
-  const config = readYamlFile(resolveWorkspacePath('config/prototype.yaml'));
+  const officialEvaluatorOutput = readYamlFile(path.join(runRoot, 'evaluator', 'output.yaml'));
+  const evaluatorShadowFindings = readYamlFile(path.join(runRoot, 'evaluator', 'shadow-findings.yaml'));
+  const formula = readYamlFile(path.join(runRoot, 'inputs', 'formula.yaml'));
+  const rubric = readYamlFile(path.join(runRoot, 'inputs', 'rubric.yaml'));
+  const lessonIndex = refreshLessonIndex();
+  const failureType = analyzerOutput.primary_failure_type || 'unknown';
+  const relevantLessons = summarizeLessonsForFailureType(lessonIndex, failureType);
+  const officialEvaluatorScore = typeof officialEvaluatorOutput.overall_score === 'number' ? officialEvaluatorOutput.overall_score : 'unknown';
+  const shadowPrecisionFindings = Array.isArray(evaluatorShadowFindings.precision_findings) ? evaluatorShadowFindings.precision_findings : [];
+  const shadowRubricGapCandidates = normalizeRubricGapCandidates(evaluatorShadowFindings.rubric_gap_candidates);
+  const precisionConcern = shadowPrecisionFindings[0]?.concern || shadowPrecisionFindings[0]?.finding || shadowPrecisionFindings[0]?.issue || shadowPrecisionFindings[0]?.description || 'none';
+  const rubricGapSummary = shadowRubricGapCandidates.length > 0
+    ? shadowRubricGapCandidates.map((entry) => entry.description || entry.suspicion || entry.rationale || entry.criterion || 'unspecified rubric gap').join('\n')
+    : 'none';
 
-  const provider = loadProvider(config.providers?.default || 'local');
+  const outputPath = path.join(mutatorDir, 'output.yaml');
 
-  const rubricGapProposal = analyzerOutput.rubric_gap_proposed
-    ? analyzerOutput.rubric_gap_proposal
-    : null;
+  const rubricCandidatePath = path.join(mutatorDir, 'rubric-candidate.yaml');
 
-  const systemPrompt = `${mutatorPrompt}
+  const prompt = `You are the Mutator agent. Produce the next candidate formula mutation based on the analyzer's diagnosis.
 
-Insanity prevention rule: Do not retry the same failed teaching method on the same failure type without explicit justification.
+WORKSPACE: ${resolveWorkspacePath('')}
+RUN_ID: ${runId}
 
-Mutation tiers (try in order):
-1. prompt_tweak
-2. step_management
-3. parent_guideline
-4. schema_change
-5. tool_change
-6. rubric_mutation
+## Your task
+1. Read the analyzer output: ${path.join(runRoot, 'analyzer', 'output.yaml')}
+2. Read the official evaluator score report: ${path.join(runRoot, 'evaluator', 'output.yaml')}
+3. Read the evaluator shadow findings: ${path.join(runRoot, 'evaluator', 'shadow-findings.yaml')}
+4. Read the formula: ${path.join(runRoot, 'inputs', 'formula.yaml')}
+5. Read the rubric: ${path.join(runRoot, 'inputs', 'rubric.yaml')}
+6. Read the lesson index: ${resolveWorkspacePath('lessons/index.yaml')}
+7. Read prior failed lessons: ${resolveWorkspacePath('lessons/failed.jsonl')}
+8. Read prior successful lessons: ${resolveWorkspacePath('lessons/learned.jsonl')}
+9. Produce a mutation proposal and write it to: ${outputPath}
+10. If the analyzer diagnosed rubric_gap_failure, ALSO write a rubric candidate to: ${rubricCandidatePath}
 
-When the analyzer proposes a rubric_gap_failure, you must also produce a rubric_candidate artifact.
-The rubric_candidate goes through governed review before affecting official scoring.
-Do NOT treat a gap proposal as already active or official.`;
+## Insanity Prevention
+Use the lesson index first. Treat proposed_change.type as the teaching method for lookup. If the same mutation type was already tried for the same failure_type and FAILED, you MUST either:
+- Propose a DIFFERENT approach, OR
+- Provide explicit justification to retry with the same approach
 
-  const recallMisses = (evaluatorOutput.recall_misses || []).map((m) =>
-    `  - [${m.criterion}] ${m.spec}: ${m.gap} (severity: ${m.severity})`
-  ).join('\n') || '  (none)';
+If a similar method already PASSED for this failure_type, prefer building on that approach.
 
-  const userPrompt = `###ROLE### mutator
-Mutator: produce the next candidate formula mutation AND a rubric candidate if the analyzer diagnosed a rubric gap.
+## Indexed lesson summary for failure_type "${failureType}"
+Failed lessons:
+${relevantLessons.failed.length > 0 ? relevantLessons.failed.map((entry) => `- ${entry.teaching_method} (${entry.source_ref})${entry.run_id ? ` [run ${entry.run_id}]` : ''}: ${entry.scenario}`).join('\n') : '- none'}
 
-## Analyzer Diagnosis
+Learned lessons:
+${relevantLessons.learned.length > 0 ? relevantLessons.learned.map((entry) => `- ${entry.teaching_method} (${entry.source_ref})${entry.run_id ? ` [run ${entry.run_id}]` : ''}: ${entry.scenario}`).join('\n') : '- none'}
 
-- Failure type: ${analyzerOutput.primary_failure_type}
-- Diagnosis: ${analyzerOutput.diagnosis}
-- Failure tier: ${analyzerOutput.failure_tier}
-- Suggested mutation: ${analyzerOutput.suggested_mutation}
-- Expected effect: ${analyzerOutput.expected_effect}
-- Rubric gap proposed: ${analyzerOutput.rubric_gap_proposed === true ? 'YES — produce rubric_candidate below' : 'no'}
-${rubricGapProposal ? `
-Rubric gap proposal from analyzer:
-  id: ${rubricGapProposal?.id || 'auto-generated-id'}
-  description: ${rubricGapProposal?.description || analyzerOutput.diagnosis}
-  evidence_refs: ${(rubricGapProposal?.evidence_refs || analyzerOutput.evidence_refs || []).join(', ')}
-` : ''}
+## Mutation Tiers (try in order)
+1. prompt_tweak — add/refine instructions within an existing step (preferred, low risk)
+2. step_management — add, remove, or reorder steps (medium risk)
+3. parent_guideline — add cross-step guidance to formula root (medium risk)
+4. schema_change — change spec schema requirements (higher risk)
+5. tool_change — add or change tooling available to generator (higher risk)
+6. rubric_mutation — propose new rubric criterion (highest risk, governed promotion required)
 
-## Evaluator Recall Misses (context — these drove the analyzer diagnosis)
+## Key rules
+- rubric_gap_failure: rubric_candidate goes through governed review before ANY scoring impact
+- proposed_change must directly address the ANALYZER's diagnosis, not just symptoms
+- Be specific: "add guidance" is not a proposal. "Add to draft step: enumerate state transitions" is.
 
-${recallMisses}
+## Formula and rubric context
+- Formula ecosystem: ${formula.ecosystem}
+- Formula step count: ${Array.isArray(formula.steps) ? formula.steps.length : 'unknown'}
+- Rubric active criteria count: ${Array.isArray(rubric.active_criteria) ? rubric.active_criteria.length : 'unknown'}
 
-## Current Formula
+## Evaluator context
+- Official evaluator score: ${officialEvaluatorScore}
+- Shadow precision concern: ${precisionConcern}
+- Shadow rubric-gap summary:
+${rubricGapSummary === 'none' ? '- none' : rubricGapSummary.split('\n').map((line) => `- ${line}`).join('\n')}
 
-${formula.id} (${formula.version})
-Steps: ${(formula.steps || []).map((s) => s.id).join(' → ')}
-Validations: ${(formula.validations || []).join(', ')}
+## Output YAML fields for output.yaml
+- run_id: "${runId}"
+- mutator: "run_mutator"
+- status: "complete"
+- provider: "opencode-agent"
+- proposed_change:
+    type: (prompt_tweak | step_management | parent_guideline | schema_change | tool_change | rubric_mutation)
+    target_step: step-id or "formula root" or "schema"
+    current: what currently exists
+    proposed: what to add or change
+    expected_improvement: what this improves
+    risk: (low | medium | high)
+    rationale: why this addresses the diagnosis
+- insanity_check:
+    method_already_failed: (true | false)
+    if_true:
+      justification: why retry despite prior failure
+      alternative_considered: what else was considered
+    failed_runs: list of { run_id, teaching_method, scenario, result }
+    learned_runs: list of { run_id, teaching_method, scenario, result }
+- rubric_candidate: (null | rubric candidate object — only if analyzer diagnosed rubric_gap_failure)
+- confidence: 0.0-1.0
+- confidence_rationale: why this confidence
+- mutator_timestamp: ISO timestamp
 
-## Prior Failed Attempts (insanity check — do not repeat same method for same failure type)
+## If rubric_gap_failure was diagnosed, also write rubric-candidate.yaml
+Fields:
+- id: auto-generated snake_case ID (e.g. "missing_state_machine_boundaries")
+- status: "candidate"
+- description: what criterion should be added
+- source: "rubric_gap_failure"
+- discovered_in_run: "${runId}"
+- rationale: why this belongs in the rubric
+- evidence_refs: specs or files demonstrating the gap
+- source_run: "${runId}"
+- evaluator_score: ${officialEvaluatorScore}
+- failure_type: "${analyzerOutput.primary_failure_type || 'unknown'}"
+- analyzer_confidence: ${analyzerOutput.confidence || 0.5}
+- recall_misses_triggered: list of recall misses that triggered this
+- scored_specs_examined: list of spec IDs evaluated
+- evidence_count: 1
+- first_observed_run: "${runId}"
+- last_observed_run: "${runId}"
+- precision_concern: "${precisionConcern}"
+- weight_recommendation: 1.0
+- probation_runs_remaining: 3
+- created_at: ISO timestamp
 
-${(lessons || []).filter((l) => l.failure_type === analyzerOutput.primary_failure_type).map((l) => `  - ${l.teaching_method}: ${l.scenario} (${l.result})`).join('\n') || '  (none)'}
-
-## Your Task
-
-Always produce:
-1. **proposed_change** (type, target_step/field, current, proposed, expected_improvement, risk)
-2. **insanity_check** (method_already_failed, failed_runs, justification)
-3. **rationale** (why this mutation addresses the diagnosis)
-
-If rubric_gap_proposed is true, ALSO produce:
-4. **rubric_candidate** with these fields:
-   - id: auto-generated snake_case ID (e.g. "missing_state_machine_boundaries")
-   - status: "candidate"
-   - description: description of the missing criterion
-   - source: "rubric_gap_failure"
-   - rationale: why this criterion should be added to the rubric
-   - confidence: your confidence this is a genuine gap (0.0–1.0)
-   - recommended_state: "probation" (always — gap candidates start in probation)
-   - discovered_in_run: "${runId}"
-   - evidence_refs: specs or files demonstrating the gap
-   - source_run: "${runId}"
-   - evaluator_score: ${evaluatorOutput.overall_score}
-   - failure_type: "${analyzerOutput.primary_failure_type}"
-   - analyzer_confidence: ${analyzerOutput.confidence}
-   - recall_misses_triggered: array of the recall_misses that triggered this diagnosis
-   - scored_specs_examined: ${(evaluatorOutput.scored_specs || []).join(', ')}
-   - evidence_count: 1
-   - first_observed_run: "${runId}"
-   - last_observed_run: "${runId}"
-   - precision_concern: "${(evaluatorOutput.precision_findings || [])[0]?.concern || 'none'}"
-   - weight_recommendation: 1.0
-   - probation_runs_remaining: 3
-
-Format as structured YAML.`;
+## Output
+Write the mutation YAML to: ${outputPath}
+${analyzerOutput.rubric_gap_proposed === true ? `Write the rubric candidate YAML to: ${rubricCandidatePath}` : ''}
+`;
 
   try {
-    const response = await provider.generate([
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ], { model: config.providers?.default || 'local' });
+    await spawnAgent({
+      role: 'Mutator',
+      workspace: resolveWorkspacePath(''),
+      prompt,
+      outputPath,
+    });
 
-    const parsed = YAML.parse(response.content);
-
-    const outputYaml = {
-      run_id: runId,
-      mutator: 'run_mutator',
-      status: 'complete',
-      provider: config.providers?.default || 'local',
-      confidence: parsed.confidence || 0.68,
-      ...parsed,
-      mutator_timestamp: timestamp(),
-      tokens_used: response.usage?.total_tokens || 0,
-    };
-
-    writeYamlFile(path.join(mutatorDir, 'output.yaml'), outputYaml);
-
-    if (parsed.rubric_candidate) {
-      writeYamlFile(path.join(mutatorDir, 'rubric-candidate.yaml'), {
-        ...parsed.rubric_candidate,
-        discovered_in_run: runId,
-        created_at: timestamp(),
-      });
-      console.log(`[Mutator] Rubric candidate also produced: ${parsed.rubric_candidate.id}`);
+    if (analyzerOutput.rubric_gap_proposed === true && !fileExists(rubricCandidatePath)) {
+      console.error(`[Mutator] rubric_gap_failure was diagnosed but rubric-candidate.yaml was not written.`);
+      process.exitCode = 1;
+      return;
     }
 
-    if (parsed.proposed_change) {
-      console.log(`[Mutator] Done. Proposed: ${parsed.proposed_change.type}`);
-    } else {
-      console.log(`[Mutator] Done. No formula mutation (rubric gap only).`);
+    if (fileExists(outputPath)) {
+      const output = readYamlFile(outputPath);
+      const proposedTeachingMethod = output.proposed_change?.type;
+      const matchingFailures = proposedTeachingMethod
+        ? findLessons(lessonIndex, {
+            failure_type: failureType,
+            teaching_method: proposedTeachingMethod,
+            result: 'FAILED',
+          })
+        : [];
+
+      if (matchingFailures.length > 0) {
+        const methodAlreadyFailed = output.insanity_check?.method_already_failed === true;
+        const justification = output.insanity_check?.if_true?.justification || output.insanity_check?.justification;
+
+        if (!methodAlreadyFailed || !justification) {
+          console.error(`[Mutator] Proposed teaching method '${proposedTeachingMethod}' already failed for failure_type '${failureType}' but the output did not acknowledge or justify the retry.`);
+          process.exitCode = 1;
+          return;
+        }
+      }
+
+      if (output.proposed_change) {
+        console.log(`[Mutator] Done. Proposed: ${output.proposed_change.type}`);
+      } else {
+        console.log(`[Mutator] Done. No formula mutation (rubric gap only).`);
+      }
     }
   } catch (err) {
     console.error(`[Mutator] Failed: ${err.message}`);
@@ -1383,6 +1389,155 @@ function parseKeyValueOutput(content) {
   return result;
 }
 
+function normalizeRubricGapCandidates(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (value && Array.isArray(value.gaps)) {
+    return value.gaps;
+  }
+
+  return [];
+}
+
+function reviewDiscoveries(args) {
+  const runId = args['run-id'];
+  if (!runId) throw new Error('--run-id is required');
+
+  const runRoot = resolveWorkspacePath(path.posix.join('runs', runId));
+  const discoveredPath = path.join(runRoot, 'evaluator', 'discovered-behaviors.yaml');
+
+  if (!fileExists(discoveredPath)) {
+    console.log(`[Review] No discoveries found for ${runId}`);
+    return;
+  }
+
+  const discovered = readYamlFile(discoveredPath);
+  console.log(`\n[Review] Discoveries from ${runId}:`);
+  console.log(`  Golden set version: ${discovered.golden_set_version}`);
+  console.log(`  Discovered at: ${discovered.discovered_at}\n`);
+
+  for (const behavior of discovered.new_behaviors) {
+    const status = behavior.status.padEnd(15);
+    const confidence = (behavior.confidence || 0).toFixed(2);
+    console.log(`  [${status}] ${behavior.id} (confidence: ${confidence})`);
+    console.log(`    ${behavior.description.substring(0, 80)}...`);
+    console.log(`    Evidence: ${(behavior.evidence_refs || []).length} files`);
+    console.log();
+  }
+
+  console.log(`Total: ${discovered.new_behaviors.length} behaviors pending review`);
+}
+
+function approveDiscovery(args) {
+  const runId = args['run-id'];
+  const behaviorId = args['behavior-id'];
+  if (!runId || !behaviorId) throw new Error('--run-id and --behavior-id are required');
+
+  const runRoot = resolveWorkspacePath(path.posix.join('runs', runId));
+  const discoveredPath = path.join(runRoot, 'evaluator', 'discovered-behaviors.yaml');
+
+  if (!fileExists(discoveredPath)) {
+    throw new Error(`No discoveries found for ${runId}`);
+  }
+
+  const discovered = readYamlFile(discoveredPath);
+  const behavior = discovered.new_behaviors.find(b => b.id === behaviorId);
+
+  if (!behavior) {
+    throw new Error(`Behavior '${behaviorId}' not found in discoveries`);
+  }
+
+  if (behavior.status !== 'pending_review') {
+    throw new Error(`Behavior '${behaviorId}' is not pending review (status: ${behavior.status})`);
+  }
+
+  behavior.status = 'approved';
+  behavior.approved_at = timestamp();
+  behavior.notes = args.notes || '';
+
+  writeYamlFile(discoveredPath, discovered);
+
+  const project = readYamlFile(resolveWorkspacePath('config/projects/sample-project.yaml'));
+  const goldenPath = resolveWorkspacePath(path.posix.join(
+    'goldens', 'projects', project.project_id || project.id, 'behaviors.yaml'
+  ));
+  const goldenSet = readYamlFile(goldenPath) || { behaviors: [] };
+
+  goldenSet.behaviors.push({
+    id: behavior.id,
+    description: behavior.description,
+    priority: args.priority || 'medium',
+    category: 'ai_discovered',
+    evidence_refs: behavior.evidence_refs,
+    source: 'ai_discovered',
+    discovered_in_run: behavior.discovery_run,
+    approved_at: behavior.approved_at,
+  });
+
+  writeYamlFile(goldenPath, goldenSet);
+
+  const discoveredGlobalPath = resolveWorkspacePath(path.posix.join(
+    'goldens', 'projects', project.project_id || project.id, 'discovered.yaml'
+  ));
+  if (fileExists(discoveredGlobalPath)) {
+    const globalDiscovered = readYamlFile(discoveredGlobalPath);
+    const entry = (globalDiscovered.behaviors || []).find(b => b.id === behaviorId);
+    if (entry) entry.status = 'approved';
+    if (globalDiscovered.stats) {
+      globalDiscovered.stats.approved = (globalDiscovered.stats.approved || 0) + 1;
+      globalDiscovered.stats.pending_review = Math.max(0, (globalDiscovered.stats.pending_review || 0) - 1);
+    }
+    writeYamlFile(discoveredGlobalPath, globalDiscovered);
+  }
+
+  console.log(`[Approve] ${behaviorId} approved and added to golden set`);
+}
+
+function rejectDiscovery(args) {
+  const runId = args['run-id'];
+  const behaviorId = args['behavior-id'];
+  if (!runId || !behaviorId) throw new Error('--run-id and --behavior-id are required');
+
+  const runRoot = resolveWorkspacePath(path.posix.join('runs', runId));
+  const discoveredPath = path.join(runRoot, 'evaluator', 'discovered-behaviors.yaml');
+
+  if (!fileExists(discoveredPath)) {
+    throw new Error(`No discoveries found for ${runId}`);
+  }
+
+  const discovered = readYamlFile(discoveredPath);
+  const behavior = discovered.new_behaviors.find(b => b.id === behaviorId);
+
+  if (!behavior) {
+    throw new Error(`Behavior '${behaviorId}' not found in discoveries`);
+  }
+
+  behavior.status = 'rejected';
+  behavior.rejected_at = timestamp();
+  behavior.rejection_reason = args.reason || 'Not specified';
+
+  writeYamlFile(discoveredPath, discovered);
+
+  const project = readYamlFile(resolveWorkspacePath('config/projects/sample-project.yaml'));
+  const discoveredGlobalPath = resolveWorkspacePath(path.posix.join(
+    'goldens', 'projects', project.project_id || project.id, 'discovered.yaml'
+  ));
+  if (fileExists(discoveredGlobalPath)) {
+    const globalDiscovered = readYamlFile(discoveredGlobalPath);
+    const entry = (globalDiscovered.behaviors || []).find(b => b.id === behaviorId);
+    if (entry) entry.status = 'rejected';
+    if (globalDiscovered.stats) {
+      globalDiscovered.stats.rejected = (globalDiscovered.stats.rejected || 0) + 1;
+      globalDiscovered.stats.pending_review = Math.max(0, (globalDiscovered.stats.pending_review || 0) - 1);
+    }
+    writeYamlFile(discoveredGlobalPath, globalDiscovered);
+  }
+
+  console.log(`[Reject] ${behaviorId} rejected`);
+}
+
 function main() {
   const [command, ...argv] = process.argv.slice(2);
 
@@ -1456,6 +1611,15 @@ function main() {
         console.error(`[Mutator] Fatal: ${err.message}`);
         process.exitCode = 1;
       });
+      break;
+    case 'review_discoveries':
+      reviewDiscoveries(args);
+      break;
+    case 'approve_discovery':
+      approveDiscovery(args);
+      break;
+    case 'reject_discovery':
+      rejectDiscovery(args);
       break;
     default:
       usage();
