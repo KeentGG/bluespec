@@ -13,6 +13,6 @@ Required principles:
 Minimum output sections by role:
 
 - Generator: `artifacts`, `trace_ref`, `confidence_notes`
-- Evaluator: `official_scores`, `misses`, `false_positives`, `suspected_rubric_gaps`
+- Evaluator: `official_score_report`, `shadow_findings`
 - Analyzer: `diagnosis`, `failure_type`, `mutation_tier`, `rubric_candidate?`
 - Mutator: `proposal`, `target_failure`, `expected_effect`

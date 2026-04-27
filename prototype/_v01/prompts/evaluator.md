@@ -14,10 +14,10 @@ Score generated specs against the frozen active rubric snapshot and the golden s
 
 ## Must Produce
 
-- recall hits and misses
-- precision findings
-- consistency findings
-- suspected rubric gaps as separate candidate artifacts
+- an official score artifact at `runs/<run-id>/evaluator/output.yaml`
+- a shadow findings artifact at `runs/<run-id>/evaluator/shadow-findings.yaml`
+- the official score artifact must stay machine-comparable
+- the shadow findings artifact must carry recall hits/misses, precision findings, consistency findings, and suspected rubric gaps
 
 ## Must Not Do
 

@@ -40,7 +40,7 @@ Apply in order. Stop at the first matching type.
 
 ### 5. `rubric_gap_failure` — The rubric genuinely lacks a criterion for this behavior
 
-**Signal**: The evaluator's `rubric_gap_candidates` includes this criterion. The behavior was produced by the formula (step 4 passes) but no rubric criterion penalizes its absence.
+**Signal**: The evaluator shadow findings include this criterion in `rubric_gap_candidates`. The behavior was produced by the formula (step 4 passes) but no rubric criterion penalizes its absence.
 
 **Check**: Verify the criterion does not appear in `rubric.active_criteria`.
 
