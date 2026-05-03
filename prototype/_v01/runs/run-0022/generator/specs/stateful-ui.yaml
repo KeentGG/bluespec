@@ -1,0 +1,295 @@
+'id': 'stateful-ui'
+'version': '1.0'
+'type': 'spec'
+'ecosystem': 'frontend'
+'golden_behaviors':
+  - 'id': 'stateful_ui'
+    'coverage': 'full'
+    'notes': 'Covers SWR data fetching, action state management, inline editing with debounce, and cross-tab broadcast'
+'description': 'Manages stateful UI behavior for reports list including SWR-based data fetching with conditional execution, per-report action states (download, rename, delete, email), inline rename editing with debounce validation, and cross-tab state synchronization.'
+'conditions':
+  - 'id': 'swr_query_execution'
+    'description': 'Controls whether SWR query should execute based on auth and business context'
+    'trigger': 'Component mount or dependency change'
+    'guards':
+      - 'field': 'enabled'
+        'condition': 'Query enabled flag is true'
+      - 'field': 'userId'
+        'condition': 'User ID exists in token'
+      - 'field': 'businessId'
+        'condition': 'Business ID is provided and non-empty'
+    'then':
+      - 'Execute SWR query with queryKey'
+      - 'Fetch data from API'
+    'else':
+      - 'Skip query execution'
+      - 'Return undefined data'
+  - 'id': 'action_state_management'
+    'description': 'Tracks per-report action states to prevent concurrent operations'
+    'trigger': 'User initiates download, rename, delete, or email action'
+    'guards':
+      - 'field': 'anyActionInProgress'
+        'condition': 'No other action running for this report'
+    'then':
+      - 'Set specific action flag to true'
+      - 'Execute action'
+      - 'Clear flag on completion'
+    'else':
+      - 'Disable UI controls for that report'
+      - 'Show loading state'
+  - 'id': 'inline_rename_validation'
+    'description': 'Validates rename input with debounce and empty name check'
+    'trigger': 'User commits rename (blur or enter)'
+    'guards':
+      - 'field': 'timeSinceEditStart'
+        'condition': 'At least 500ms since edit started'
+      - 'field': 'trimmedName'
+        'condition': 'Name is not empty and different from original'
+    'then':
+      - 'Call patchReport API'
+      - 'Show success toast'
+      - 'Refresh list'
+    'else':
+      - 'If too soon: ignore commit'
+      - 'If empty: show error toast'
+      - 'If no change: cancel edit silently'
+  - 'id': 'download_capability'
+    'description': 'Controls download button based on report downloadability'
+    'trigger': 'Report row renders'
+    'guards':
+      - 'field': 'report.isDownloadable'
+        'condition': 'report.pdfSummary exists or isDownloadable flag is true'
+    'then':
+      - 'Enable download button'
+      - 'Allow email PDF action'
+    'else':
+      - 'Disable download button'
+      - 'Show tooltip: Report must be 100% complete'
+      - 'Disable email action'
+  - 'id': 'cross_tab_state_sync'
+    'description': 'Synchronizes logout/login events across tabs'
+    'trigger': 'BroadcastChannel or localStorage event'
+    'guards':
+      - 'field': 'isBroadcastSupported'
+        'condition': 'BroadcastChannel API available'
+    'then':
+      - 'Listen for logout events'
+      - 'Clear session on logout'
+      - 'Redirect to /login on protected routes'
+    'else':
+      - 'Fallback to localStorage polling'
+'inputs':
+  - 'id': 'businessId'
+    'type': 'string business identifier'
+    'source': 'route parameter or user selection'
+    'required': true
+  - 'id': 'enabled'
+    'type': 'boolean flag'
+    'source': 'component props or parent state'
+    'required': false
+    'validation':
+      'default': 'true'
+  - 'id': 'report'
+    'type': 'report object with _id, name, isDownloadable'
+    'source': 'SWR query response'
+    'required': true
+  - 'id': 'newName'
+    'type': 'string new report name'
+    'source': 'inline edit input'
+    'required': false
+'outputs':
+  - 'id': 'reports_list'
+    'type': 'array of report objects'
+    'destination': 'React component state'
+    'lifespan': 'session'
+  - 'id': 'action_states'
+    'type': 'per-report action flags'
+    'destination': 'Zustand store'
+    'lifespan': 'session'
+  - 'id': 'edit_state'
+    'type': 'editing report ID and name'
+    'destination': 'React useState'
+    'lifespan': 'component lifecycle'
+'evidence_refs':
+  - 'path': '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportsListQuery.ts'
+    'snippet': |
+      const token = getToken();
+      const userId = typeof token?._id === 'string' && token._id.length > 0 ? token._id : null;
+      const isEnabled =
+        enabled &&
+        typeof userId === 'string' &&
+        userId.length > 0 &&
+        typeof businessId === 'string' &&
+        businessId.length > 0;
+      
+      const swrQuery = useSWR(
+        isEnabled ? queryKey : null,
+        () => fetchReportsListRuntime({ businessId, page, pageSize, search, sortBy, sortOrder, calculatorId }),
+        { keepPreviousData: false, revalidateOnMount: true, shouldRetryOnError: false }
+      );
+    'covers':
+      - 'condition:swr_query_execution'
+    'line_range':
+      'start': 22
+      'end': 63
+  - 'path': '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/store/useReportActionStore.ts'
+    'snippet': |
+      export const useReportActionStore = create<ReportActionState>((set, get) => ({
+        downloading: {},
+        renaming: {},
+        deleting: {},
+        emailing: {},
+        
+        setDownloading: (reportId, isLoading) =>
+          set((state) => ({
+            downloading: { ...state.downloading, [reportId]: isLoading },
+          })),
+        
+        isDownloading: (reportId) => !!get().downloading[reportId],
+        isRenaming: (reportId) => !!get().renaming[reportId],
+        isDeleting: (reportId) => !!get().deleting[reportId],
+        isEmailing: (reportId) => !!get().emailing[reportId],
+        
+        anyActionInProgress: (reportId) => {
+          const state = get();
+          return (
+            !!state.downloading[reportId] ||
+            !!state.renaming[reportId] ||
+            !!state.deleting[reportId] ||
+            !!state.emailing[reportId]
+          );
+        },
+      }));
+    'covers':
+      - 'condition:action_state_management'
+    'line_range':
+      'start': 21
+      'end': 61
+  - 'path': '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportRowController.ts'
+    'snippet': |
+      const [editingReportId, setEditingReportId] = useState<string | null>(null);
+      const [editingName, setEditingName] = useState('');
+      
+      const commitRename = useCallback(
+        async (reportId: string, force = false) => {
+          const trimmedName = editingName.trim();
+          const timeSinceEditStart = Date.now() - editStartTimeRef.current;
+          
+          if (!force && timeSinceEditStart < RENAME_COMMIT_DEBOUNCE_MS) {
+            return { success: false, reason: 'too_soon' };
+          }
+          
+          if (!force && trimmedName === originalNameRef.current.trim()) {
+            setEditingReportId(null);
+            return { success: true, reason: 'no_change' };
+          }
+          
+          if (!trimmedName) {
+            return { success: false, reason: 'empty' };
+          }
+          
+          const result = await renameAction.rename({ reportId, newName: trimmedName });
+          if (!result.success) return result;
+          
+          setEditingReportId(null);
+          return { success: true };
+        },
+        [editingName, renameAction]
+      );
+    'covers':
+      - 'condition:inline_rename_validation'
+    'line_range':
+      'start': 40
+      'end': 97
+  - 'path': '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportSplitActions.tsx'
+    'snippet': |
+      type ReportSplitActionsProps = {
+        reportName: string;
+        isDownloadable?: boolean;
+        isDownloading?: boolean;
+        isRenaming?: boolean;
+        isDeleting?: boolean;
+        isEmailing?: boolean;
+        onDownload: (event: React.MouseEvent<HTMLButtonElement>) => void;
+        onEditReport: () => void;
+        onRename: () => void;
+        onEmailPdf: () => void;
+        onDelete: () => void;
+      };
+      
+      export function ReportSplitActions({ isDownloadable = false, ... }) {
+        const anyActionInProgress = isDownloading || isRenaming || isDeleting || isEmailing;
+        const canDownload = isDownloadable;
+        
+        return (
+          <Button disabled={isDownloading || !canDownload} ...>
+            {isDownloading ? <><Spinner /> Downloading...</> : 'Download'}
+          </Button>
+          ...
+        );
+      }
+    'covers':
+      - 'condition:download_capability'
+    'line_range':
+      'start': 13
+      'end': 114
+  - 'path': '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/contracts/list-contract.js'
+    'snippet': |
+      isDownloadable: report.isDownloadable === true || Boolean(report.pdfSummary),
+    'covers':
+      - 'condition:download_capability'
+    'line_range':
+      'start': 173
+      'end': 173
+  - 'path': '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportRenameAction.ts'
+    'snippet': |
+      const handleRename = useCallback(
+        async (params: { reportId: string; newName: string }) => {
+          const trimmedName = params.newName.trim();
+          
+          if (!trimmedName) {
+            toast.error('Name cannot be empty.');
+            return { success: false as const, reason: 'empty' as const };
+          }
+          
+          try {
+            const token = getToken();
+            await patchReport({ _id: params.reportId, userId: token?._id, name: trimmedName });
+            toast.success('Report renamed.');
+            onSuccess?.();
+            return { success: true as const };
+          } catch (err: any) {
+            toast.error(err.message || 'Rename failed.');
+            return { success: false as const, reason: 'error' as const };
+          }
+        },
+        [onSuccess]
+      );
+    'covers':
+      - 'condition:inline_rename_validation'
+    'line_range':
+      'start': 15
+      'end': 36
+  - 'path': '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/lib/crossTab.js'
+    'snippet': |
+      export function isBroadcastSupported() {
+        const isEdgeRuntime = typeof EdgeRuntime !== 'undefined';
+        return (
+          !isEdgeRuntime &&
+          typeof window !== 'undefined' &&
+          typeof globalThis.BroadcastChannel !== 'undefined'
+        );
+      }
+    'covers':
+      - 'condition:cross_tab_state_sync'
+    'line_range':
+      'start': 16
+      'end': 24
+'confidence': 0.88
+'confidence_rationale': 'SWR query conditions confirmed in useReportsListQuery.ts. Action store verified in useReportActionStore.ts. Rename validation logic confirmed in useReportRowController.ts and useReportRenameAction.ts. Download capability verified in ReportSplitActions.tsx and list-contract.js. Cross-tab sync confirmed in crossTab.js. Minor uncertainty around exact SWR caching behavior and error retry logic.'
+'unresolved_questions':
+  - 'Exact SWR cache invalidation strategy on rename/delete'
+  - 'Error boundary integration for failed actions'
+  - 'Optimistic update behavior during rename'
+  - 'Cross-tab broadcast for data changes (only logout/login currently)'
+'status': 'complete'

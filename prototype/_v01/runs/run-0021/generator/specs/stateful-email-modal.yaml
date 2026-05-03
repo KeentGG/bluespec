@@ -1,0 +1,103 @@
+id: stateful-email-modal
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_email_modal
+    coverage: full
+    notes: Email report modal with recipient management and sending state
+description: >
+  Email report modal with reportId, emailRecipients, emailDraft, and
+  isSending states. Semantic actions (open, close, startSend, stopSend,
+  finishSend) manage modal lifecycle. Recipients input with chip
+  management, paste handling, and validation. Auto-close timer on success.
+conditions:
+  - id: reportId_set
+    description: Modal is open with target report
+    trigger: User clicks Email on a report row
+    guards:
+      - field: reportId
+        condition: is set (modal open)
+    then:
+      - Render Modal with email form
+      - Reset recipients and draft
+  - id: reportId_null
+    description: Modal is closed
+    trigger: User closes modal or send completes
+    guards:
+      - field: reportId
+        condition: is null (modal closed)
+    then:
+      - Do not render Modal
+inputs:
+  - id: reportId
+    type: string
+    source: report row
+    required: true
+  - id: emailRecipients
+    type: array
+    source: recipients input
+    required: true
+  - id: emailDraft
+    type: string
+    source: message textarea
+    required: false
+outputs:
+  - id: modal_state
+    type: object
+    destination: EmailReportModal component
+    lifespan: session
+evidence_refs:
+  - path: src/features/reports/hooks/useReportEmailModal.ts
+    snippet: |
+      export function useReportEmailModal(): UseReportEmailModalReturn {
+        const [reportId, setReportId] = useState<string | null>(null);
+        const [emailRecipients, setEmailRecipients] = useState<string[]>([]);
+        const [emailDraft, setEmailDraft] = useState("");
+        const [isSending, setIsSending] = useState(false);
+        const open = useCallback((id: string) => { setReportId(id); setEmailRecipients([]); setEmailDraft(""); setIsSending(false); }, []);
+        const close = useCallback(() => { setReportId(null); setEmailRecipients([]); setEmailDraft(""); setIsSending(false); }, []);
+        const startSend = useCallback(() => { setIsSending(true); }, []);
+        const stopSend = useCallback(() => { setIsSending(false); }, []);
+        const finishSend = useCallback(() => { setIsSending(false); }, []);
+        return { reportId, emailRecipients, emailDraft, isSending, open, close, startSend, stopSend, finishSend, ... };
+      }
+    covers:
+      - condition: reportId_set
+      - condition: reportId_null
+    line_range:
+      start: 24
+      end: 77
+  - path: src/features/reports/components/EmailReportModal.tsx
+    snippet: |
+      export function EmailReportModal({ isOpen, reportId, emailRecipients, emailDraft, isSending, onClose, onStartSend, onStopSend, onFinishSend, ... }) {
+        const [errorMessage, setErrorMessage] = useState("");
+        const [successMessage, setSuccessMessage] = useState("");
+        const closeTimerRef = useRef(null);
+        const requestIdRef = useRef(0);
+        const canSend = emailRecipients.length > 0 && !isSending;
+        return (
+          <Modal isOpen={isOpen} onClose={onClose} title="Email Report">
+            <EmailRecipientsInput recipients={emailRecipients} onChange={onRecipientsChange} />
+            <textarea value={emailDraft} onChange={(e) => onDraftChange(e.target.value)} placeholder="Add a message..." />
+            {errorMessage && <Alert variant="error">{errorMessage}</Alert>}
+            {successMessage && <Alert variant="success">{successMessage}</Alert>}
+            <Button onClick={handleSend} disabled={!canSend}>
+              {isSending ? "Sending..." : "Send Email"}
+            </Button>
+          </Modal>
+        );
+      }
+    covers:
+      - condition: reportId_set
+      - condition: reportId_null
+    line_range:
+      start: 58
+      end: 211
+confidence: 0.85
+confidence_rationale: >
+  Email modal fully traced across hook and component. Four-state management
+  with semantic actions confirmed. Recipients input with validation and
+  auto-close timer documented.
+unresolved_questions: []
+status: complete

@@ -1,0 +1,266 @@
+'id': 'frontend-derived'
+'version': 'v004'
+'ecosystem': 'frontend'
+'behavior_shapes':
+  - 'stateful_ui'
+  - 'conditional_flow'
+'compatible_rubric_snapshots':
+  - 'v001'
+'steps':
+  - 'id': 'explore'
+    'name': 'Explore codebase structure and behavioral surfaces'
+    'agent': 'codebase-explorer'
+    'tools':
+      - 'glob'
+      - 'grep'
+      - 'read'
+    'max_tokens': 8000
+    'prompt': "Explore the codebase at {{project.codebase_path}}.
+
+
+      Focus on these behavioral shapes: {{project.behavior_shapes}}
+
+
+      Your task:
+
+      1. List ALL source files (file_tree)
+
+      2. Identify potential behavioral areas (auth, state, UI, API, etc.)
+
+      3. For each area, list evidence files that contain the behavior
+
+      4. Flag files that are clearly infrastructure vs business logic
+
+
+      Output as YAML:
+
+      file_tree: []
+
+      behavior_candidates:
+
+      \  - id: string
+
+      \    description: string
+
+      \    evidence_refs: []
+
+      \    confidence: 0.0-1.0\n"
+    'outputs':
+      'file_tree':
+        'type': 'array'
+        'items':
+          'type': 'string'
+      'behavior_candidates':
+        'type': 'array'
+        'items':
+          'type': 'object'
+          'properties':
+            'id':
+              'type': 'string'
+            'description':
+              'type': 'string'
+            'evidence_refs':
+              'type': 'array'
+              'items':
+                'type': 'string'
+            'confidence':
+              'type': 'number'
+          'required':
+            - 'id'
+            - 'description'
+            - 'evidence_refs'
+  - 'id': 'analyze'
+    'name': 'Analyze discovered behaviors for spec-worthiness'
+    'agent': 'behavior-analyzer'
+    'tools':
+      - 'read'
+    'max_tokens': 12000
+    'prompt': "Analyze these behavior candidates from the exploration step:
+
+      {{prior_outputs.explore.behavior_candidates}}
+
+
+      Your task:
+
+      1. Filter candidates to those with high confidence (>0.6)
+
+      2. For conditional flows, produce a predicate_inventory:
+
+      \   - List each gate predicate separately
+
+      \   - Label render mode: hidden, visible-disabled, visible-enabled
+
+      \   - Note: this is LIVE CODE analysis, not golden-set matching
+
+      3. Flag behaviors that need deeper exploration
+
+
+      Output as YAML:
+
+      predicate_inventory: []
+
+      behaviors_to_spec: []
+
+      needs_deeper_exploration: []\n"
+    'outputs':
+      'predicate_inventory':
+        'type': 'array'
+        'items':
+          'type': 'object'
+          'properties':
+            'behavior_id':
+              'type': 'string'
+            'predicates':
+              'type': 'array'
+              'items':
+                'type': 'string'
+            'render_mode':
+              'type': 'string'
+              'enum':
+                - 'hidden'
+                - 'visible-disabled'
+                - 'visible-enabled'
+      'behaviors_to_spec':
+        'type': 'array'
+        'items':
+          'type': 'string'
+      'needs_deeper_exploration':
+        'type': 'array'
+        'items':
+          'type': 'string'
+  - 'id': 'draft'
+    'name': 'Draft behavioral specs'
+    'agent': 'spec-writer'
+    'tools':
+      - 'read'
+      - 'write'
+    'max_tokens': 16000
+    'prompt': 'Draft specs for these behaviors:
+
+      {{prior_outputs.analyze.behaviors_to_spec}}
+
+
+      Predicate inventory:
+
+      {{prior_outputs.analyze.predicate_inventory}}
+
+
+      Use schema: schemas/spec.schema.yaml
+
+      Write specs to: runs/{{run_id}}/generator/specs/
+
+
+      Each spec must include:
+
+      - id, type, version
+
+      - behaviors[] with evidence_refs
+
+      - state_transitions where applicable
+
+      - confidence score
+
+
+      Output as YAML:
+
+      spec_files: []
+
+      summary: string
+
+      '
+    'outputs':
+      'spec_files':
+        'type': 'array'
+        'items':
+          'type': 'string'
+      'summary':
+        'type': 'string'
+  - 'id': 'verify'
+    'name': 'Verify specs against schema'
+    'agent': null
+    'tool': 'schema-validator'
+    'inputs':
+      'specs_dir': 'runs/{{run_id}}/generator/specs/'
+      'schema': 'schemas/spec.schema.yaml'
+    'prompt': 'Validate all specs in runs/{{run_id}}/generator/specs/ against schemas/spec.schema.yaml.
+
+      '
+    'outputs':
+      'validation_report':
+        'type': 'object'
+        'properties':
+          'valid_specs':
+            'type': 'array'
+            'items':
+              'type': 'string'
+          'invalid_specs':
+            'type': 'array'
+            'items':
+              'type': 'object'
+              'properties':
+                'file':
+                  'type': 'string'
+                'errors':
+                  'type': 'array'
+                  'items':
+                    'type': 'string'
+          'all_valid':
+            'type': 'boolean'
+  - 'id': 'cross_ref'
+    'name': 'Link related specs and evidence'
+    'outputs':
+      - 'reference_map'
+'validations':
+  - 'schema_valid'
+  - 'references_resolve'
+  - 'no_internal_contradictions'
+'mutation_tiers':
+  - 'prompt_tweak'
+  - 'step_management'
+  - 'parent_guideline'
+  - 'schema_change'
+  - 'tool_change'
+  - 'rubric_mutation'
+'_extends_chain':
+  - 'formulas/seed/universal.yaml'
+  - 'formulas/seed/frontend.yaml'
+  - 'formulas/promoted/frontend-derived-v004.yaml'
+'specializations':
+  - 'component_state_tracking'
+  - 'conditional_rendering_checks'
+  - 'accessibility_review'
+  - 'layout_intent_capture'
+  - 'data_table_behavior'
+'parent': 'frontend-derived-v003-consolidated'
+'fine_tune_run': null
+'execution':
+  'orchestrator_version': 'v2'
+  'agent_provider': 'opencode'
+  'max_step_retries': 3
+'evaluation':
+  'recall':
+    'weight': 0.4
+    'description': 'Coverage of known golden behaviors'
+  'precision':
+    'mechanical':
+      'weight': 0.7
+      'checks':
+        - 'id': 'behavior_exists'
+          'description': 'Every behavior claimed in spec exists in code'
+        - 'id': 'evidence_ref_valid'
+          'description': 'Every evidence_ref points to a file containing the behavior'
+    'agent':
+      'weight': 0.3
+      'prompt': 'Review these specs for business logic hallucinations that AST extraction might miss.'
+      'agent': 'spec-reviewer'
+  'discovery':
+    'weight': 0.3
+    'description': 'New behaviors found that aren''t in golden set'
+    'criteria':
+      - 'behavior_must_have_evidence_refs'
+      - 'behavior_must_have_state_machine_or_conditions'
+      - 'behavior_must_not_be_duplicate_of_existing'
+'status': 'active'
+'discovered_in_run': null
+'created_at': '2026-04-26T00:00:00Z'
+'governance_notes': 'v004: First formula with execution metadata, step schemas, and discovery-augmented evaluation.'

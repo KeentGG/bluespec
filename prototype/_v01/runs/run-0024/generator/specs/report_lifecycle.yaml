@@ -1,0 +1,220 @@
+id: report_lifecycle
+version: '1.0'
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: report_lifecycle
+    coverage: full
+    notes: 'Covers report list controller states (idle/empty/loading/ready/error), business selection, pagination (Load More), delete/email modals, and CRUD action progress states'
+description: |
+  The reports page is managed by useReportsPageController which derives a listState enum from runtime conditions. The page renders different UI components per state: idle (select a company prompt), empty (no reports, create one), loading (skeleton), ready (table with data), and error (alert with message). Business selection triggers a SWR data query via useReportsListQuery. Pagination is client-driven with a Load More button and isLoadingMore indicator. The delete modal (useReportDeleteDialog) and email modal (useReportEmailModal) manage open/close state and progress indicators. Each report row has action states tracked by useReportActionStore: downloading, renaming, deleting, emailing — with anyActionInProgress blocking conflicting operations.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: 'No business selected — ReportsIdleState shown with "Select a company" prompt'
+    - id: empty
+      description: 'Business selected but no reports exist — ReportsEmptyState with create CTA'
+    - id: loading
+      description: 'Data fetching in progress — ReportsTableSkeleton shown'
+    - id: ready
+      description: 'Data loaded successfully — ReportsTable with rows shown'
+    - id: error
+      description: 'API error — error Alert shown, ReportsTable still rendered with error message'
+  transitions:
+    - id: select_business
+      from: idle
+      to: loading
+      trigger: 'User selects a business from dropdown (selectedBusinessId !== REPORTS_ALL_BUSINESSES_ID)'
+      effects:
+        - 'SWR query fires for reports list'
+        - 'Reset userPage to 1, clear accumulatedReportsRef'
+    - id: business_deselected
+      from:
+        - empty
+        - ready
+        - error
+        - loading
+      to: idle
+      trigger: 'selectedBusinessId === REPORTS_ALL_BUSINESSES_ID'
+      effects:
+        - 'Clear reportList, set empty array'
+        - 'Disable SWR query'
+    - id: data_loaded_with_results
+      from: loading
+      to: ready
+      trigger: 'reportsListQuery.data.ok === true and reports exist'
+      effects:
+        - 'Populate reportList from accumulatedReportsRef'
+    - id: data_loaded_empty
+      from: loading
+      to: empty
+      trigger: 'hasSelectedBusiness is true, not loading, listContract.ui.showTable is false, no error'
+      effects:
+        - 'Render ReportsEmptyState'
+    - id: data_load_error
+      from: loading
+      to: error
+      trigger: 'reportsListQuery.data.ok === false AND reason !== "aborted"'
+      effects:
+        - 'Set runtimeErrorMessage from result.message'
+        - 'Still show ReportsTable with error state'
+    - id: refetch
+      from:
+        - error
+        - ready
+      to: loading
+      trigger: 'User clicks refresh or create/delete/email triggers refetch'
+      effects:
+        - 'Call reportsListQuery.revalidate()'
+conditions:
+  - id: show_company_header
+    description: 'Show company context header + New Report button when business selected'
+    trigger: 'ReportsPageContent render'
+    guards:
+      - field: hasSelectedBusiness
+        condition: 'controller.hasSelectedBusiness === true'
+    then:
+      - 'Show company logo, name, Back to Companies link'
+      - 'Show New Report button'
+  - id: hide_company_header
+    description: 'Hide company context when no business selected'
+    trigger: 'ReportsPageContent render'
+    guards:
+      - field: hasSelectedBusiness
+        condition: 'controller.hasSelectedBusiness === false'
+    then:
+      - 'Hide header and buttons'
+  - id: show_delete_modal
+    description: 'DeleteReportModal visible when dialog is open'
+    trigger: 'useReportDeleteDialog.isOpen === true'
+    guards:
+      - field: deleteDialog.isOpen
+        condition: 'deleteDialog.isOpen === true'
+    then:
+      - 'Render DeleteReportModal component'
+  - id: show_email_modal
+    description: 'EmailReportModal visible when reportId is set'
+    trigger: 'useReportEmailModal.reportId is truthy'
+    guards:
+      - field: emailModal.reportId
+        condition: '!!emailModal.reportId'
+    then:
+      - 'Render EmailReportModal component'
+  - id: show_load_more
+    description: 'Show Load More button when more pages available'
+    trigger: 'ReportsTable render'
+    guards:
+      - field: hasMore
+        condition: 'controller.hasMore === true'
+    then:
+      - 'Show Load More button at bottom of table'
+    else:
+      - 'Hide Load More button'
+  - id: show_loading_more
+    description: 'Show loading indicator during pagination fetch'
+    trigger: 'Load More click'
+    guards:
+      - field: isLoadingMore
+        condition: 'controller.isLoadingMore === true'
+    then:
+      - 'Show spinner on Load More button, disable button'
+  - id: action_progress
+    description: 'Show action-specific progress state on report row'
+    trigger: 'useReportActionStore state changes'
+    guards:
+      - field: isDeleting
+        condition: 'isDeleting(reportId) === true'
+    then:
+      - 'Disable delete button, show progress'
+      - 'anyActionInProgress(reportId) blocks conflicting actions'
+  - id: action_email_progress
+    description: 'Show email progress state on report row'
+    trigger: 'useReportActionStore state changes'
+    guards:
+      - field: isEmailing
+        condition: 'isEmailing(reportId) === true'
+    then:
+      - 'Disable email button, show progress'
+inputs:
+  - id: selected_business_id
+    type: 'String business ID from dropdown selection'
+    source: 'useReportBusinessSelection hook'
+    required: true
+  - id: search_query
+    type: 'String text filter'
+    source: 'useReportsListStore (Zustand)'
+    required: false
+  - id: sort_option
+    type: 'Sort by field and order'
+    source: 'useReportsListStore'
+    required: false
+outputs:
+  - id: list_state
+    type: 'Enum: "idle" | "empty" | "loading" | "ready" | "error"'
+    destination: 'ReportsPageContent component'
+    lifespan: immediate
+evidence_refs:
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/controllers/useReportsPageController.ts'
+    snippet: |
+      const listState = useMemo(() => {
+        if (runtimeErrorMessage) return "error";
+        if (isRuntimeLoading && !isLoadingMore) return "loading";
+        if (listContract.ui.showTable) return "ready";
+        return hasSelectedBusiness ? "empty" : "idle";
+      }, [runtimeErrorMessage, isRuntimeLoading, isLoadingMore, listContract.ui.showTable, hasSelectedBusiness]);
+    covers:
+      - 'transition:data_loaded_with_results'
+      - 'transition:data_loaded_empty'
+      - 'transition:data_load_error'
+    line_range:
+      start: 109
+      end: 120
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsPageContent.tsx'
+    snippet: |
+      {controller.hasSelectedBusiness && (<div>company header + New Report button</div>)}
+      {controller.listState === "empty" && <ReportsEmptyState />}
+      {controller.listState === "idle" && <ReportsIdleState />}
+      {controller.listState === "loading" && <ReportsTableSkeleton />}
+      {(controller.listState === "ready" || controller.listState === "error") && <ReportsTable />}
+      <DeleteReportModal isOpen={deleteDialog.isOpen} isDeleting={deleteDialog.isDeleting} .../>
+      <EmailReportModal isOpen={!!emailModal.reportId} reportId={emailModal.reportId} isSending={emailModal.isSending} .../>
+    covers:
+      - 'condition:show_company_header'
+      - 'condition:hide_company_header'
+      - 'condition:show_delete_modal'
+      - 'condition:show_email_modal'
+    line_range:
+      start: 52
+      end: 179
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsTable.tsx'
+    snippet: |
+      {hasMore && (
+        <div className="flex justify-center py-4">
+          <Button variant="secondary" onClick={onLoadMore} disabled={isLoadingMore}>
+            {isLoadingMore ? (<ArrowPathIcon className="animate-spin" /> Loading...) : "Load more reports"}
+          </Button>
+        </div>
+      )}
+    covers:
+      - 'condition:show_load_more'
+      - 'condition:show_loading_more'
+    line_range:
+      start: 139
+      end: 153
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/store/useReportActionStore.ts'
+    snippet: |
+      anyActionInProgress: (reportId) => {
+        return !!state.downloading[reportId] || !!state.renaming[reportId] || !!state.deleting[reportId] || !!state.emailing[reportId];
+      }
+    covers:
+      - 'condition:action_progress'
+      - 'condition:action_email_progress'
+    line_range:
+      start: 52
+      end: 60
+confidence: 0.92
+confidence_rationale: |
+  All listState derivations confirmed in useReportsPageController.ts. UI rendering gates confirmed in ReportsPageContent.tsx. Delete/email modal state confirmed in useReportDeleteDialog.ts and useReportEmailModal.ts. Action store (Zustand) with anyActionInProgress confirmed. Pagination via Load More with userPage state confirmed. One gap: the exact nature of the "listContract.ui.showTable" discriminator depends on list-contract.js which wasn't fully enumerated.
+unresolved_questions: []
+status: complete

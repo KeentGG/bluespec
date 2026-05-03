@@ -1,0 +1,409 @@
+run_id: run-0021
+evaluator: orchestrator
+status: complete
+formula_id: frontend-derived
+recall:
+  golden_behaviors_total: 4
+  golden_behaviors_found: 0
+  score: 0
+  hits: []
+  misses:
+    - auth-conditional-redirect
+    - download-button-visibility
+    - toa-gated-first-report-creation
+    - auth.login
+discovery:
+  new_behaviors_found: 29
+  score: 1
+  new_behaviors:
+    - auth-cross-tab-sync
+    - auth-csrf-protection
+    - auth-error-handling
+    - auth-login-flow
+    - auth-session-memory-store
+    - auth-signup-flow
+    - auth-token-refresh
+    - auth-user-data-fetch
+    - feature-photo-editor
+    - feature-profile
+    - feature-reports-templates
+    - infrastructure-api-client
+    - infrastructure-contracts
+    - infrastructure-qfm
+    - infrastructure-routing
+    - infrastructure-shared-components
+    - stateful-company-form
+    - stateful-company-list
+    - stateful-company-modals
+    - stateful-create-report-modal
+    - stateful-dashboard-shell
+    - stateful-delete-dialog
+    - stateful-email-modal
+    - stateful-pdf-download
+    - stateful-report-actions
+    - stateful-reports-list
+    - stateful-reports-page-controller
+    - stateful-reports-toolbar
+    - stateful-routing-gates
+  pending_review_path: runs/run-0021/evaluator/discovered-behaviors.yaml
+precision:
+  mechanical: 0.94
+  agent: 0.88
+  combined: 0.92
+overall_score: 0.58
+scored_specs:
+  - id: auth-cross-tab-sync
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: auth-csrf-protection
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: auth-error-handling
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: auth-guard-protection
+    precision:
+      mechanical:
+        score: 0
+        issues:
+          - type: unparseable_spec
+            file: auth-guard-protection.yaml
+            message: >
+              Nested mappings are not allowed in compact mappings at line 8,
+              column 12:
+
+                  notes: Three-layer protection: Edge middleware, authGuard function, AuthGua…
+                         ^
+      agent:
+        score: 0
+        issues: []
+      combined: 0
+  - id: auth-login-flow
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: auth-password-reset
+    precision:
+      mechanical:
+        score: 0
+        issues:
+          - type: unparseable_spec
+            file: auth-password-reset.yaml
+            message: >
+              Nested mappings are not allowed in compact mappings at line 8,
+              column 12:
+
+                  notes: Two-step flow: request reset email, then update password with token
+                         ^
+      agent:
+        score: 0
+        issues: []
+      combined: 0
+  - id: auth-session-memory-store
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: auth-signup-flow
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: auth-token-refresh
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: auth-user-data-fetch
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: feature-photo-editor
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: feature-profile
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: feature-reports-templates
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: infrastructure-api-client
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: infrastructure-contracts
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: infrastructure-qfm
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: infrastructure-routing
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: infrastructure-shared-components
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: stateful-company-form
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: stateful-company-list
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: stateful-company-modals
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: stateful-create-report-modal
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: stateful-dashboard-shell
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: stateful-delete-dialog
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: stateful-email-modal
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: stateful-pdf-download
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: stateful-report-actions
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: stateful-reports-list
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: stateful-reports-page-controller
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: stateful-reports-toolbar
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+  - id: stateful-routing-gates
+    precision:
+      mechanical:
+        score: 1
+        issues: []
+      agent:
+        score: 0
+        issues: []
+      combined: 0.7
+mechanical_issues:
+  - type: unparseable_spec
+    file: auth-guard-protection.yaml
+    message: >
+      YAML parse error: Nested mappings are not allowed in compact mappings at
+      line 8, column 12:
+
+          notes: Three-layer protection: Edge middleware, authGuard function, AuthGua…
+                 ^
+  - type: unparseable_spec
+    file: auth-password-reset.yaml
+    message: >
+      YAML parse error: Nested mappings are not allowed in compact mappings at
+      line 8, column 12:
+
+          notes: Two-step flow: request reset email, then update password with token
+                 ^
+agent_issues:
+  - spec: auth-login-flow
+    severity: medium
+    description: Evidence snippet shows registerUser function from auth-service.js
+      instead of loginRequest function. The login API call is not shown in
+      evidence.
+    evidence_ref: src/features/auth/api/auth-service.js
+    suggestion: Include the actual loginRequest or login API call in evidence refs
+  - spec: auth-login-flow
+    severity: low
+    description: Evidence snippet for LoginPageContent.tsx shows simplified
+      bootstrapLoginSession call with stagedSessionPayload variable that doesn't
+      match actual implementation
+    evidence_ref: src/features/auth/components/LoginPageContent.tsx
+    suggestion: Verify line ranges match actual component code
+  - spec: stateful-dashboard-shell
+    severity: low
+    description: Evidence snippet for useDashboardShell.ts shows simplified logout
+      flow - actual implementation includes company logout coordination contract
+      and localStorage cleanup
+    evidence_ref: src/features/shell/hooks/useDashboardShell.ts
+    suggestion: Update snippet to reflect actual executeLogout implementation with
+      coordination contract
+  - spec: stateful-reports-page-controller
+    severity: low
+    description: Evidence snippet shows simplified listState derivation - actual
+      implementation uses listContract.ui.showTable and hasSelectedBusiness
+      checks
+    evidence_ref: src/features/reports/controllers/useReportsPageController.ts
+    suggestion: Update snippet to match actual useMemo logic with listContract dependency
+  - spec: auth-csrf-protection
+    severity: low
+    description: Line ranges 473-493 and 540-583 in apiClient.ts evidence ref need
+      verification against actual file line numbers
+    evidence_ref: src/shared/lib/api/apiClient.ts
+    suggestion: Verify line ranges match actual CSRF handling code positions
+  - spec: infrastructure-shared-components
+    severity: low
+    description: Button.tsx evidence snippet shows slightly different class names
+      than actual implementation (base cva classes differ)
+    evidence_ref: src/shared/components/Button.tsx
+    suggestion: Update snippet to match actual CVA base class string
+evaluated_at: 2026-04-30T10:38:19.224Z

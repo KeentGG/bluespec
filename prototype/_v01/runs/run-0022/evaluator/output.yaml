@@ -1,0 +1,75 @@
+'run_id': 'run-0022'
+'evaluator': 'orchestrator'
+'status': 'complete'
+'formula_id': 'frontend-derived'
+'recall':
+  'golden_behaviors_total': 4
+  'golden_behaviors_found': 0
+  'score': 0
+  'hits': []
+  'misses':
+    - 'auth-conditional-redirect'
+    - 'download-button-visibility'
+    - 'toa-gated-first-report-creation'
+    - 'auth.login'
+'discovery':
+  'new_behaviors_found': 2
+  'score': 1
+  'new_behaviors':
+    - 'auth-flow'
+    - 'stateful-ui'
+  'pending_review_path': 'runs/run-0022/evaluator/discovered-behaviors.yaml'
+'precision':
+  'mechanical': 1
+  'agent': 0.9
+  'combined': 0.97
+'overall_score': 0.59
+'scored_specs':
+  - 'id': 'auth-flow'
+    'precision':
+      'mechanical':
+        'score': 1
+        'issues': []
+      'agent':
+        'score': 0.92
+        'issues':
+          - 'Refresh cookie lifespan (7 days) not verifiable from frontend code.'
+          - 'CSRF token lifespan (7 days) not verifiable from frontend code.'
+          - 'Exact behavior when localStorage is unavailable not fully covered.'
+          - 'Token refresh timeout handling edge cases not fully visible.'
+        'verified_behaviors':
+          - 'Route protection logic matches authGuard.js.'
+          - 'Token refresh coordination matches tokenRefresher.js.'
+          - 'Cross-tab broadcast support matches crossTab.js.'
+          - 'CSRF token validation matches csrfHelper.js.'
+          - 'JWT parsing matches tokenValidator.js.'
+          - 'Cookie writing and broadcast on login matches tokenService.js.'
+          - 'Redirect to /companies after login matches authGuard.js and sessionBootstrap.js.'
+          - '401 handling triggers refresh matches tokenRefresher.js and authErrorHandler.js.'
+      'combined': 0.976
+  - 'id': 'stateful-ui'
+    'precision':
+      'mechanical':
+        'score': 1
+        'issues': []
+      'agent':
+        'score': 0.88
+        'issues':
+          - 'SWR cache invalidation strategy not explicitly documented in evidence refs.'
+          - 'Error boundary integration for failed actions not covered.'
+          - 'Optimistic update behavior during rename not detailed.'
+          - 'Cross-tab broadcast for data changes only covers logout/login, not report updates.'
+        'verified_behaviors':
+          - 'SWR query conditional execution matches useReportsListQuery.ts.'
+          - 'Per-report action state management matches useReportActionStore.ts.'
+          - 'Inline rename validation with debounce matches useReportRowController.ts.'
+          - 'Download capability based on isDownloadable matches ReportSplitActions.tsx and list-contract.js.'
+          - 'Cross-tab state sync via BroadcastChannel matches crossTab.js.'
+          - 'Toast notifications for rename success/error matches useReportRenameAction.ts.'
+          - 'Disabled UI controls during actions matches ReportSplitActions.tsx.'
+      'combined': 0.964
+'mechanical_issues': []
+'agent_issues':
+  - 'auth-flow.yaml: Refresh cookie and CSRF token lifespans (7 days) are not verified in frontend code; may be backend-set but not visible in evidence refs.'
+  - 'stateful-ui.yaml: Minor uncertainty around SWR cache invalidation strategy and optimistic update behavior, but no hallucinated business logic detected.'
+'evaluated_at': '2026-04-30T12:19:21.560Z'

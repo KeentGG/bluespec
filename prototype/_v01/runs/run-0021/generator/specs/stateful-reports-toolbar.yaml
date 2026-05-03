@@ -1,0 +1,130 @@
+id: stateful-reports-toolbar
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_reports_toolbar
+    coverage: full
+    notes: Reports toolbar state for search, sort, and filter controls via Zustand
+description: >
+  Reports toolbar state managed by Zustand store. Stores searchQuery,
+  sortId, and calcTypeFilter. Toolbar controller provides sort options
+  and calculator type options. Toolbar component renders SelectFilter
+  and SearchInput bound to the store.
+conditions:
+  - id: search_changed
+    description: User types in search input
+    trigger: SearchInput onChange fires
+    guards:
+      - field: searchQuery
+        condition: value changed
+    then:
+      - Update searchQuery in Zustand store
+      - Debounce triggers SWR re-fetch
+  - id: sort_changed
+    description: User selects sort option
+    trigger: SelectFilter onChange fires
+    guards:
+      - field: sortId
+        condition: value changed
+    then:
+      - Update sortId in Zustand store
+      - Triggers SWR re-fetch
+  - id: filter_changed
+    description: User selects calculator type filter
+    trigger: SelectFilter onChange fires
+    guards:
+      - field: calcTypeFilter
+        condition: value changed
+    then:
+      - Update calcTypeFilter in Zustand store
+      - Triggers SWR re-fetch
+inputs:
+  - id: searchQuery
+    type: string
+    source: search input
+    required: false
+  - id: sortId
+    type: string
+    source: sort selector
+    required: false
+  - id: calcTypeFilter
+    type: string
+    source: calculator type filter
+    required: false
+outputs:
+  - id: filter_state
+    type: object
+    destination: SWR query params
+    lifespan: session
+evidence_refs:
+  - path: src/features/reports/store/useReportsListStore.ts
+    snippet: |
+      export const useReportsListStore = create<ReportsListState>((set) => ({
+        searchQuery: "",
+        sortId: "updatedAt:desc",
+        calcTypeFilter: "all",
+        setSearchQuery: (query) => set({ searchQuery: query }),
+        setSortId: (sortId) => set({ sortId }),
+        setCalcTypeFilter: (filter) => set({ calcTypeFilter: filter }),
+        resetFilters: () => set({ searchQuery: "", sortId: "updatedAt:desc", calcTypeFilter: "all" }),
+      }));
+    covers:
+      - condition: search_changed
+      - condition: sort_changed
+      - condition: filter_changed
+    line_range:
+      start: 14
+      end: 28
+  - path: src/features/reports/hooks/useReportsToolbarController.ts
+    snippet: |
+      export function useReportsToolbarController() {
+        const { searchQuery, sortId, calcTypeFilter, setSearchQuery, setSortId, setCalcTypeFilter } = useReportsListStore();
+        const sortOptions = [
+          { value: "updatedAt:desc", label: "Newest first" },
+          { value: "updatedAt:asc", label: "Oldest first" },
+          { value: "name:asc", label: "Name A-Z" },
+          { value: "name:desc", label: "Name Z-A" },
+        ];
+        const calculatorTypes = [
+          { value: "all", label: "All Types" },
+          { value: "1", label: "Value Estimate" },
+          { value: "2", label: "Discretionary Earnings" },
+          { value: "3", label: "Value Gap Analysis" },
+          { value: "4", label: "Net Proceeds" },
+        ];
+        return { searchQuery, sortId, calcTypeFilter, setSearchQuery, setSortId, setCalcTypeFilter, sortOptions, calculatorTypes };
+      }
+    covers:
+      - condition: search_changed
+      - condition: sort_changed
+      - condition: filter_changed
+    line_range:
+      start: 1
+      end: 31
+  - path: src/features/reports/components/ReportsToolbar.tsx
+    snippet: |
+      export function ReportsToolbar() {
+        const { searchQuery, sortId, calcTypeFilter, setSearchQuery, setSortId, setCalcTypeFilter, sortOptions, calculatorTypes } = useReportsToolbarController();
+        return (
+          <div className="flex gap-4">
+            <SelectFilter value={sortId} options={sortOptions} onChange={setSortId} />
+            <SelectFilter value={calcTypeFilter} options={calculatorTypes} onChange={setCalcTypeFilter} />
+            <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Search reports..." />
+          </div>
+        );
+      }
+    covers:
+      - condition: search_changed
+      - condition: sort_changed
+      - condition: filter_changed
+    line_range:
+      start: 1
+      end: 32
+confidence: 0.85
+confidence_rationale: >
+  Reports toolbar fully traced across Zustand store, toolbar controller,
+  and toolbar component. Three filter controls with Zustand state confirmed.
+  Options arrays and bound inputs verified.
+unresolved_questions: []
+status: complete

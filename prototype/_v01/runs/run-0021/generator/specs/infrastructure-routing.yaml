@@ -1,0 +1,123 @@
+id: infrastructure-routing
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: infrastructure_routing
+    coverage: full
+    notes: Route guards, base path handling, query validation, navigation utilities
+description: >
+  Routing infrastructure including Edge middleware for server-side guards,
+  base path handling for /dashboard prefix, query parameter validation,
+  initialization guards for Strict Mode, and entry contracts for
+  external calculator handoffs.
+conditions:
+  - id: protected_route
+    description: Route requires authentication
+    trigger: Request matches /companies, /reports, or /profile
+    guards:
+      - field: pathname
+        condition: matches protected path
+    then:
+      - Check session in cookies
+      - If missing, attempt silent refresh
+      - If still missing, redirect to /login
+  - id: public_route
+    description: Route is publicly accessible
+    trigger: Request matches /login, /signup, /reset-password
+    guards:
+      - field: pathname
+        condition: matches public path
+    then:
+      - Allow request to proceed
+inputs:
+  - id: pathname
+    type: string
+    source: URL path
+    required: true
+  - id: session
+    type: object
+    source: cookies
+    required: false
+outputs:
+  - id: guard_decision
+    type: allow or redirect
+    destination: navigation
+    lifespan: immediate
+evidence_refs:
+  - path: src/shared/lib/routing/basePath.js
+    snippet: |
+      export function getBasePath() {
+        return process.env.NEXT_PUBLIC_BASE_PATH || "/dashboard";
+      }
+      export function withBasePath(path) {
+        if (typeof path === "string" && /^https?:\/\//.test(path)) return path;
+        const basePath = getBasePath();
+        return path.startsWith(basePath) ? path : `${basePath}${path}`;
+      }
+    covers:
+      - condition: protected_route
+    line_range:
+      start: 1
+      end: 61
+  - path: src/shared/lib/routing/queryValidators.js
+    snippet: |
+      export function parseCreateQuery(searchParams) {
+        const calculatorMap = { ve: "1", de: "2", vga: "3", np: "4" };
+        const calc = searchParams.get("calc");
+        const calculatorId = calculatorMap[calc] || calc || "1";
+        return { calculatorId, businessId: searchParams.get("businessId"), reportName: searchParams.get("name") };
+      }
+      export function validateGateQuery(searchParams) {
+        const target = searchParams.get("target");
+        const source = searchParams.get("source");
+        if (!target || !source) return { valid: false, reason: "missing_params" };
+        return { valid: true, target, source };
+      }
+    covers:
+      - condition: protected_route
+    line_range:
+      start: 50
+      end: 120
+  - path: src/shared/lib/routing/entryContracts.js
+    snippet: |
+      export function resolveRootHomeRedirect(session) {
+        if (!session) return { destination: "/login", reason: "anonymous" };
+        return { destination: "/companies", reason: "authenticated" };
+      }
+      export function resolveReportsBusinessSelection(searchParams, session) {
+        const businessId = searchParams.get("businessId");
+        if (!businessId) return { selected: false, reason: "no_business_id" };
+        return { selected: true, businessId };
+      }
+    covers:
+      - condition: protected_route
+      - condition: public_route
+    line_range:
+      start: 106
+      end: 220
+  - path: src/shared/lib/routing/initGuards.js
+    snippet: |
+      export function isRouterReady(router) {
+        return router && typeof router.push === "function";
+      }
+      export function createOneShotGuard(key) {
+        const guards = new Set();
+        return () => {
+          if (guards.has(key)) return false;
+          guards.add(key);
+          return true;
+        };
+      }
+    covers:
+      - condition: protected_route
+    line_range:
+      start: 13
+      end: 77
+confidence: 0.9
+confidence_rationale: >
+  Routing infrastructure fully traced across basePath, queryValidators,
+  entryContracts, and initGuards. Edge middleware for server-side guards
+  confirmed. Base path handling and query validation verified.
+unresolved_questions: []
+status: complete

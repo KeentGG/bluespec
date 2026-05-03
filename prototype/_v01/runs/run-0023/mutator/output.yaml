@@ -1,0 +1,16 @@
+'run_id': 'run-0023'
+'status': 'complete'
+'proposed_change':
+  'type': 'step_management'
+  'target_step': 'draft'
+  'description': 'Added mandatory verification crosscheck to draft step. Forces spec writer to re-read each evidence_ref file and verify every behavioral claim (conditions, guards, state transitions, function signatures) is directly observable in the source code. Includes rejection criteria for misattributed behaviors and verification output format. Addresses recognition_failure where generator hallucinated behaviors by inferring from related files rather than observing target file directly.'
+'confidence': 0.82
+'formula_candidate_path': 'runs/run-0023/mutator/formula-candidate.yaml'
+'mutation_record':
+  'run_id': 'run-0023'
+  'type': 'step_management'
+  'target_step': 'draft'
+  'teaching_method': 'verification_crosscheck'
+  'lesson_basis': 'recognition_failure x verification_crosscheck: 1 PASSED, 0 FAILED (learned.jsonl#1)'
+  'previous_step_management_result': 'PARTIAL (run-0022)'
+  'justification': 'Previous step_management attempt got PARTIAL, not FAILED. This attempt combines step_management mutation type with proven verification_crosscheck teaching method. The verification crosscheck has 100% success rate for recognition_failure (1/1). Anti-contamination check: step_management not in failed list, only PARTIAL - retry justified.'

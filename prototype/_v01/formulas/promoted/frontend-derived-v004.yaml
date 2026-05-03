@@ -133,6 +133,12 @@ steps:
       - behaviors[] with evidence_refs
       - state_transitions where applicable
       - confidence score
+      - evidence_refs[].covers[] as strings only, e.g. "condition:route_protection" or "transition:login_success". Do not write covers as mappings like { condition: route_protection } or list items like "- condition: route_protection".
+
+      YAML safety rules:
+      - Quote every inline string containing ":", "|", "{", "}", "[", "]", "#", or TypeScript union text.
+      - For prose/code containing JSON-like objects, write quoted strings, e.g. 'Return { success: false, reason: "too_soon" }'.
+      - Prefer block scalars for long notes and snippets.
 
       Output as YAML:
       spec_files: []

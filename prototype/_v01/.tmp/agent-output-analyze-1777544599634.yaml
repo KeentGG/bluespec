@@ -1,0 +1,113 @@
+predicate_inventory:
+  - behavior_id: auth_guard_protection
+    predicates:
+      - token._id && token.accessToken (hasValidToken)
+      - attemptTokenRefresh option
+      - isChecking state
+    render_mode: visible-enabled
+  - behavior_id: auth_token_refresh
+    predicates:
+      - isRefreshing || refreshPromise (already refreshing in this tab)
+      - hasLock (acquired cross-tab lock via localStorage)
+      - result.success (refresh succeeded)
+    render_mode: hidden
+  - behavior_id: auth_login_flow
+    predicates:
+      - isLoading (prevents double submission)
+      - decision.sessionStaged (determines if session was established)
+      - decision.action === "redirect" (determines if redirect happens)
+    render_mode: visible-enabled
+  - behavior_id: auth_signup_flow
+    predicates:
+      - isLoading (prevents double submission)
+      - decision.sessionStaged (determines if session was established)
+      - decision.action === "redirect" (determines if redirect happens)
+    render_mode: visible-enabled
+  - behavior_id: auth_password_reset
+    predicates:
+      - isLoading (prevents double submission)
+      - response.ok || response.statusCode === 200 (determines success/error message)
+    render_mode: visible-enabled
+  - behavior_id: auth_error_handling
+    predicates:
+      - isAuthErrorHandling (prevents concurrent handling)
+      - isAuthError(response) (checks if response is auth error: 401/403 or taxonomy bucket)
+      - skipRedirect option (controls whether redirect happens)
+    render_mode: hidden
+  - behavior_id: auth_csrf_protection
+    predicates:
+      - hasCsrfToken() (checks if CSRF token exists)
+      - isCsrfTokenValid(token) (validates token format)
+      - retriedAfterRefresh (prevents infinite retry loops)
+      - MAX_CSRF_RETRIES (limits retry attempts)
+    render_mode: hidden
+  - behavior_id: auth_cross_tab_sync
+    predicates:
+      - isBroadcastSupported() (checks if BroadcastChannel API is available)
+      - REDIRECT_DEBOUNCE_MS (prevents redirect loops)
+      - LOGIN_DEBOUNCE_MS (prevents login broadcast loops)
+      - isLoginPage check (determines redirect behavior)
+      - isProtected check (determines if on protected route)
+    render_mode: hidden
+  - behavior_id: stateful_pdf_download
+    predicates:
+      - dlStatus state: "waiting" | "finished" | "failed" | "completed" | ""
+      - isGenerating (tracks PDF generation state)
+      - response.ok && hasPdfGenerationUserId(response.data) (determines success)
+    render_mode: visible-enabled
+  - behavior_id: stateful_report_actions
+    predicates:
+      - anyActionInProgress(reportId) (checks if any action is in progress for a report)
+    render_mode: visible-enabled
+  - behavior_id: stateful_reports_list
+    predicates:
+      - searchQuery (empty or non-empty)
+      - sortId (default "updatedAt:desc" or other)
+      - calcTypeFilter (default "all" or specific type)
+    render_mode: visible-enabled
+  - behavior_id: infrastructure_routing
+    predicates:
+      - isRouterReady(router) (checks if Next.js router has resolved initial params)
+      - shouldRun(intentKey) (one-shot execution guard)
+      - hasRun(intentKey) (checks if intent has already executed)
+    render_mode: hidden
+
+behaviors_to_spec:
+  - auth_login_flow
+  - auth_signup_flow
+  - auth_guard_protection
+  - auth_token_refresh
+  - auth_cross_tab_sync
+  - auth_password_reset
+  - auth_error_handling
+  - auth_csrf_protection
+  - auth_session_memory_store
+  - auth_user_data_fetch
+  - stateful_reports_list
+  - stateful_report_actions
+  - stateful_pdf_download
+  - stateful_create_report_modal
+  - stateful_company_modals
+  - stateful_company_list
+  - stateful_reports_toolbar
+  - stateful_reports_page_controller
+  - stateful_delete_dialog
+  - stateful_email_modal
+  - stateful_company_form
+  - stateful_dashboard_shell
+  - stateful_routing_gates
+  - infrastructure_api_client
+  - infrastructure_routing
+  - infrastructure_qfm
+  - infrastructure_contracts
+  - infrastructure_shared_components
+  - feature_photo_editor
+  - feature_profile
+  - feature_reports_templates
+
+needs_deeper_exploration:
+  - infrastructure_qfm (Query/Fetch/Mutation framework with failure taxonomy, rollback gates, and response normalization - complex interaction patterns)
+  - infrastructure_routing (route guards, base path handling, query validation - needs more context on how guards interact with auth)
+  - feature_reports_templates (template system for different calculator types - needs understanding of how templates affect report generation)
+  - auth_token_refresh (cross-tab coordination via localStorage lock - edge cases around lock expiry and concurrent refresh attempts)
+  - auth_error_handling (global 401/403 handling - needs verification of all error detection paths and redirect logic)

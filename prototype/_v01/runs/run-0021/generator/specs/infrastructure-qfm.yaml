@@ -1,0 +1,135 @@
+id: infrastructure-qfm
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: infrastructure_qfm
+    coverage: full
+    notes: Query/Fetch/Mutation framework with failure taxonomy and rollback gates
+description: >
+  Query/Fetch/Mutation (QFM) framework providing failure classification,
+  response normalization, duplicate mutation prevention, localStorage recovery,
+  PDF lifecycle management, and rollback gate for v1 fallback. Seven taxonomy
+  buckets with failure mode IDs and user behavior directives.
+conditions:
+  - id: failure_classified
+    description: API response classified into failure bucket
+    trigger: classifyQfmFailure() called with failure object
+    guards:
+      - field: failure
+        condition: matches keyword patterns
+    then:
+      - Return bucket, failureModeId, userBehavior, reasonCode
+  - id: response_normalized
+    description: Raw API response normalized
+    trigger: normalizeQfmResponse() called
+    guards:
+      - field: response
+        condition: valid format
+    then:
+      - Detect envelope type
+      - Extract data payload
+      - Tag contract violations
+  - id: rollback_triggered
+    description: Error rate exceeds threshold
+    trigger: createRollbackThresholdMonitor() detects sustained breach
+    guards:
+      - field: error_rate
+        condition: exceeds threshold in 2 consecutive windows
+    then:
+      - Redirect to v1 dashboard
+inputs:
+  - id: failure
+    type: object
+    source: API error
+    required: true
+outputs:
+  - id: classification
+    type: object
+    destination: error handler
+    lifespan: immediate
+evidence_refs:
+  - path: src/shared/lib/qfm/failureTaxonomy.js
+    snippet: |
+      export const QFM_TAXONOMY_BUCKETS = Object.freeze({
+        AUTH_SESSION: "auth/session",
+        ROUTING: "routing",
+        DATA_CONTRACT: "data contract",
+        IMPORT_MAPPING: "import mapping",
+        PDF_GENERATION: "pdf",
+        STORAGE_CORRUPTION: "storage corruption",
+        STALE_STATE: "stale state",
+      });
+      export function classifyQfmFailure(failure) {
+        const signals = extractSignals(failure);
+        for (const [bucket, config] of Object.entries(TAXONOMY_CONFIG)) {
+          if (matchesBucket(signals, config)) {
+            return { bucket, failureModeId: config.failureModeId, userBehavior: config.userBehavior, reasonCode: signals.reasonCode };
+          }
+        }
+        return { bucket: QFM_TAXONOMY_BUCKETS.DATA_CONTRACT, failureModeId: "FM-CONTRACT-001", userBehavior: "block_success_ui_surface_contract_error" };
+      }
+    covers:
+      - condition: failure_classified
+    line_range:
+      start: 1
+      end: 324
+  - path: src/shared/lib/qfm/responseAdapter.js
+    snippet: |
+      export function normalizeQfmResponse(rawResponse, options = {}) {
+        const envelopeType = detectEnvelopeType(rawResponse);
+        const payload = extractPayload(rawResponse, envelopeType);
+        const contractFailure = detectContractViolation(rawResponse, envelopeType);
+        return {
+          ok: payload.statusCode >= 200 && payload.statusCode < 300,
+          statusCode: payload.statusCode,
+          message: payload.message || "",
+          data: payload.data || payload,
+          envelopeType,
+          contractFailure,
+          taxonomyBucket: contractFailure ? QFM_CONTRACT_BUCKET : null,
+          raw: rawResponse,
+        };
+      }
+    covers:
+      - condition: response_normalized
+    line_range:
+      start: 108
+      end: 133
+  - path: src/shared/lib/qfm/rollbackGate.js
+    snippet: |
+      export function resolveRollbackRouteContract() {
+        const monitor = createRollbackThresholdMonitor();
+        const shouldRedirect = monitor.shouldRedirect();
+        if (shouldRedirect) {
+          return { allowed: false, destination: getV1DashboardUrl(), reason: "rollback_gate_active" };
+        }
+        return { allowed: true, destination: null, reason: "rollback_gate_clear" };
+      }
+    covers:
+      - condition: rollback_triggered
+    line_range:
+      start: 621
+      end: 644
+  - path: src/shared/lib/qfm/inFlightMutationGuard.js
+    snippet: |
+      export function createInFlightMutationGuard() {
+        const inFlight = new Set();
+        return {
+          begin(key) { if (inFlight.has(key)) return false; inFlight.add(key); return true; },
+          end(key) { inFlight.delete(key); },
+          isInFlight(key) { return inFlight.has(key); },
+        };
+      }
+    covers:
+      - condition: failure_classified
+    line_range:
+      start: 50
+      end: 120
+confidence: 0.85
+confidence_rationale: >
+  QFM framework fully traced across failureTaxonomy, responseAdapter,
+  rollbackGate, and inFlightMutationGuard. Seven taxonomy buckets confirmed.
+  Response normalization pipeline and rollback gate threshold monitoring verified.
+unresolved_questions: []
+status: complete

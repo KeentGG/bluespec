@@ -1,0 +1,167 @@
+id: infrastructure-shared-components
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: infrastructure_shared_components
+    coverage: full
+    notes: Reusable UI components with CVA variants and Radix primitives
+description: >
+  Reusable UI component library with 27 components. Uses class-variance-authority
+  (CVA) for variant-driven styling, Radix UI primitives for accessibility,
+  and Framer Motion for animations. Key components include Button (6 variants),
+  Modal (Radix Dialog), Dialog (confirmation pattern), Sidebar (navigation),
+  DropdownMenuContent (Radix), Badge (5 colors), Alert (4 variants),
+  and ErrorBoundary (react-error-boundary wrapper).
+conditions:
+  - id: button_variant
+    description: Button renders with specified variant
+    trigger: Button component rendered
+    guards:
+      - field: variant
+        condition: primary, secondary, ghost, danger, link, or unstyled
+    then:
+      - Apply CVA variant styles
+  - id: modal_open
+    description: Modal is visible
+    trigger: Modal isOpen prop is true
+    guards:
+      - field: isOpen
+        condition: equals true
+    then:
+      - Render Radix Dialog with overlay
+      - Animate enter with Framer Motion
+      - Trap focus inside modal
+  - id: error_boundary_catch
+    description: Error boundary catches component error
+    trigger: Child component throws
+    guards:
+      - field: error
+        condition: thrown
+    then:
+      - Render ErrorFallback component
+      - Show retry/refresh options
+inputs:
+  - id: variant
+    type: string
+    source: component props
+    required: false
+outputs:
+  - id: styled_component
+    type: JSX
+    destination: page layout
+    lifespan: session
+evidence_refs:
+  - path: src/shared/components/Button.tsx
+    snippet: |
+      import { cva, type VariantProps } from "class-variance-authority";
+      const buttonVariants = cva(
+        "inline-flex items-center justify-center rounded-md font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-primary",
+        {
+          variants: {
+            variant: { primary: "bg-brand-primary text-white hover:bg-brand-primary-hover", secondary: "bg-surface-card text-text-primary hover:bg-surface-card-hover", ghost: "text-text-primary hover:bg-surface-card-hover", danger: "bg-state-danger text-white hover:bg-state-danger-hover", link: "text-brand-primary underline-offset-4 hover:underline", unstyled: "" },
+            size: { sm: "h-8 px-3 text-sm", md: "h-10 px-4 text-sm", lg: "h-12 px-6 text-base", icon: "h-10 w-10", none: "" },
+          },
+          defaultVariants: { variant: "primary", size: "md" },
+        }
+      );
+      export function Button({ className, variant, size, ...props }: ButtonProps) {
+        return <button className={cn(buttonVariants({ variant, size, className }))} {...props} />;
+      }
+    covers:
+      - condition: button_variant
+    line_range:
+      start: 1
+      end: 55
+  - path: src/shared/components/Modal.tsx
+    snippet: |
+      import * as DialogPrimitive from "@radix-ui/react-dialog";
+      import { AnimatePresence, motion } from "framer-motion";
+      export function Modal({ isOpen, onClose, title, children, maxWidth = "max-w-lg" }) {
+        return (
+          <DialogPrimitive.Root open={isOpen} onOpenChange={(open) => !open && onClose()}>
+            <DialogPrimitive.Portal>
+              <AnimatePresence>
+                {isOpen && (
+                  <>
+                    <DialogPrimitive.Overlay asChild>
+                      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/50 z-50" />
+                    </DialogPrimitive.Overlay>
+                    <DialogPrimitive.Content asChild>
+                      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className={`fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-white rounded-lg shadow-xl p-6 ${maxWidth}`}>
+                        <DialogPrimitive.Title className="text-lg font-semibold">{title}</DialogPrimitive.Title>
+                        {children}
+                      </motion.div>
+                    </DialogPrimitive.Content>
+                  </>
+                )}
+              </AnimatePresence>
+            </DialogPrimitive.Portal>
+          </DialogPrimitive.Root>
+        );
+      }
+    covers:
+      - condition: modal_open
+    line_range:
+      start: 1
+      end: 120
+  - path: src/shared/components/ErrorBoundary.tsx
+    snippet: |
+      import { ErrorBoundary as ReactErrorBoundary } from "react-error-boundary";
+      import { ErrorFallback } from "./ErrorFallback";
+      export function ErrorBoundary({ children }) {
+        return (
+          <ReactErrorBoundary FallbackComponent={ErrorFallback} onReset={() => window.location.reload()}>
+            {children}
+          </ReactErrorBoundary>
+        );
+      }
+    covers:
+      - condition: error_boundary_catch
+    line_range:
+      start: 1
+      end: 43
+  - path: src/shared/components/index.ts
+    snippet: |
+      export { Alert } from "./Alert";
+      export { AnimatedListItem } from "./AnimatedListItem";
+      export { AuthSyncBootstrap } from "./AuthSyncBootstrap";
+      export { Avatar } from "./Avatar";
+      export { Badge } from "./Badge";
+      export { Breadcrumbs } from "./Breadcrumbs";
+      export { Button } from "./Button";
+      export { Dialog } from "./Dialog";
+      export { DropdownMenuContent } from "./DropdownMenuContent";
+      export { EmptyState } from "./EmptyState";
+      export { ErrorBoundary } from "./ErrorBoundary";
+      export { ErrorFallback } from "./ErrorFallback";
+      export { FormError } from "./FormError";
+      export { Heading } from "./Heading";
+      export { Label } from "./Label";
+      export { Modal } from "./Modal";
+      export { ProgressBar } from "./ProgressBar";
+      export { ProgressRing } from "./ProgressRing";
+      export { SearchInput } from "./SearchInput";
+      export { SelectFilter } from "./SelectFilter";
+      export { Sidebar } from "./Sidebar";
+      export { Spinner } from "./Spinner";
+      export { StaticImage } from "./StaticImage";
+      export { TableHeader } from "./TableHeader";
+      export { TableRow } from "./TableRow";
+      export { Text } from "./Text";
+      export { TextInput } from "./TextInput";
+    covers:
+      - condition: button_variant
+      - condition: modal_open
+      - condition: error_boundary_catch
+    line_range:
+      start: 1
+      end: 27
+confidence: 0.9
+confidence_rationale: >
+  Shared components fully traced across index barrel, Button, Modal, and
+  ErrorBoundary. CVA variant system, Radix Dialog primitives, Framer Motion
+  animations, and react-error-boundary wrapper confirmed. 27-component
+  inventory documented.
+unresolved_questions: []
+status: complete

@@ -1,0 +1,41 @@
+spec_files:
+  - runs/run-0021/generator/specs/auth-login-flow.yaml
+  - runs/run-0021/generator/specs/auth-signup-flow.yaml
+  - runs/run-0021/generator/specs/auth-guard-protection.yaml
+  - runs/run-0021/generator/specs/auth-token-refresh.yaml
+  - runs/run-0021/generator/specs/auth-cross-tab-sync.yaml
+  - runs/run-0021/generator/specs/auth-password-reset.yaml
+  - runs/run-0021/generator/specs/auth-error-handling.yaml
+  - runs/run-0021/generator/specs/auth-csrf-protection.yaml
+  - runs/run-0021/generator/specs/auth-session-memory-store.yaml
+  - runs/run-0021/generator/specs/auth-user-data-fetch.yaml
+  - runs/run-0021/generator/specs/stateful-reports-list.yaml
+  - runs/run-0021/generator/specs/stateful-report-actions.yaml
+  - runs/run-0021/generator/specs/stateful-pdf-download.yaml
+  - runs/run-0021/generator/specs/stateful-create-report-modal.yaml
+  - runs/run-0021/generator/specs/stateful-company-modals.yaml
+  - runs/run-0021/generator/specs/stateful-company-list.yaml
+  - runs/run-0021/generator/specs/stateful-reports-toolbar.yaml
+  - runs/run-0021/generator/specs/stateful-reports-page-controller.yaml
+  - runs/run-0021/generator/specs/stateful-delete-dialog.yaml
+  - runs/run-0021/generator/specs/stateful-email-modal.yaml
+  - runs/run-0021/generator/specs/stateful-company-form.yaml
+  - runs/run-0021/generator/specs/stateful-dashboard-shell.yaml
+  - runs/run-0021/generator/specs/stateful-routing-gates.yaml
+  - runs/run-0021/generator/specs/infrastructure-api-client.yaml
+  - runs/run-0021/generator/specs/infrastructure-routing.yaml
+  - runs/run-0021/generator/specs/infrastructure-qfm.yaml
+  - runs/run-0021/generator/specs/infrastructure-contracts.yaml
+  - runs/run-0021/generator/specs/infrastructure-shared-components.yaml
+  - runs/run-0021/generator/specs/feature-photo-editor.yaml
+  - runs/run-0021/generator/specs/feature-profile.yaml
+  - runs/run-0021/generator/specs/feature-reports-templates.yaml
+summary: >
+  Drafted 31 behavioral specs for the EOYT dashboard-v2 codebase covering 10
+  auth behaviors, 13 stateful UI behaviors, 5 infrastructure behaviors, and 3
+  feature behaviors. Each spec includes id, type, version, golden_behaviors with
+  coverage, state_machine or conditions where applicable, inputs/outputs,
+  evidence_refs with actual code snippets and line ranges, confidence score, and
+  confidence rationale. All evidence was gathered from direct source file reads
+  across the codebase. Average confidence: 0.88. All specs use the schema
+  defined in schemas/spec.schema.yaml.

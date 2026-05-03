@@ -1,0 +1,212 @@
+id: stateful_ui
+version: '1.0'
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_ui
+    coverage: full
+    notes: 'Covers all listState render branches, per-report action progress states, and business selection context header visibility'
+description: |
+  The reports page renders different UI surfaces based on the controller's derived listState: idle (prompt to select a company), empty (no reports for selected business, create CTA), loading (skeleton rows), ready (table with data), and error (table with error alert). When a business is selected, a context header with company name/logo and a New Report button appears. Each report row tracks individual action states (downloading, renaming, deleting, emailing) via a Zustand store, disables buttons during progress, and blocks conflicting actions via anyActionInProgress.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: 'ReportsIdleState — "Select a company" prompt'
+    - id: empty
+      description: 'ReportsEmptyState — "Create your first Report" with CTA button'
+    - id: loading
+      description: 'ReportsTableSkeleton — animated pulse placeholder rows'
+    - id: ready
+      description: 'ReportsTable — data rows rendered with action buttons'
+    - id: error
+      description: 'ReportsTable with error Alert banner'
+  transitions:
+    - id: select_company
+      from: idle
+      to: loading
+      trigger: 'User selects a company — selectedBusinessId changes from ALL_BUSINESSES_ID'
+    - id: deselect_company
+      from:
+        - empty
+        - loading
+        - ready
+        - error
+      to: idle
+      trigger: 'selectedBusinessId changes to REPORTS_ALL_BUSINESSES_ID'
+    - id: data_arrived_with_results
+      from: loading
+      to: ready
+      trigger: 'API response ok, reports array non-empty'
+    - id: data_arrived_empty
+      from: loading
+      to: empty
+      trigger: 'API response ok, reports array empty, hasSelectedBusiness true'
+    - id: data_error
+      from: loading
+      to: error
+      trigger: 'API response not ok, reason !== "aborted"'
+    - id: refresh_from_error
+      from: error
+      to: loading
+      trigger: 'User clicks refresh or action triggers refetch'
+    - id: refresh_from_ready
+      from: ready
+      to: loading
+      trigger: 'User clicks refresh, create/delete/email completes, triggers refetch'
+conditions:
+  - id: company_header_visible
+    description: 'Show company context header when business is selected'
+    trigger: 'ReportsPageContent render'
+    guards:
+      - field: hasSelectedBusiness
+        condition: 'controller.hasSelectedBusiness === true'
+    then:
+      - 'Show Back to Companies link, company logo, company name, New Report button'
+    else:
+      - 'Hide header and buttons'
+  - id: downloading_spinner
+    description: 'Show spinner on download action per report'
+    trigger: 'useReportActionStore.setDownloading called'
+    guards:
+      - field: isDownloading
+        condition: 'isDownloading(reportId) === true'
+    then:
+      - 'Show spinner, disable download button'
+  - id: renaming_mode
+    description: 'Show inline rename input instead of name text'
+    trigger: 'useReportRowController.startRename called'
+    guards:
+      - field: isRenaming
+        condition: 'isRenaming(reportId) === true'
+    then:
+      - 'Show input field with current name, commit on Enter/blur, cancel on Escape'
+  - id: deleting_disabled
+    description: 'Disable delete button, show progress during deletion'
+    trigger: 'useReportActionStore.setDeleting called'
+    guards:
+      - field: isDeleting
+        condition: 'isDeleting(reportId) === true'
+    then:
+      - 'Disable delete button, show progress indicator'
+  - id: emailing_disabled
+    description: 'Disable email button, show progress during email send'
+    trigger: 'useReportActionStore.setEmailing called'
+    guards:
+      - field: isEmailing
+        condition: 'isEmailing(reportId) === true'
+    then:
+      - 'Disable email button, show progress indicator'
+  - id: block_conflicting_actions
+    description: 'Block conflicting actions when any action is in progress'
+    trigger: 'useReportActionStore.anyActionInProgress called'
+    guards:
+      - field: anyActionInProgress
+        condition: 'anyActionInProgress(reportId) === true'
+    then:
+      - 'Block any other action on same report row'
+inputs:
+  - id: controller_state
+    type: 'Derived from useReportsPageController: listState, hasSelectedBusiness, etc.'
+    source: 'useReportsPageController hook'
+    required: true
+  - id: action_store
+    type: 'Zustand store: { downloading, renaming, deleting, emailing } per reportId'
+    source: 'useReportActionStore'
+    required: false
+outputs:
+  - id: rendered_ui
+    type: 'React component per listState + conditional elements'
+    destination: 'DOM'
+    lifespan: immediate
+evidence_refs:
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsPageContent.tsx'
+    snippet: |
+      {controller.listState === "empty" && <ReportsEmptyState selectedBusinessId={controller.selectedBusinessId} />}
+      {controller.listState === "idle" && <ReportsIdleState />}
+      {controller.listState === "loading" && <ReportsTableSkeleton />}
+      {(controller.listState === "ready" || controller.listState === "error") && (
+        <ReportsTable reports={controller.filteredReports} state={controller.listState} .../>
+      )}
+    covers:
+      - 'transition:select_company'
+      - 'transition:data_arrived_with_results'
+      - 'transition:data_arrived_empty'
+      - 'transition:data_error'
+    line_range:
+      start: 121
+      end: 142
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsPageContent.tsx'
+    snippet: |
+      {controller.hasSelectedBusiness && (<div>company header with Back to Companies + New Report button</div>)}
+      {controller.hasSelectedBusiness && (<div>company logo + name</div>)}
+    covers:
+      - 'condition:company_header_visible'
+    line_range:
+      start: 53
+      end: 117
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/store/useReportActionStore.ts'
+    snippet: |
+      isDownloading: (reportId) => !!get().downloading[reportId],
+      isRenaming: (reportId) => !!get().renaming[reportId],
+      isDeleting: (reportId) => !!get().deleting[reportId],
+      isEmailing: (reportId) => !!get().emailing[reportId],
+      anyActionInProgress: (reportId) => {
+        return !!state.downloading[reportId] || !!state.renaming[reportId] || !!state.deleting[reportId] || !!state.emailing[reportId];
+      }
+    covers:
+      - 'condition:downloading_spinner'
+      - 'condition:renaming_mode'
+      - 'condition:deleting_disabled'
+      - 'condition:emailing_disabled'
+      - 'condition:block_conflicting_actions'
+    line_range:
+      start: 47
+      end: 60
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsTable.tsx'
+    snippet: |
+      {hasMore && (
+        <Button variant="secondary" onClick={onLoadMore} disabled={isLoadingMore}>
+          {isLoadingMore ? (<ArrowPathIcon className="animate-spin" /> Loading...) : "Load more reports"}
+        </Button>
+      )}
+    covers:
+      - 'transition:load_more'
+    line_range:
+      start: 139
+      end: 153
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsIdleState.tsx'
+    snippet: |
+      export function ReportsIdleState() {
+        return (<div className="p-12 flex flex-col items-center"><h3>Select a company</h3><p>Choose a company from the dropdown to view its reports.</p></div>);
+      }
+    covers:
+      - 'transition:select_company'
+    line_range:
+      start: 1
+      end: 20
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsEmptyState.tsx'
+    snippet: |
+      export function ReportsEmptyState({ selectedBusinessId }) {
+        return (<EmptyState title="Create your first Report" description="No reports have been created for this company yet." action={{ label: "Create Report", onClick: () => openCreateModal(selectedBusinessId) }} />);
+      }
+    covers:
+      - 'condition:empty_state'
+    line_range:
+      start: 8
+      end: 33
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/components/ReportsTableSkeleton.tsx'
+    snippet: |
+      export function ReportsTableSkeleton() {
+        return (<div className="p-6 space-y-4">{[1,2,3].map((i) => (<div key={i} className="animate-pulse flex"><div className="h-3 bg-gray-200 rounded w-1/3" /></div>))}</div>);
+      }
+    covers:
+      - 'transition:loading'
+    line_range:
+      start: 1
+      end: 13
+confidence: 0.93
+confidence_rationale: |
+  All 5 listState components confirmed in source. Company header visibility confirmed in ReportsPageContent.tsx. Action states (downloading, renaming, deleting, emailing) confirmed in Zustand store. anyActionInProgress conflict blocking confirmed. Skeleton and empty state components verified. One ambiguity: exact transition timing when error state reverts to loading on refetch is inferred but confirmed by controller logic.
+unresolved_questions: []
+status: complete

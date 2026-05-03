@@ -1,0 +1,15 @@
+'validation_report':
+  'valid_specs':
+    - 'api-client-with-token-refresh.yaml'
+    - 'auth-flow.yaml'
+    - 'browser-storage-utilities.yaml'
+    - 'cross-tab-session-sync.yaml'
+    - 'middleware-auth-guard.yaml'
+    - 'report-lifecycle-management.yaml'
+    - 'routing-contracts.yaml'
+    - 'stale-response-guards.yaml'
+    - 'stateful-ui-company-management.yaml'
+    - 'stateful-ui-pdf-generation.yaml'
+    - 'stateful-ui-reports.yaml'
+  'invalid_specs': []
+  'all_valid': true

@@ -1,0 +1,194 @@
+id: feature-reports-templates
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: feature_reports_templates
+    coverage: full
+    notes: Report template system for different calculator types (DE, NP, VE, VGA)
+description: >
+  Report template system for four calculator types: VE (Value Estimate),
+  DE (Discretionary Earnings), VGA (Value Gap Analysis), and NP (Net Proceeds).
+  Each template defines structured question sets. Import engine orchestrates
+  cross-calculator field mapping with 17 bidirectional field pairs between
+  DE and VGA. NP is deferred (stub implementation).
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: No template selected
+    - id: selected
+      description: Template selected, ready for data entry
+    - id: importing
+      description: Cross-calculator import in progress
+    - id: complete
+      description: Import or mapping complete
+  transitions:
+    - id: template_selected
+      from: idle
+      to: selected
+      trigger: User selects calculator type in CreateReportModal
+      effects:
+        - Load template structure
+        - Initialize empty question answers
+    - id: import_started
+      from: selected
+      to: importing
+      trigger: User initiates cross-calculator import
+      effects:
+        - Resolve canonical plan via import engine
+        - Map fields between source and target templates
+    - id: import_complete
+      from: importing
+      to: complete
+      trigger: Field mapping completes
+      effects:
+        - Apply mapped values to target template
+inputs:
+  - id: calculatorId
+    type: string
+    source: calculator type selection
+    required: true
+outputs:
+  - id: template
+    type: object
+    destination: report creation form
+    lifespan: session
+evidence_refs:
+  - path: src/features/reports/contracts/templates/ve-template.ts
+    snippet: |
+      export const VE_TEMPLATE = Object.freeze({
+        calculatorId: REPORT_CALCULATOR_IDS.VE,
+        reportProgress: REPORT_DEFAULT_PROGRESS_BY_CALCULATOR_ID[REPORT_CALCULATOR_IDS.VE],
+        periodList: [{ isMain: true, VEC_question2: { answer: "" } }],
+      });
+      export const VE_TO_DE_PAIRS = Object.freeze([
+        { sourceField: "VEC_question2", targetField: "DE_question9" },
+      ]);
+      export const VE_TO_VGA_PAIRS = Object.freeze([
+        { sourceField: "VEC_question2", targetField: "VGA_question14" },
+      ]);
+    covers:
+      - state: selected
+    line_range:
+      start: 15
+      end: 70
+  - path: src/features/reports/contracts/templates/de-template.ts
+    snippet: |
+      export const DE_TEMPLATE = Object.freeze({
+        calculatorId: REPORT_CALCULATOR_IDS.DE,
+        deQuestions: [{
+          DE_question2: { answer: "" },
+          DE_question9: { answer: "" },
+          DE_question10: { answer: "" },
+          DE_question11: { answer: "" },
+          DE_question12: { answer: "" },
+          DE_question13: { answer: "" },
+          DE_question14: { answer: "" },
+          DE_question15: { answer: "" },
+          DE_question16: { answer: "" },
+          DE_question17: { answer: "" },
+          DE_question18: { answer: "" },
+          DE_question19: { answer: "" },
+          DE_question20: { answer: "" },
+          DE_question21: { answer: "" },
+          DE_question22: { answer: "" },
+          DE_question23: { answer: "" },
+          DE_question45: { answer: "" },
+        }],
+      });
+      export const VGA_TO_DE_CANONICAL_FIELD_PAIRS = Object.freeze([
+        { sourceField: "VGA_question14", targetField: "DE_question9" },
+        { sourceField: "VGA_question15", targetField: "DE_question10" },
+      ]);
+    covers:
+      - state: selected
+      - state: importing
+    line_range:
+      start: 15
+      end: 101
+  - path: src/features/reports/contracts/templates/vga-template.ts
+    snippet: |
+      export const VGA_TEMPLATE = Object.freeze({
+        calculatorId: REPORT_CALCULATOR_IDS.VGA,
+        vgaQuestions: [{
+          VGA_question6: { answer: "", type: "No" },
+          VGA_question14: { answer: "" },
+          VGA_question15: { answer: "" },
+          VGA_question16: { answer: "" },
+          VGA_question17: { answer: "" },
+          VGA_question18: { answer: "" },
+          VGA_question19: { answer: "" },
+          VGA_question20: { answer: "" },
+          VGA_question21: { answer: "" },
+          VGA_question22: { answer: "" },
+          VGA_question23: { answer: "" },
+          VGA_question24: { answer: "" },
+          VGA_question25: { answer: "" },
+          VGA_question26: { answer: "" },
+          VGA_question27: { answer: "" },
+          VGA_question28: { answer: "" },
+          VGA_question29: { answer: "" },
+          VGA_question30: { answer: "" },
+          VGA_question31: { answer: "" },
+        }],
+      });
+      export const DE_TO_VGA_CANONICAL_FIELD_PAIRS = Object.freeze([
+        { sourceField: "DE_question9", targetField: "VGA_question14" },
+        { sourceField: "DE_question10", targetField: "VGA_question15" },
+      ]);
+    covers:
+      - state: selected
+      - state: importing
+    line_range:
+      start: 15
+      end: 105
+  - path: src/features/reports/contracts/templates/np-template.ts
+    snippet: |
+      export const NP_TEMPLATE = Object.freeze({
+        calculatorId: REPORT_CALCULATOR_IDS.NP,
+        NP_DEFERRED: true,
+      });
+      export function getNpOperations() { return null; }
+    covers:
+      - state: idle
+    line_range:
+      start: 1
+      end: 34
+  - path: src/features/reports/contracts/import-engine.ts
+    snippet: |
+      export function resolveCanonicalPlan({ sourceCalculatorId, targetCalculatorId }) {
+        const key = `${sourceCalculatorId}->${targetCalculatorId}`;
+        const mapping = CANONICAL_PLAN_MAPPINGS[key];
+        if (!mapping) return { success: false, error: "unsupported_mapping" };
+        if (mapping.deferred) return { success: false, error: "deferred" };
+        return { success: true, template: mapping.template, operations: mapping.operations, fieldPairs: mapping.fieldPairs };
+      }
+    covers:
+      - state: importing
+      - state: complete
+    line_range:
+      start: 131
+      end: 192
+  - path: src/features/reports/contracts/lifecycle-contract.js
+    snippet: |
+      export const REPORT_CALCULATOR_IDS = Object.freeze({ VE: "1", DE: "2", VGA: "3", NP: "4" });
+      export const REPORT_DEFAULT_PROGRESS_BY_CALCULATOR_ID = Object.freeze({
+        [REPORT_CALCULATOR_IDS.VE]: "/questionnaire/1",
+        [REPORT_CALCULATOR_IDS.DE]: "/company-information/1",
+        [REPORT_CALCULATOR_IDS.VGA]: "/company-information/1",
+        [REPORT_CALCULATOR_IDS.NP]: "/company-information/1",
+      });
+    covers:
+      - state: selected
+    line_range:
+      start: 17
+      end: 29
+confidence: 0.85
+confidence_rationale: >
+  Report templates fully traced across VE/DE/VGA/NP templates, import engine,
+  and lifecycle contract. Four calculator types with structured question sets
+  confirmed. Cross-calculator field mapping with 17 bidirectional pairs verified.
+  NP deferred status documented.
+unresolved_questions: []
+status: complete

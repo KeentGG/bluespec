@@ -1,0 +1,227 @@
+id: auth-token-refresh
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: auth_token_refresh
+    coverage: full
+    notes: Cross-tab coordinated refresh with localStorage lock and timeout
+description: >
+  Automatic JWT access token refresh with cross-tab coordination. When a 401
+  is detected, the tab acquires a localStorage lock, calls POST /auth/refresh
+  with HTTP-only cookie, broadcasts the new token to waiting tabs, and retries
+  the original request. Lock auto-expires after 10 seconds to prevent deadlocks.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: No refresh in progress
+    - id: acquiring_lock
+      description: Attempting to acquire cross-tab refresh lock
+    - id: refreshing
+      description: Token refresh API call in flight
+    - id: waiting_for_other_tab
+      description: Another tab holds the lock, waiting for result
+    - id: success
+      description: New token acquired and stored
+    - id: failure
+      description: Refresh failed, session expired
+  transitions:
+    - id: refresh_needed
+      from: idle
+      to: acquiring_lock
+      trigger: 401 response or JWT expired error detected
+      effects:
+        - Check if refresh is already in progress in this tab
+    - id: lock_acquired
+      from: acquiring_lock
+      to: refreshing
+      trigger: acquireRefreshLock() returns true
+      effects:
+        - Write lock to localStorage with timestamp and tabId
+    - id: lock_not_acquired
+      from: acquiring_lock
+      to: waiting_for_other_tab
+      trigger: acquireRefreshLock() returns false
+      effects:
+        - Wait for TOKEN_REFRESHED event via BroadcastChannel or localStorage polling
+    - id: refresh_success
+      from: refreshing
+      to: success
+      trigger: performRefresh() returns success === true
+      effects:
+        - Store new token in memory
+        - Write new user cookie
+        - Broadcast TOKEN_REFRESHED to other tabs
+        - Release lock
+    - id: refresh_failure
+      from: refreshing
+      to: failure
+      trigger: performRefresh() returns success === false
+      effects:
+        - Release lock
+        - Handle auth error (clear session, redirect to /login)
+    - id: other_tab_success
+      from: waiting_for_other_tab
+      to: success
+      trigger: TOKEN_REFRESHED event received with success
+      effects:
+        - Apply token from other tab
+    - id: other_tab_failure
+      from: waiting_for_other_tab
+      to: acquiring_lock
+      trigger: TOKEN_REFRESHED event received with failure or timeout
+      effects:
+        - Try to acquire lock again
+inputs:
+  - id: apiClient
+    type: object
+    source: API client instance
+    required: false
+outputs:
+  - id: new_token
+    type: object
+    destination: in-memory session store + user cookie
+    lifespan: session
+  - id: csrf_token
+    type: string
+    destination: csrfToken cookie
+    lifespan: 7 days
+evidence_refs:
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      export async function refreshAccessToken(options = {}) {
+        if (isRefreshing || refreshPromise) {
+          log("Refresh already in progress in this tab, waiting...");
+          return refreshPromise || Promise.resolve({ success: false, error: "Refresh in progress", token: null });
+        }
+        const { apiClient } = options;
+        isRefreshing = true;
+        refreshPromise = performCoordinatedRefresh(apiClient).finally(() => {
+          isRefreshing = false;
+          refreshPromise = null;
+        });
+        return refreshPromise;
+      }
+    covers:
+      - state: idle
+      - state: refreshing
+    line_range:
+      start: 139
+      end: 160
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      function acquireRefreshLock() {
+        if (typeof window === "undefined") return true;
+        try {
+          const now = Date.now();
+          const existing = localStorage.getItem(REFRESH_LOCK_KEY);
+          if (existing) {
+            const { timestamp } = JSON.parse(existing);
+            if (now - timestamp < LOCK_TIMEOUT_MS) {
+              log("Another tab holds refresh lock, waiting...");
+              return false;
+            }
+            log("Refresh lock expired, acquiring...");
+          }
+          localStorage.setItem(REFRESH_LOCK_KEY, JSON.stringify({ timestamp: now, tabId: getTabId() }));
+          log("Acquired refresh lock");
+          return true;
+        } catch (error) {
+          log("Failed to acquire lock:", error.message);
+          return true;
+        }
+      }
+    covers:
+      - state: acquiring_lock
+      - state: waiting_for_other_tab
+    line_range:
+      start: 74
+      end: 99
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      async function performRefresh(apiClient) {
+        try {
+          const timeoutPromise = new Promise((resolve) => {
+            setTimeout(() => resolve({ __timeout: true }), REFRESH_TIMEOUT_MS);
+          });
+          const result = await Promise.race([
+            refreshToken({}, apiClient ? { client: apiClient } : {}),
+            timeoutPromise,
+          ]);
+          if (result && result.__timeout) {
+            return { success: false, error: `Token refresh timed out after ${REFRESH_TIMEOUT_MS}ms`, token: null };
+          }
+          const actualResponse = result;
+          const raw = actualResponse?.raw;
+          const rawStatusCode = raw?.statusCode ?? actualResponse?.statusCode;
+          if (actualResponse?.error || (typeof rawStatusCode === "number" && rawStatusCode >= 400)) {
+            return { success: false, error: raw?.message || actualResponse?.message || "Token refresh failed", statusCode: rawStatusCode, token: null };
+          }
+          const userData = raw?.user ?? raw?.data?.user;
+          if (!userData || typeof userData.accessToken !== "string" || typeof userData._id !== "string") {
+            return { success: false, error: "No access token in refresh response", token: null };
+          }
+          const newTokenPayload = { _id: userData._id, email: typeof userData.email === "string" ? userData.email : "", accessToken: userData.accessToken };
+          const csrfToken = raw?.csrfToken ?? raw?.data?.csrfToken ?? null;
+          setToken(newTokenPayload);
+          return { success: true, token: newTokenPayload, csrfToken, message: raw?.message || "Token refreshed successfully" };
+        } catch (error) {
+          return { success: false, error: error?.message || "Token refresh error", token: null };
+        }
+      }
+    covers:
+      - state: refreshing
+      - state: success
+      - state: failure
+    line_range:
+      start: 226
+      end: 296
+  - path: src/features/auth/api/tokenRefresher.js
+    snippet: |
+      async function performCoordinatedRefresh(apiClient) {
+        const hasLock = acquireRefreshLock();
+        if (!hasLock) {
+          log("Waiting for another tab to complete refresh...");
+          try {
+            const { waitForResult } = await getCrossTab();
+            const result = await waitForResult({
+              storageKey: REFRESH_RESULT_KEY,
+              eventType: "TOKEN_REFRESHED",
+              timeoutMs: 8000,
+            });
+            if (result && result.success) {
+              log("Applying token from other tab's refresh");
+              setToken(result.token);
+              return result;
+            }
+          } catch (error) {
+            log("Cross-tab wait failed, proceeding with own refresh:", error.message);
+          }
+        }
+        try {
+          const result = await performRefresh(apiClient);
+          if (result.success) {
+            try {
+              const { broadcastMessage } = await getCrossTab();
+              broadcastMessage({ eventType: "TOKEN_REFRESHED", data: result, storageKey: REFRESH_RESULT_KEY, cleanupMs: 500 });
+            } catch (error) { log("Cross-tab broadcast failed:", error.message); }
+          }
+          return result;
+        } finally {
+          releaseRefreshLock();
+        }
+      }
+    covers:
+      - state: waiting_for_other_tab
+      - state: success
+    line_range:
+      start: 166
+      end: 222
+confidence: 0.95
+confidence_rationale: >
+  Token refresh flow fully traced across tokenRefresher.js with cross-tab
+  coordination, localStorage lock protocol, timeout handling, and result
+  broadcasting. All state transitions confirmed with code evidence.
+unresolved_questions: []
+status: complete

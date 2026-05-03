@@ -1,0 +1,167 @@
+'run_id': 'run-0023'
+'evaluator': 'orchestrator'
+'status': 'complete'
+'formula_id': 'frontend-derived'
+'recall':
+  'golden_behaviors_total': 4
+  'golden_behaviors_found': 0
+  'score': 0
+  'hits': []
+  'misses':
+    - 'auth-conditional-redirect'
+    - 'download-button-visibility'
+    - 'toa-gated-first-report-creation'
+    - 'auth.login'
+'discovery':
+  'new_behaviors_found': 10
+  'score': 1
+  'new_behaviors':
+    - 'api-client-with-token-refresh'
+    - 'browser-storage-utilities'
+    - 'cross-tab-session-sync'
+    - 'middleware-auth-guard'
+    - 'report-lifecycle-management'
+    - 'routing-contracts'
+    - 'stale-response-guards'
+    - 'stateful-ui-company-management'
+    - 'stateful-ui-pdf-generation'
+    - 'stateful-ui-reports'
+  'pending_review_path': 'runs/run-0023/evaluator/discovered-behaviors.yaml'
+'precision':
+  'mechanical': 1
+  'agent': 0.92
+  'combined': 0.98
+'overall_score': 0.59
+'scored_specs':
+  - 'id': 'api-client-with-token-refresh'
+    'precision':
+      'mechanical':
+        'score': 1
+        'issues': []
+      'agent':
+        'score': 0
+        'issues': []
+      'combined': 0.7
+  - 'id': 'auth-flow'
+    'precision':
+      'mechanical':
+        'score': 1
+        'issues': []
+      'agent':
+        'score': 0
+        'issues': []
+      'combined': 0.7
+  - 'id': 'browser-storage-utilities'
+    'precision':
+      'mechanical':
+        'score': 1
+        'issues': []
+      'agent':
+        'score': 0
+        'issues': []
+      'combined': 0.7
+  - 'id': 'cross-tab-session-sync'
+    'precision':
+      'mechanical':
+        'score': 1
+        'issues': []
+      'agent':
+        'score': 0
+        'issues': []
+      'combined': 0.7
+  - 'id': 'middleware-auth-guard'
+    'precision':
+      'mechanical':
+        'score': 1
+        'issues': []
+      'agent':
+        'score': 0
+        'issues': []
+      'combined': 0.7
+  - 'id': 'report-lifecycle-management'
+    'precision':
+      'mechanical':
+        'score': 1
+        'issues': []
+      'agent':
+        'score': 0
+        'issues': []
+      'combined': 0.7
+  - 'id': 'routing-contracts'
+    'precision':
+      'mechanical':
+        'score': 1
+        'issues': []
+      'agent':
+        'score': 0
+        'issues': []
+      'combined': 0.7
+  - 'id': 'stale-response-guards'
+    'precision':
+      'mechanical':
+        'score': 1
+        'issues': []
+      'agent':
+        'score': 0
+        'issues': []
+      'combined': 0.7
+  - 'id': 'stateful-ui-company-management'
+    'precision':
+      'mechanical':
+        'score': 1
+        'issues': []
+      'agent':
+        'score': 0
+        'issues': []
+      'combined': 0.7
+  - 'id': 'stateful-ui-pdf-generation'
+    'precision':
+      'mechanical':
+        'score': 1
+        'issues': []
+      'agent':
+        'score': 0
+        'issues': []
+      'combined': 0.7
+  - 'id': 'stateful-ui-reports'
+    'precision':
+      'mechanical':
+        'score': 1
+        'issues': []
+      'agent':
+        'score': 0
+        'issues': []
+      'combined': 0.7
+'mechanical_issues': []
+'agent_issues':
+  - 'spec': 'api-client-with-token-refresh'
+    'type': 'snippet_inaccuracy'
+    'severity': 'low'
+    'description': 'Spec snippet shows refreshAccessToken with different function signature than actual code. Actual code has performCoordinatedRefresh which handles cross-tab coordination internally.'
+    'evidence': 'Actual tokenRefresher.js shows performCoordinatedRefresh(apiClient) not refreshAccessToken({ apiClient: { request, get, post, patch, delete: remove } })'
+  - 'spec': 'middleware-auth-guard'
+    'type': 'hallucinated_conditions'
+    'severity': 'medium'
+    'description': 'Spec includes conditions ''hasRefreshTokenNoSession'' and ''refreshResultNotNull'' which are not present in the authGuard.js implementation. The actual authGuard.js is simpler with just session-based allow/redirect logic.'
+    'evidence': 'authGuard.js only handles session normalization and redirect decisions without explicit refresh token checks'
+  - 'spec': 'middleware-auth-guard'
+    'type': 'scope_mismatch'
+    'severity': 'low'
+    'description': 'Spec mentions ''session refresh attempts'' in description but the actual authGuard.js does not perform refresh - it only makes allow/redirect decisions based on session state.'
+    'evidence': 'authGuard.js returns allow/redirect decisions without calling refreshAccessToken'
+  - 'spec': 'report-lifecycle-management'
+    'type': 'incomplete_evidence'
+    'severity': 'low'
+    'description': 'Spec status is ''partial'' which is accurate - some hydration details in shared/lib modules not fully inspected.'
+    'evidence': 'Gate edit initialization confirmed but default report structure details not visible in frontend code'
+  - 'spec': 'routing-contracts'
+    'type': 'incomplete_evidence'
+    'severity': 'low'
+    'description': 'Spec status is ''partial'' which is accurate - allowed origins list and referrer validation logic details in shared/lib not fully inspected.'
+    'evidence': 'Gate entry hooks confirmed but validation contracts in shared/lib modules not fully verified'
+  - 'spec': 'stale-response-guards'
+    'type': 'incomplete_evidence'
+    'severity': 'low'
+    'description': 'Spec status is ''partial'' which is accurate - exact versioning algorithm in shared/lib/request-intent-guard.js not fully inspected.'
+    'evidence': 'Guard configuration confirmed but implementation details in shared/lib module not fully inspected'
+'evaluated_at': '2026-04-30T14:23:20.905Z'

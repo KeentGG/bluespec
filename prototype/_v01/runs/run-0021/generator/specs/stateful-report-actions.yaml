@@ -1,0 +1,119 @@
+id: stateful-report-actions
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_report_actions
+    coverage: full
+    notes: Per-report action state tracking via Zustand with semantic selectors
+description: >
+  Per-report action state tracking for download, rename, delete, and email
+  operations. Uses Zustand store with Record<string, boolean> for each action
+  type. Provides semantic selectors (isDownloading, isRenaming, etc.) and
+  compound selector (anyActionInProgress). Actions disable UI controls while
+  in progress.
+conditions:
+  - id: anyActionInProgress
+    description: Any action is in progress for a report
+    trigger: Component checks if report has active action
+    guards:
+      - field: anyActionInProgress
+        condition: returns true for reportId
+    then:
+      - Disable action dropdown trigger
+      - Show loading indicator
+  - id: isDownloading
+    description: Download action in progress
+    trigger: User initiates PDF download
+    guards:
+      - field: isDownloading
+        condition: returns true for reportId
+    then:
+      - Show "Downloading..." suffix on download button
+  - id: isRenaming
+    description: Rename action in progress
+    trigger: User saves new report name
+    guards:
+      - field: isRenaming
+        condition: returns true for reportId
+    then:
+      - Show loading on rename input
+  - id: isDeleting
+    description: Delete action in progress
+    trigger: User confirms deletion
+    guards:
+      - field: isDeleting
+        condition: returns true for reportId
+    then:
+      - Show "Deleting..." on delete button
+  - id: isEmailing
+    description: Email action in progress
+    trigger: User sends email
+    guards:
+      - field: isEmailing
+        condition: returns true for reportId
+    then:
+      - Show "Sending..." on send button
+inputs:
+  - id: reportId
+    type: string
+    source: report row
+    required: true
+outputs:
+  - id: action_state
+    type: boolean
+    destination: UI controls
+    lifespan: action duration
+evidence_refs:
+  - path: src/features/reports/store/useReportActionStore.ts
+    snippet: |
+      export const useReportActionStore = create<ReportActionState>((set, get) => ({
+        downloading: {},
+        renaming: {},
+        deleting: {},
+        emailing: {},
+        setDownloading: (reportId, isLoading) => set((state) => ({ downloading: { ...state.downloading, [reportId]: isLoading } })),
+        setRenaming: (reportId, isLoading) => set((state) => ({ renaming: { ...state.renaming, [reportId]: isLoading } })),
+        setDeleting: (reportId, isLoading) => set((state) => ({ deleting: { ...state.deleting, [reportId]: isLoading } })),
+        setEmailing: (reportId, isLoading) => set((state) => ({ emailing: { ...state.emailing, [reportId]: isLoading } })),
+        isDownloading: (reportId) => !!get().downloading[reportId],
+        isRenaming: (reportId) => !!get().renaming[reportId],
+        isDeleting: (reportId) => !!get().deleting[reportId],
+        isEmailing: (reportId) => !!get().emailing[reportId],
+        anyActionInProgress: (reportId) => {
+          const state = get();
+          return !!state.downloading[reportId] || !!state.renaming[reportId] || !!state.deleting[reportId] || !!state.emailing[reportId];
+        },
+      }));
+    covers:
+      - condition: anyActionInProgress
+      - condition: isDownloading
+      - condition: isRenaming
+      - condition: isDeleting
+      - condition: isEmailing
+    line_range:
+      start: 21
+      end: 61
+  - path: src/features/reports/components/ReportSplitActions.tsx
+    snippet: |
+      export function ReportSplitActions({ isDownloading, isRenaming, isDeleting, isEmailing, ... }) {
+        const isAnyInProgress = isDownloading || isRenaming || isDeleting || isEmailing;
+        return (
+          <DropdownMenuTrigger disabled={isAnyInProgress}>
+            {isDownloading ? <><Spinner /> Downloading...</> : "Download"}
+          </DropdownMenuTrigger>
+        );
+      }
+    covers:
+      - condition: anyActionInProgress
+      - condition: isDownloading
+    line_range:
+      start: 29
+      end: 73
+confidence: 0.95
+confidence_rationale: >
+  Report actions fully traced across Zustand store and ReportSplitActions
+  component. Per-report action tracking with Record<string, boolean> confirmed.
+  Semantic selectors and compound selector verified.
+unresolved_questions: []
+status: complete

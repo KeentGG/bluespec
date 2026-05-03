@@ -1,0 +1,20 @@
+'run_id': 'run-0022'
+'golden_set_version': 'v001'
+'discovered_at': '2026-04-30T12:11:06.702Z'
+'new_behaviors':
+  - 'id': 'auth-flow'
+    'description': 'Manages authentication flow including route protection, token lifecycle, JWT refresh with cross-tab coordination, and session synchronization via BroadcastChannel with localStorage fallback.'
+    'evidence_refs': []
+    'confidence': 0.92
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0022'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-ui'
+    'description': 'Manages stateful UI behavior for reports list including SWR-based data fetching with conditional execution, per-report action states (download, rename, delete, email), inline rename editing with debou'
+    'evidence_refs': []
+    'confidence': 0.88
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0022'
+    'discovered_by': 'spec-writer-agent'

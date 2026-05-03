@@ -1,0 +1,129 @@
+id: logout_flow
+version: '1.0'
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: logout_flow
+    coverage: full
+    notes: 'Covers executeLogout in useDashboardShell, logout API call, cross-tab broadcast, session/cache clearing, and fail-safe force-clear'
+description: |
+  Logout is initiated from the dashboard shell (sidebar). The executeLogout function calls POST /auth/logout with CSRF headers, then consults the company logout coordination contract to determine cleanup actions. On success, it clears the client data cache, clears the auth token (which broadcasts logout to other tabs via BroadcastChannel), removes specific localStorage keys, shows a success toast, and redirects to /login after a 500ms delay. On failure, a fail-safe path force-clears all auth state: clears client cache, clears auth token, runs window.localStorage.clear(), and redirects to /login to prevent stuck sessions.
+conditions:
+  - id: logout_success_cleanup
+    description: 'Normal logout path — API call succeeds'
+    trigger: 'executeLogout called, POST /auth/logout returns ok'
+    guards:
+      - field: logoutResult.ok
+        condition: 'logoutResult.ok === true'
+    then:
+      - 'clearClientDataCache()'
+      - 'clearToken()'
+      - 'Remove COMPANY_LOGOUT_LOCAL_STORAGE_KEYS from localStorage'
+      - 'Show success toast'
+      - 'Redirect to /login after 500ms delay'
+  - id: logout_fail_safe
+    description: 'Logout API call fails — force-clear everything to prevent stuck sessions'
+    trigger: 'executeLogout called, POST /auth/logout throws error or returns error'
+    then:
+      - 'clearClientDataCache()'
+      - 'clearToken()'
+      - 'window.localStorage.clear()'
+      - 'Redirect to /login'
+  - id: cross_tab_logout
+    description: 'clearToken() broadcasts logout to all open tabs via BroadcastChannel + localStorage'
+    trigger: 'clearToken() called (inside executeLogout or handleAuthError)'
+    effects:
+      - 'broadcastAuthChange("logout") via authBroadcast'
+      - 'clearAuthSession() — set in-memory session to null'
+      - 'clearBrowserUserCookie() — expire the user cookie'
+inputs:
+  - id: logout_headers
+    type: 'CSRF token from cookie applied as x-csrf-token header'
+    source: 'applyCsrfHeaders() reading from document.cookie'
+    required: true
+outputs:
+  - id: redirect_url
+    type: 'Browser redirect to /login'
+    destination: 'window.location.href = "/login"'
+    lifespan: immediate
+  - id: cleared_session
+    type: 'Auth session removed from memory, user cookie expired'
+    destination: 'All tabs (via cross-tab broadcast)'
+    lifespan: session
+evidence_refs:
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/shell/hooks/useDashboardShell.ts'
+    snippet: >
+      'async function executeLogout() {
+        const logoutResult = await logoutUser();
+        const coordination = resolveCompanyLogoutCoordinationContract();
+        if (logoutResult.ok) {
+          await clearClientDataCache();
+          clearToken();
+          // Remove localStorage keys
+          showToast("Logged out successfully");
+          setTimeout(() => window.location.href = "/login", 500);
+        }
+      }
+      // On failure:
+      await clearClientDataCache();
+      clearToken();
+      window.localStorage.clear();
+      window.location.href = "/login";'
+    covers:
+      - 'condition:logout_success_cleanup'
+      - 'condition:logout_fail_safe'
+    line_range:
+      start: 50
+      end: 89
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/auth-service.js'
+    snippet: |
+      export async function logoutUser(options = {}) {
+        const client = getClient(options);
+        return client.post({
+          path: "/auth/logout",
+          body: null,
+          headers: applyCsrfHeaders(),
+        });
+      }
+    covers:
+      - input:logout_headers
+    line_range:
+      start: 52
+      end: 58
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/tokenService.js'
+    snippet: |
+      export function clearToken() {
+        broadcastAuthChange("logout");
+        clearAuthSession();
+        clearBrowserUserCookie();
+      }
+      function broadcastAuthChange(type) {
+        if (typeof window === "undefined") return;
+        import("../lib/authBroadcast").then((mod) => (type === "login" ? mod.broadcastLogin() : mod.broadcastLogout()));
+      }
+    covers:
+      - 'condition:cross_tab_logout'
+    line_range:
+      start: 229
+      end: 236
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/company/contracts/shell-contract.js'
+    snippet: >
+      'export function resolveCompanyLogoutCoordinationContract() {
+        return {
+          shouldClearAuthSession: true,
+          shouldRedirect: true,
+          redirectDestination: "/login",
+          clearLocalStorageKeys: COMPANY_LOGOUT_LOCAL_STORAGE_KEYS,
+        };
+      }'
+    covers:
+      - 'condition:logout_success_cleanup'
+    line_range:
+      start: 344
+      end: 405
+confidence: 0.90
+confidence_rationale: |
+  Logout flow confirmed in useDashboardShell.ts (executeLogout), auth-service.js (POST /auth/logout with CSRF), tokenService.js (clearToken with cross-tab broadcast), and shell-contract.js (coordination contract). Fail-safe fallback path confirmed. The coordination contract references COMPANY_LOGOUT_LOCAL_STORAGE_KEYS but exact key names are in company feature — not fully enumerated here but contract shape is confirmed.
+unresolved_questions:
+  - 'Exact list of COMPANY_LOGOUT_LOCAL_STORAGE_KEYS not enumerated (in company feature, referenced by contract)'
+status: complete

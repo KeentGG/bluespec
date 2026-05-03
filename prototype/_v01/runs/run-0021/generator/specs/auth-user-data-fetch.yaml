@@ -1,0 +1,126 @@
+id: auth-user-data-fetch
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: auth_user_data_fetch
+    coverage: full
+    notes: SWR-based user profile data fetching with token-based authorization
+description: >
+  User profile data fetching using SWR for caching and revalidation. Reads
+  user ID from in-memory token store, fetches profile from GET /users/:userId
+  with automatic JWT injection. Returns normalized user data including TOA
+  agreement status.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: Waiting for userId to be available
+    - id: fetching
+      description: SWR query in flight
+    - id: success
+      description: User profile data loaded
+    - id: error
+      description: Fetch failed
+  transitions:
+    - id: userId_available
+      from: idle
+      to: fetching
+      trigger: Token store has valid userId
+      effects:
+        - Enable SWR query with key ["user.profile", userId]
+    - id: fetch_success
+      from: fetching
+      to: success
+      trigger: Backend returns 200 with user data
+      effects:
+        - Cache response in SWR
+        - Return normalized user profile
+    - id: fetch_error
+      from: fetching
+      to: error
+      trigger: Backend returns error
+      effects:
+        - Do not retry (shouldRetryOnError: false)
+inputs:
+  - id: userId
+    type: string
+    source: in-memory token store
+    required: true
+outputs:
+  - id: userProfile
+    type: object
+    destination: SWR cache
+    lifespan: session
+evidence_refs:
+  - path: src/features/auth/hooks/useUserQuery.ts
+    snippet: |
+      export function useUserQuery(options: any = {}) {
+        const { enabled = true } = options;
+        const token = getToken();
+        const userId = typeof token?._id === "string" && token._id.length > 0 ? token._id : null;
+        const isEnabled = enabled && typeof userId === "string" && userId.length > 0;
+        const queryKey = useMemo(() => ["user.profile", userId], [userId]);
+        const swrQuery = useSWR(
+          isEnabled ? queryKey : null,
+          () => fetchUserData({ userId }),
+          {
+            keepPreviousData: false,
+            revalidateOnMount: true,
+            shouldRetryOnError: false,
+          },
+        );
+        return { ...swrQuery, revalidate: () => swrQuery.mutate() };
+      }
+    covers:
+      - state: idle
+      - state: fetching
+      - state: success
+      - state: error
+    line_range:
+      start: 9
+      end: 31
+  - path: src/features/auth/api/user-service.js
+    snippet: |
+      export async function fetchUserData({ userId } = {}) {
+        const resolvedUserId = userId || getToken()?._id;
+        if (!resolvedUserId) {
+          return { ok: false, message: "User ID is required" };
+        }
+        const client = createDefaultApiClient({ apiBaseUrl: getApiBaseUrl() });
+        const path = `/users/${resolvedUserId}`;
+        const result = await client.get({ path });
+        if (!result.ok) {
+          return { ok: false, message: result.message || "Failed to fetch user data" };
+        }
+        const raw = result.raw || result.data;
+        return {
+          ok: true,
+          data: {
+            _id: raw._id || "",
+            email: raw.email || "",
+            agreedToa: raw.agreedToa === true,
+            firstName: raw.firstName || "",
+            lastName: raw.lastName || "",
+            website: raw.website || "",
+            company: raw.company || "",
+            phone: raw.phone || "",
+            address: raw.address || "",
+            companyDetails: raw.companyDetails || "",
+            marketingConsent: raw.marketingConsent === true,
+          },
+        };
+      }
+    covers:
+      - state: fetching
+      - state: success
+    line_range:
+      start: 57
+      end: 113
+confidence: 0.85
+confidence_rationale: >
+  User data fetch fully traced across useUserQuery hook and user-service API.
+  SWR integration with compound query key confirmed. Token-based userId
+  resolution verified. No retry on error policy documented.
+unresolved_questions: []
+status: complete

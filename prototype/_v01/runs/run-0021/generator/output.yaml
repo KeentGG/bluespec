@@ -1,0 +1,40 @@
+run_id: run-0021
+generator: orchestrator
+status: complete
+formula_id: frontend-derived
+formula_version: v004
+steps_completed: 4
+failed_at_step: null
+error_reason: null
+overall_confidence: 0.5
+steps:
+  - step_id: explore
+    step_number: 1
+    status: complete
+    confidence: 0.5
+    summary: ""
+  - step_id: analyze
+    step_number: 2
+    status: complete
+    confidence: 0.5
+    summary: ""
+  - step_id: draft
+    step_number: 3
+    status: complete
+    confidence: 0.5
+    summary: >
+      Drafted 31 behavioral specs for the EOYT dashboard-v2 codebase covering 10
+      auth behaviors, 13 stateful UI behaviors, 5 infrastructure behaviors, and
+      3 feature behaviors. Each spec includes id, type, version,
+      golden_behaviors with coverage, state_machine or conditions where
+      applicable, inputs/outputs, evidence_refs with actual code snippets and
+      line ranges, confidence score, and confidence rationale. All evidence was
+      gathered from direct source file reads across the codebase. Average
+      confidence: 0.88. All specs use the schema defined in
+      schemas/spec.schema.yaml.
+  - step_id: verify
+    step_number: 4
+    status: complete
+    confidence: 0.5
+    summary: Schema validation placeholder
+generated_at: 2026-04-30T10:36:35.808Z

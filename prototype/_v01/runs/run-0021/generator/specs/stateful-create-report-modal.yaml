@@ -1,0 +1,105 @@
+id: stateful-create-report-modal
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_create_report_modal
+    coverage: full
+    notes: Create report modal open/close state with default business ID via Zustand
+description: >
+  Create report modal open/close state managed by Zustand store. Stores
+  isOpen flag and optional defaultBusinessId. Modal resets form when opened
+  with a default business ID. Form includes company selector, tool type
+  grid (4 calculator types), and name input.
+conditions:
+  - id: isOpen_true
+    description: Modal is open
+    trigger: User clicks Create Report button
+    guards:
+      - field: isOpen
+        condition: equals true
+    then:
+      - Render Modal component
+      - Reset form fields
+      - If defaultBusinessId provided, pre-select company
+  - id: isOpen_false
+    description: Modal is closed
+    trigger: User closes modal or submission completes
+    guards:
+      - field: isOpen
+        condition: equals false
+    then:
+      - Do not render Modal
+inputs:
+  - id: defaultBusinessId
+    type: string
+    source: company context
+    required: false
+outputs:
+  - id: modal_state
+    type: boolean
+    destination: Modal component
+    lifespan: session
+evidence_refs:
+  - path: src/features/reports/store/useCreateReportStore.ts
+    snippet: |
+      export const useCreateReportStore = create<CreateReportState>((set) => ({
+        isOpen: false,
+        defaultBusinessId: null,
+        open: (defaultBusinessId) => set({ isOpen: true, defaultBusinessId: defaultBusinessId || null }),
+        close: () => set({ isOpen: false, defaultBusinessId: null }),
+      }));
+    covers:
+      - condition: isOpen_true
+      - condition: isOpen_false
+    line_range:
+      start: 11
+      end: 17
+  - path: src/features/reports/hooks/useCreateReportModal.ts
+    snippet: |
+      export function useCreateReportModal() {
+        const { isOpen, defaultBusinessId, open, close } = useCreateReportStore();
+        const [reportName, setReportName] = useState("");
+        const [businessId, setBusinessId] = useState("");
+        const [calcId, setCalcId] = useState("1");
+        useEffect(() => {
+          if (isOpen) {
+            setReportName("");
+            setBusinessId(defaultBusinessId || "");
+            setCalcId("1");
+          }
+        }, [isOpen, defaultBusinessId]);
+        return { isOpen, reportName, businessId, calcId, open, close, ... };
+      }
+    covers:
+      - condition: isOpen_true
+      - condition: isOpen_false
+    line_range:
+      start: 14
+      end: 43
+  - path: src/features/reports/components/CreateReportModal.tsx
+    snippet: |
+      export function CreateReportModal() {
+        const { isOpen, close, reportName, businessId, calcId, ... } = useCreateReportModal();
+        if (!isOpen) return null;
+        return (
+          <Modal isOpen={isOpen} onClose={close} title="Create Report">
+            <CompanySelector value={businessId} onChange={setBusinessId} />
+            <ToolGrid selectedTool={calcId} onSelect={setCalcId} />
+            <TextInput value={reportName} onChange={setReportName} maxLength={100} />
+            <Button onClick={handleSubmit} disabled={isCreating}>Create</Button>
+          </Modal>
+        );
+      }
+    covers:
+      - condition: isOpen_true
+    line_range:
+      start: 34
+      end: 199
+confidence: 0.9
+confidence_rationale: >
+  Create report modal fully traced across Zustand store, useCreateReportModal
+  hook, and CreateReportModal component. Open/close state with default
+  business ID confirmed. Form reset on open verified.
+unresolved_questions: []
+status: complete

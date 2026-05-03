@@ -1,0 +1,140 @@
+id: stateful-pdf-download
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_pdf_download
+    coverage: full
+    notes: PDF generation state management with localStorage persistence
+description: >
+  PDF generation state management with Zustand store and localStorage
+  persistence. Tracks generation status (waiting, finished, failed, completed),
+  generation flag, and metadata (pdfKey, cid, publicUrl, currentReportId).
+  Full-screen overlay renders different UI based on status. Polling checks
+  generation status every 3 seconds.
+conditions:
+  - id: isGenerating
+    description: PDF generation in progress
+    trigger: User initiates PDF download
+    guards:
+      - field: isGenerating
+        condition: equals true
+    then:
+      - Show full-screen overlay with waiting animation
+  - id: dlStatus_waiting
+    description: Waiting for PDF generation
+    trigger: Generation started
+    guards:
+      - field: dlStatus
+        condition: equals "waiting"
+    then:
+      - Show calculator GIF animation
+      - Poll status every 3 seconds
+  - id: dlStatus_finished
+    description: PDF generation finished
+    trigger: Poll returns finished status
+    guards:
+      - field: dlStatus
+        condition: equals "finished"
+    then:
+      - Show celebration GIF for 5 seconds
+      - Then show download button
+  - id: dlStatus_failed
+    description: PDF generation failed
+    trigger: Poll returns failed status
+    guards:
+      - field: dlStatus
+        condition: equals "failed"
+    then:
+      - Show error icon
+      - Show Try Again and Close buttons
+  - id: dlStatus_completed
+    description: PDF download completed
+    trigger: User downloads generated PDF
+    guards:
+      - field: dlStatus
+        condition: equals "completed"
+    then:
+      - Close overlay
+inputs:
+  - id: userId
+    type: string
+    source: auth token
+    required: true
+  - id: reportId
+    type: string
+    source: report row
+    required: true
+  - id: cid
+    type: string
+    source: report data
+    required: true
+outputs:
+  - id: pdf_url
+    type: string
+    destination: download link
+    lifespan: session
+evidence_refs:
+  - path: src/features/pdf/store/useDownloadStore.ts
+    snippet: |
+      export const useDownloadStore = create<DownloadState & DownloadActions>((set, get) => ({
+        dlStatus: getStorageValue(STORAGE_KEY_STATUS) as DownloadState["dlStatus"] || "",
+        isGenerating: getIsGeneratingFromStorage(),
+        pdfKey: getStorageValue(STORAGE_KEY_PDF_KEY),
+        cid: getStorageValue(STORAGE_KEY_CID),
+        publicUrl: getStorageValue(STORAGE_KEY_PUBLIC_URL),
+        currentReportId: getStorageValue(STORAGE_KEY_REPORT_ID),
+        setDlStatus: (status) => { set({ dlStatus: status }); setStorageValue(STORAGE_KEY_STATUS, status); },
+        setIsGenerating: (value) => { set({ isGenerating: value }); setStorageValue(STORAGE_KEY_IS_GENERATING, value.toString()); },
+        startDownload: async ({ userId, reportId, cid, email }) => {
+          get().setIsGenerating(true);
+          get().setDlStatus("waiting");
+          const response = await startPdfGeneration({ userId, reportId, email });
+          if (response.ok && hasPdfGenerationUserId(response.data) && response.data.userId) {
+            return true;
+          } else {
+            get().setDlStatus("failed");
+            return false;
+          }
+        },
+      }));
+    covers:
+      - condition: isGenerating
+      - condition: dlStatus_waiting
+      - condition: dlStatus_failed
+    line_range:
+      start: 76
+      end: 160
+  - path: src/features/pdf/components/PdfGenerationOverlay.tsx
+    snippet: |
+      if (dlStatus === "waiting") {
+        return <img src={calculatorGif} alt="Generating PDF..." />;
+      }
+      if (dlStatus === "finished" && showAnimation) {
+        return <img src={yeheyGif} alt="Success!" />;
+      }
+      if (dlStatus === "finished") {
+        return <Button onClick={handleDownload}>Download PDF</Button>;
+      }
+      if (dlStatus === "failed") {
+        return (
+          <>
+            <Button onClick={handleTryAgain}>Try Again</Button>
+            <Button onClick={handleClose}>Close</Button>
+          </>
+        );
+      }
+    covers:
+      - condition: dlStatus_waiting
+      - condition: dlStatus_finished
+      - condition: dlStatus_failed
+    line_range:
+      start: 197
+      end: 279
+confidence: 0.95
+confidence_rationale: >
+  PDF download fully traced across Zustand store and PdfGenerationOverlay.
+  Four-status state machine with localStorage persistence confirmed.
+  Polling interval (3s) and max attempts (60) documented.
+unresolved_questions: []
+status: complete

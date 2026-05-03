@@ -1,0 +1,6 @@
+'validation_report':
+  'valid_specs':
+    - 'auth-flow.yaml'
+    - 'stateful-ui.yaml'
+  'invalid_specs': []
+  'all_valid': true

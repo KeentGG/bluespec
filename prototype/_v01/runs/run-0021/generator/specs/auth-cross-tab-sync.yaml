@@ -1,0 +1,151 @@
+id: auth-cross-tab-sync
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: auth_cross_tab_sync
+    coverage: full
+    notes: BroadcastChannel with localStorage fallback for login/logout sync
+description: >
+  Cross-tab login/logout synchronization using BroadcastChannel with localStorage
+  fallback. When a user logs out in one tab, all other tabs clear their session
+  and redirect to /login. Login events redirect tabs on the login page to /companies.
+  Debounce protection prevents redirect loops.
+state_machine:
+  initial: listening
+  states:
+    - id: listening
+      description: Waiting for cross-tab events
+    - id: handling_logout
+      description: Processing logout event from another tab
+    - id: handling_login
+      description: Processing login event from another tab
+  transitions:
+    - id: logout_broadcast_received
+      from: listening
+      to: handling_logout
+      trigger: BroadcastChannel or localStorage logout event received
+      effects:
+        - Debounce check (1s window)
+        - If on protected route (/companies, /reports): redirect to /login
+        - Clear session via callback
+    - id: login_broadcast_received
+      from: listening
+      to: handling_login
+      trigger: BroadcastChannel or localStorage login event received
+      effects:
+        - Debounce check (1s window)
+        - If on /login page: redirect to /companies
+        - Refresh auth state via callback
+inputs:
+  - id: channel_name
+    type: string
+    source: constant "eoyt-auth-sync"
+    required: true
+  - id: storage_key
+    type: string
+    source: event-specific key prefix
+    required: true
+outputs:
+  - id: session_clear
+    type: event
+    destination: in-memory session store
+    lifespan: immediate
+  - id: redirect
+    type: URL
+    destination: window.location
+    lifespan: immediate
+evidence_refs:
+  - path: src/features/auth/lib/authBroadcast.js
+    snippet: |
+      export function broadcastLogout() {
+        if (typeof window === "undefined") return;
+        const timestamp = Date.now();
+        broadcastMessage({
+          channelName: CHANNEL_NAME,
+          eventType: LOGOUT_EVENT,
+          data: { timestamp },
+          storageKey: `${LOGOUT_KEY_PREFIX}${timestamp}`,
+          cleanupMs: 100,
+        });
+      }
+    covers:
+      - transition: logout_broadcast_received
+    line_range:
+      start: 35
+      end: 55
+  - path: src/features/auth/lib/authBroadcast.js
+    snippet: |
+      function handleLogoutEvent(callback) {
+        const now = Date.now();
+        if (now - lastRedirectTime < REDIRECT_DEBOUNCE_MS) return;
+        lastRedirectTime = now;
+        const currentPath = window.location.pathname;
+        const isProtected = currentPath.includes("/companies") || currentPath.includes("/reports");
+        if (isProtected) {
+          const basePath = window.location.pathname.split("/companies")[0].split("/reports")[0] || "";
+          const loginPath = basePath ? `${basePath}/login` : "/login";
+          window.location.href = loginPath;
+        }
+        if (typeof callback === "function") callback();
+      }
+    covers:
+      - transition: logout_broadcast_received
+    line_range:
+      start: 264
+      end: 305
+  - path: src/features/auth/lib/authBroadcast.js
+    snippet: |
+      function handleLoginEvent(callback) {
+        const now = Date.now();
+        if (now - lastLoginTime < LOGIN_DEBOUNCE_MS) return;
+        lastLoginTime = now;
+        const currentPath = window.location.pathname;
+        const isLoginPage = currentPath.includes("/login");
+        if (isLoginPage) {
+          const basePath = currentPath.split("/login")[0] || "";
+          const companiesPath = basePath ? `${basePath}/companies` : "/companies";
+          window.location.href = companiesPath;
+        }
+        if (typeof callback === "function") callback();
+      }
+    covers:
+      - transition: login_broadcast_received
+    line_range:
+      start: 217
+      end: 258
+  - path: src/features/auth/lib/crossTab.js
+    snippet: |
+      export function broadcastMessage({ channelName = CHANNEL_NAME, eventType, data, storageKey, cleanupMs = 500 }) {
+        if (typeof window === "undefined") return;
+        if (isBroadcastSupported()) {
+          try {
+            const BC = getBroadcastChannelConstructor();
+            if (BC) {
+              const channel = new BC(channelName);
+              channel.postMessage({ type: eventType, data });
+              channel.close();
+            }
+          } catch (_error) { }
+        }
+        if (typeof localStorage !== "undefined") {
+          try {
+            const payload = typeof data === "string" ? data : JSON.stringify(data);
+            localStorage.setItem(storageKey, payload);
+            setTimeout(() => { try { localStorage.removeItem(storageKey); } catch (_e) {} }, cleanupMs);
+          } catch (_error) { }
+        }
+      }
+    covers:
+      - transition: logout_broadcast_received
+      - transition: login_broadcast_received
+    line_range:
+      start: 46
+      end: 85
+confidence: 0.9
+confidence_rationale: >
+  Cross-tab sync fully traced across authBroadcast.js, crossTab.js, and
+  authMemorySession.js. BroadcastChannel + localStorage dual path confirmed.
+  Debounce protection and redirect logic documented.
+unresolved_questions: []
+status: complete

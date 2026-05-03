@@ -1,0 +1,181 @@
+id: stateful-ui-company-management
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_ui_company_management
+    coverage: full
+    notes: "Modal states for company add/edit, delete, and report creation"
+description: >
+  Manages UI state for company-related modals including add/edit form,
+  delete confirmation, and report creation. Tracks which modal is open
+  and whether an operation is in progress.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: "No modal open"
+    - id: add_edit_modal_open
+      description: "Add or edit company modal is visible"
+    - id: delete_modal_open
+      description: "Delete company confirmation is visible"
+    - id: create_report_modal_open
+      description: "Create report for company modal is visible"
+  transitions:
+    - id: open_add
+      from: idle
+      to: add_edit_modal_open
+      trigger: "User clicks add company button"
+      effects:
+        - "Set editBusinessId=null (add mode)"
+        - "Set isAddEditOpen=true"
+    - id: open_edit
+      from: idle
+      to: add_edit_modal_open
+      trigger: "User clicks edit button on company row"
+      effects:
+        - "Set editBusinessId=businessId (edit mode)"
+        - "Set isAddEditOpen=true"
+    - id: close_add_edit
+      from: add_edit_modal_open
+      to: idle
+      trigger: "User closes modal or submits form"
+      effects:
+        - "Set isAddEditOpen=false"
+        - "Set editBusinessId=null"
+    - id: open_delete
+      from: idle
+      to: delete_modal_open
+      trigger: "User clicks delete button on company row"
+      effects:
+        - "Set deleteTargetId=businessId"
+        - "Set isDeleteOpen=true"
+    - id: close_delete
+      from: delete_modal_open
+      to: idle
+      trigger: "User cancels or confirms deletion"
+      effects:
+        - "Set isDeleteOpen=false"
+        - "Set deleteTargetId=null"
+    - id: open_create_report
+      from: idle
+      to: create_report_modal_open
+      trigger: "User clicks create report button on company row"
+      effects:
+        - "Set createReportBusinessId=businessId"
+        - "Set createReportCalculatorId=calculatorId"
+        - "Set isCreateReportOpen=true"
+    - id: close_create_report
+      from: create_report_modal_open
+      to: idle
+      trigger: "User closes modal or submits form"
+      effects:
+        - "Set isCreateReportOpen=false"
+conditions:
+  - id: isAddEditOpen
+    description: "Controls visibility of add/edit company modal"
+    trigger: "Add or edit button clicked"
+    guards:
+      - field: isAddEditOpen
+        condition: "isAddEditOpen === true"
+    then:
+      - "Render add/edit company modal"
+    else:
+      - "Hide add/edit company modal"
+  - id: editBusinessIdNotNull
+    description: "Determines if modal is in edit mode"
+    trigger: "Add/edit modal opens"
+    guards:
+      - field: editBusinessId
+        condition: "editBusinessId !== null (edit mode)"
+    then:
+      - "Populate form with existing company data"
+      - "Set modal title to 'Edit Company'"
+    else:
+      - "Show empty form"
+      - "Set modal title to 'Add Company'"
+  - id: editBusinessIdNull
+    description: "Determines if modal is in add mode"
+    trigger: "Add/edit modal opens"
+    guards:
+      - field: editBusinessId
+        condition: "editBusinessId === null (add mode)"
+    then:
+      - "Show empty form for new company"
+  - id: isDeleteOpen
+    description: "Controls visibility of delete confirmation modal"
+    trigger: "Delete button clicked"
+    guards:
+      - field: isDeleteOpen
+        condition: "isDeleteOpen === true"
+    then:
+      - "Render delete confirmation modal"
+    else:
+      - "Hide delete confirmation modal"
+  - id: isCreateReportOpen
+    description: "Controls visibility of create report modal"
+    trigger: "Create report button clicked"
+    guards:
+      - field: isCreateReportOpen
+        condition: "isCreateReportOpen === true"
+    then:
+      - "Render create report modal"
+    else:
+      - "Hide create report modal"
+inputs:
+  - id: businessId
+    type: string
+    source: "Company row click"
+    required: true
+  - id: calculatorId
+    type: string
+    source: "Calculator type selection"
+    required: false
+outputs:
+  - id: modalState
+    type: "Modal state object"
+    destination: "Component props"
+    lifespan: "Session duration"
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/company/hooks/useCompanyModals.ts
+    snippet: |
+      export function useCompanyModals(): UseCompanyModalsReturn {
+        const [isAddEditOpen, setIsAddEditOpen] = useState(false);
+        const [editBusinessId, setEditBusinessId] = useState<string | null>(null);
+        const openAdd = useCallback(() => {
+          setEditBusinessId(null);
+          setIsAddEditOpen(true);
+        }, []);
+        const openEdit = useCallback((businessId: string) => {
+          setEditBusinessId(businessId);
+          setIsAddEditOpen(true);
+        }, []);
+        const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+        const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+        const [isCreateReportOpen, setIsCreateReportOpen] = useState(false);
+        return {
+          addEdit: { isOpen: isAddEditOpen, editBusinessId, openAdd, openEdit, close: closeAddEdit },
+          delete: { isOpen: isDeleteOpen, targetId: deleteTargetId, open: openDelete, close: closeDelete },
+          createReport: { isOpen: isCreateReportOpen, businessId: createReportBusinessId, calculatorId: createReportCalculatorId, open: openCreateReport, close: closeCreateReport },
+        };
+      }
+    covers:
+      - "condition:isAddEditOpen"
+      - "condition:editBusinessIdNotNull"
+      - "condition:editBusinessIdNull"
+      - "condition:isDeleteOpen"
+      - "condition:isCreateReportOpen"
+      - "transition:open_add"
+      - "transition:open_edit"
+      - "transition:close_add_edit"
+      - "transition:open_delete"
+      - "transition:close_delete"
+      - "transition:open_create_report"
+      - "transition:close_create_report"
+confidence: 0.95
+confidence_rationale: >
+  useCompanyModals hook provides complete state management for all three modals.
+  Add/edit mode distinction clearly handled via editBusinessId state.
+  All transitions have explicit state updates.
+unresolved_questions: []
+status: complete

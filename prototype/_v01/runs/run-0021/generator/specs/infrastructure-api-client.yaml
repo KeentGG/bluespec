@@ -1,0 +1,152 @@
+id: infrastructure-api-client
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: infrastructure_api_client
+    coverage: full
+    notes: Core HTTP client with JWT injection, CSRF handling, auto refresh, retry
+description: >
+  Core HTTP client wrapping the Fetch API. Provides createApiClient and
+  createDefaultApiClient factories returning typed request methods. Auto-injects
+  JWT Bearer token, CSRF header for state-changing requests, handles 401
+  auto-retry with token refresh, and normalizes responses to ApiResult<T>.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: Client ready for requests
+    - id: requesting
+      description: HTTP request in flight
+    - id: refreshing
+      description: Token refresh triggered by 401
+    - id: retrying
+      description: Retrying original request with new token
+  transitions:
+    - id: request_sent
+      from: idle
+      to: requesting
+      trigger: client.get/post/patch/delete called
+      effects:
+        - Resolve token from memory store
+        - Build auth headers (Bearer + userId)
+        - Inject CSRF header for state-changing methods
+        - Execute fetch with credentials: include
+    - id: response_received
+      from: requesting
+      to: idle
+      trigger: Backend responds
+      effects:
+        - Normalize response via QFM responseAdapter
+        - Return ApiResult<T>
+    - id: auth_error_detected
+      from: requesting
+      to: refreshing
+      trigger: Response is 401, 403+CSRF, or 500+jwt expired
+      guards:
+        - field: skipTokenRefresh
+          condition: not true
+        - field: isRefreshEndpoint
+          condition: not true
+      effects:
+        - Call refreshAccessToken()
+    - id: refresh_success
+      from: refreshing
+      to: retrying
+      trigger: Token refresh succeeds
+      effects:
+        - Retry original request with new token
+        - Set retriedAfterRefresh flag to prevent loops
+    - id: refresh_failure
+      from: refreshing
+      to: idle
+      trigger: Token refresh fails
+      effects:
+        - Call handleAuthError() to redirect to /login
+inputs:
+  - id: path
+    type: string
+    source: API endpoint
+    required: true
+  - id: method
+    type: string
+    source: HTTP method
+    required: true
+  - id: body
+    type: object
+    source: request payload
+    required: false
+outputs:
+  - id: result
+    type: ApiResult<T>
+    destination: calling code
+    lifespan: immediate
+evidence_refs:
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      export function createApiClient(options: ApiClientOptions = {}): ApiClient {
+        async function executeRequest<T>(requestOptions: RequestOptions = {}, { retriedAfterRefresh = false } = {}): Promise<ApiResult<T>> {
+          const fetchImpl = resolveFetchImpl(requestOptions, options);
+          const requestUrl = resolveRequestUrl(requestOptions, options);
+          const token = resolveTokenForRequest(requestOptions, options);
+          const requestHeaders = normalizeHeaderInput(requestOptions.headers);
+          const headers = buildAuthHeaders(requestHeaders, token);
+          const method = normalizeRequestMethod(requestOptions.method);
+          const withBody = method !== "GET" && method !== "HEAD";
+          const isRefreshEndpoint = requestOptions.path === "/auth/refresh";
+          if (withBody && !hasHeader(headers, "x-csrf-token") && !skipRefresh && !isRefreshEndpoint) {
+            let csrfToken = getCsrfToken();
+            if (!csrfToken && !retriedAfterRefresh) {
+              const refreshAccessToken = await getRefreshAccessToken();
+              const refreshResult = await refreshAccessToken({ apiClient: { request, get, post, patch, delete: remove } });
+              if (refreshResult.success) { csrfToken = getCsrfToken(); }
+            }
+            if (csrfToken) { headers["x-csrf-token"] = csrfToken; }
+          }
+          const response = await fetchImpl(requestUrl, { method, headers, body, signal, cache, credentials: "include" });
+          const normalized = normalizeQfmResponse({ status: response.status, data: payload }, { transportStatus: response.status });
+          const result = createResult<T>({ ok: normalized.ok, statusCode: normalized.statusCode, ... });
+          if (shouldRetryAfterRefresh) { /* retry logic */ }
+          return result;
+        }
+        return { request, get, post, patch, delete: remove };
+      }
+    covers:
+      - state: idle
+      - state: requesting
+      - state: refreshing
+      - state: retrying
+    line_range:
+      start: 445
+      end: 672
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      export interface ApiResult<T = unknown> {
+        ok: boolean;
+        statusCode: number | null;
+        message: string;
+        data?: T;
+        envelopeType: string;
+        contractFailure: unknown | null;
+        taxonomyBucket: string | null;
+        raw: unknown;
+        response: Response | null;
+        status: number | null;
+        headers: Record<string, string>;
+        url: string | null;
+        error?: Error | null;
+        aborted: boolean;
+        reason: string;
+      }
+    covers:
+      - state: idle
+    line_range:
+      start: 411
+      end: 427
+confidence: 0.95
+confidence_rationale: >
+  API client fully traced. Fetch-based implementation with JWT injection,
+  CSRF interceptor, 401 auto-retry, and normalized ApiResult<T> confirmed.
+  Lazy-loaded refresh function for Edge Runtime compatibility verified.
+unresolved_questions: []
+status: complete

@@ -1,0 +1,208 @@
+id: stateful-ui-pdf-generation
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_ui_pdf_generation
+    coverage: full
+    notes: "PDF generation overlay with waiting, finished, and failed states"
+description: >
+  Manages the PDF generation lifecycle including status polling,
+  celebration animation, download button display, and error handling.
+  Uses localStorage to persist generation state across page refreshes.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: "No PDF generation in progress"
+    - id: generating
+      description: "PDF generation started, polling for status"
+    - id: waiting
+      description: "Waiting for backend to complete PDF generation"
+    - id: finished_with_animation
+      description: "PDF ready, showing celebration animation"
+    - id: finished_with_download
+      description: "PDF ready, showing download button"
+    - id: failed
+      description: "PDF generation failed"
+  transitions:
+    - id: start_generation
+      from: idle
+      to: generating
+      trigger: "User initiates PDF download"
+      effects:
+        - "Set isGenerating=true"
+        - "Set dlStatus='waiting'"
+        - "Store pdfKey, cid, reportId in localStorage"
+    - id: poll_status
+      from: generating
+      to: waiting
+      trigger: "Polling begins for PDF status"
+      effects:
+        - "Start interval polling every 3 seconds"
+        - "Maximum 60 attempts before timeout"
+    - id: generation_complete
+      from: waiting
+      to: finished_with_animation
+      trigger: "Backend returns status='finished' or publicUrl exists"
+      effects:
+        - "Set dlStatus='finished'"
+        - "Store publicUrl"
+        - "Show celebration animation for 5 seconds"
+    - id: animation_complete
+      from: finished_with_animation
+      to: finished_with_download
+      trigger: "5-second animation timer expires"
+      effects:
+        - "Set showAnimation=false"
+        - "Display download button"
+    - id: generation_failed
+      from: waiting
+      to: failed
+      trigger: "Backend returns status='failed' or timeout reached"
+      effects:
+        - "Set dlStatus='failed'"
+        - "Show error message with retry option"
+    - id: retry
+      from: failed
+      to: waiting
+      trigger: "User clicks retry button"
+      effects:
+        - "Set dlStatus='waiting'"
+        - "Restart polling"
+    - id: close
+      from: any
+      to: idle
+      trigger: "User clicks close button"
+      effects:
+        - "Clear all state"
+        - "Remove localStorage entries"
+conditions:
+  - id: isGenerating
+    description: "Controls overlay visibility"
+    trigger: "PDF generation initiated"
+    guards:
+      - field: isGenerating
+        condition: "isGenerating === false → return null"
+    then:
+      - "Do not render overlay"
+    else:
+      - "Render full-screen overlay"
+  - id: dlStatusWaiting
+    description: "Shows loading animation while waiting"
+    trigger: "dlStatus changes to 'waiting'"
+    guards:
+      - field: dlStatus
+        condition: "dlStatus === 'waiting'"
+    then:
+      - "Show calculator loading GIF"
+      - "Display 'putting together your personalized report' message"
+  - id: dlStatusFinishedWithAnimation
+    description: "Shows celebration animation on completion"
+    trigger: "dlStatus changes to 'finished'"
+    guards:
+      - field: dlStatus
+        condition: "dlStatus === 'finished' AND showAnimation === true"
+    then:
+      - "Show Yehey celebration GIF"
+      - "Display success message"
+  - id: dlStatusFinishedWithoutAnimation
+    description: "Shows download button after animation"
+    trigger: "Animation timer completes"
+    guards:
+      - field: dlStatus
+        condition: "dlStatus === 'finished' AND showAnimation === false"
+    then:
+      - "Show download button with ArrowDownTrayIcon"
+      - "Display 'Click the button above to download' message"
+  - id: dlStatusFailed
+    description: "Shows error state with retry option"
+    trigger: "dlStatus changes to 'failed'"
+    guards:
+      - field: dlStatus
+        condition: "dlStatus === 'failed'"
+    then:
+      - "Show ExclamationCircleIcon with bounce animation"
+      - "Display 'Report Generation Failed' message"
+      - "Show Try Again and Close buttons"
+  - id: isWaitingCloseButton
+    description: "Hides close button during waiting state"
+    trigger: "Overlay renders"
+    guards:
+      - field: isWaiting
+        condition: "isWaiting === false → show close button"
+    then:
+      - "Show close button in top-right corner"
+    else:
+      - "Hide close button"
+inputs:
+  - id: userId
+    type: string
+    source: "Current user ID"
+    required: true
+  - id: reportId
+    type: string
+    source: "Report being downloaded"
+    required: true
+  - id: cid
+    type: string
+    source: "Calculator type ID"
+    required: true
+outputs:
+  - id: downloadUrl
+    type: string
+    destination: "Browser download"
+    lifespan: "Immediate"
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/pdf/components/PdfGenerationOverlay.tsx
+    snippet: |
+      export function PdfGenerationOverlay() {
+        const { isGenerating, dlStatus, pdfKey, cid, publicUrl, setDlStatus, setIsGenerating, setPublicUrl, reset } = useDownloadStore();
+        // ...
+        if (!isGenerating) return null;
+        const isFinished = dlStatus === "finished";
+        const isFailed = dlStatus === "failed";
+        const isWaiting = dlStatus === "waiting";
+        // ...
+        {isWaiting && ( <div>...CalculatorLoading GIF...</div> )}
+        {isFinished && showAnimation && ( <div>...Yehey GIF...</div> )}
+        {isFinished && !showAnimation && ( <div>...download button...</div> )}
+        {isFailed && ( <div>...error state...</div> )}
+        {!isWaiting && ( <Button>...close button...</Button> )}
+      }
+    covers:
+      - "condition:isGenerating"
+      - "condition:dlStatusWaiting"
+      - "condition:dlStatusFinishedWithAnimation"
+      - "condition:dlStatusFinishedWithoutAnimation"
+      - "condition:dlStatusFailed"
+      - "condition:isWaitingCloseButton"
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/pdf/store/useDownloadStore.ts
+    snippet: |
+      export const useDownloadStore = create<DownloadState & DownloadActions>((set, get) => ({
+        dlStatus: getStorageValue(STORAGE_KEY_STATUS) as DownloadState["dlStatus"] || "",
+        isGenerating: getIsGeneratingFromStorage(),
+        pdfKey: getStorageValue(STORAGE_KEY_PDF_KEY),
+        cid: getStorageValue(STORAGE_KEY_CID),
+        publicUrl: getStorageValue(STORAGE_KEY_PUBLIC_URL),
+        currentReportId: getStorageValue(STORAGE_KEY_REPORT_ID),
+        startDownload: async ({ userId, reportId, cid, email }) => {
+          get().setIsGenerating(true);
+          get().setDlStatus("waiting");
+          // ...
+        },
+        reset: () => {
+          set({ dlStatus: "", isGenerating: false, pdfKey: "", cid: "", publicUrl: "", currentReportId: "" });
+          // Remove localStorage entries
+        },
+      }));
+    covers:
+      - "transition:start_generation"
+      - "transition:close"
+confidence: 0.96
+confidence_rationale: >
+  Overlay component explicitly handles all state combinations.
+  Zustand store confirms localStorage persistence and state management.
+  Polling logic and animation timer verified in PdfGenerationOverlay.tsx.
+unresolved_questions: []
+status: complete

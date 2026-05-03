@@ -1,53 +1,55 @@
-id: toa.gated-first-report-creation
-version: "1.0"
-type: spec
-ecosystem: frontend
-golden_behaviors:
-  - id: toa-gated-first-report-creation
-    coverage: partial
-    notes: Captures TOA-gated redirect behavior but not end-to-end calculator-side report creation.
-description: Defers first report creation until TOA is accepted by redirecting the user into the introduction flow.
-state_machine:
-  initial: dashboard_ready
-  states:
-    - id: dashboard_ready
-      description: User is on the dashboard before report creation.
-    - id: introduction_redirected
-      description: User is redirected to the TOA introduction flow.
-    - id: report_created
-      description: Report exists after TOA acceptance and downstream creation.
-  transitions:
-    - id: toa_not_accepted
-      from: dashboard_ready
-      to: introduction_redirected
-      trigger: user attempts first report creation without TOA
-      guards:
-        - field: agreed_toa
-          condition: agreed_toa is false
-      effects:
-        - redirect to introduction route with businessId and reportName
-conditions: []
-inputs:
-  - id: agreed_toa
-    type: boolean
-    source: user profile service
-    required: true
-outputs:
-  - id: toa_redirect
-    type: route transition
-    destination: browser navigation
-evidence_refs:
-  - path: src/features/reports/hooks/useReportCreation.ts
-    snippet: |
-      if (!agreedToa) {
-        router.push(introductionUrl);
-        return;
-      }
-    covers:
-      - transition: toa_not_accepted
-      - output: toa_redirect
-confidence: 0.82
-confidence_rationale: Dashboard-side TOA gating is evidenced, but downstream report creation remains outside the visible fixture.
-unresolved_questions:
-  - Which calculator route performs report creation after TOA acceptance.
-status: partial
+'id': 'toa.gated-first-report-creation'
+'version': '1.0'
+'type': 'spec'
+'ecosystem': 'frontend'
+'golden_behaviors':
+  - 'id': 'toa-gated-first-report-creation'
+    'coverage': 'partial'
+    'notes': 'Captures TOA-gated redirect behavior but not end-to-end calculator-side report creation.'
+'description': 'Defers first report creation until TOA is accepted by redirecting the user into the introduction flow.'
+'state_machine':
+  'initial': 'dashboard_ready'
+  'states':
+    - 'id': 'dashboard_ready'
+      'description': 'User is on the dashboard before report creation.'
+    - 'id': 'introduction_redirected'
+      'description': 'User is redirected to the TOA introduction flow.'
+    - 'id': 'report_created'
+      'description': 'Report exists after TOA acceptance and downstream creation.'
+  'transitions':
+    - 'id': 'toa_not_accepted'
+      'from': 'dashboard_ready'
+      'to': 'introduction_redirected'
+      'trigger': 'user attempts first report creation without TOA'
+      'guards':
+        - 'field': 'agreed_toa'
+          'condition': 'agreed_toa is false'
+      'effects':
+        - 'redirect to introduction route with businessId and reportName'
+'conditions': []
+'inputs':
+  - 'id': 'agreed_toa'
+    'type': 'boolean'
+    'source': 'user profile service'
+    'required': true
+'outputs':
+  - 'id': 'toa_redirect'
+    'type': 'route transition'
+    'destination': 'browser navigation'
+'evidence_refs':
+  - 'path': 'src/features/reports/hooks/useReportCreation.ts'
+    'snippet': "if (!agreedToa) {
+
+      \  router.push(introductionUrl);
+
+      \  return;
+
+      }\n"
+    'covers':
+      - 'transition:toa_not_accepted'
+      - 'output:toa_redirect'
+'confidence': 0.82
+'confidence_rationale': 'Dashboard-side TOA gating is evidenced, but downstream report creation remains outside the visible fixture.'
+'unresolved_questions':
+  - 'Which calculator route performs report creation after TOA acceptance.'
+'status': 'partial'

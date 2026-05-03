@@ -1,0 +1,195 @@
+id: auth-login-flow
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: auth_login_flow
+    coverage: full
+    notes: Complete login flow with credentials, session bootstrap, and redirect
+description: >
+  User authentication via email/password login form. Submits credentials to
+  POST /auth/login, bootstraps session from response envelope, stores token
+  in memory, writes user cookie, broadcasts login to other tabs, and
+  redirects authenticated user to /companies.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: Form ready for input
+    - id: submitting
+      description: Login request in flight
+    - id: session_staging
+      description: Token extracted, session being bootstrapped
+    - id: success
+      description: Session established, redirect pending
+    - id: error
+      description: Login failed, error displayed
+  transitions:
+    - id: form_submit
+      from: idle
+      to: submitting
+      trigger: User clicks Access button
+      guards:
+        - field: email
+          condition: non-empty
+        - field: password
+          condition: non-empty
+      effects:
+        - POST /auth/login with email, password, rememberMe
+    - id: login_success
+      from: submitting
+      to: session_staging
+      trigger: Backend returns 200 with user envelope
+      effects:
+        - Extract token payload from response
+        - Set token in memory via tokenService
+        - Write user cookie
+        - Broadcast login to other tabs
+    - id: bootstrap_complete
+      from: session_staging
+      to: success
+      trigger: Session staging callback completes
+      effects:
+        - Clear client data cache
+        - Router.replace(/companies)
+    - id: login_failure
+      from: submitting
+      to: error
+      trigger: Backend returns non-200 or envelope missing
+      effects:
+        - Display error message to user
+    - id: retry
+      from: error
+      to: idle
+      trigger: User edits form and resubmits
+inputs:
+  - id: email
+    type: string
+    source: email input field
+    required: true
+    validation:
+      format: email
+      trim: true
+  - id: password
+    type: string
+    source: password input field
+    required: true
+  - id: rememberMe
+    type: boolean
+    source: checkbox
+    required: false
+outputs:
+  - id: session_token
+    type: JWT string
+    destination: in-memory session store
+    lifespan: session
+  - id: user_cookie
+    type: JSON object
+    destination: document.cookie (user cookie)
+    lifespan: 7 days
+  - id: login_broadcast
+    type: event
+    destination: BroadcastChannel + localStorage
+    lifespan: 100ms
+evidence_refs:
+  - path: src/features/auth/components/LoginPageContent.tsx
+    snippet: |
+      async function handleSubmit(event) {
+        event.preventDefault();
+        if (isLoading) return;
+        setErrorMessage("");
+        setIsLoading(true);
+        const trimmedEmail = email.trim();
+        try {
+          const loginResponse = await loginRequest(apiClient, {
+            email: trimmedEmail,
+            password,
+            rememberMe,
+          });
+          const decision = await bootstrapLoginSession({
+            loginResponse,
+            stageSession: async (sessionPayload) => {
+              stagedSessionPayload = sessionPayload;
+              await clearClientDataCache();
+            },
+          });
+          if (!decision.sessionStaged) {
+            setErrorMessage(...);
+            return;
+          }
+          if (decision.action === "redirect" && typeof decision.destination === "string") {
+            router.replace(decision.destination);
+            return;
+          }
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    covers:
+      - transition: form_submit
+      - transition: login_success
+      - transition: login_failure
+    line_range:
+      start: 90
+      end: 136
+  - path: src/features/auth/api/auth-service.js
+    snippet: |
+      export async function registerUser({ email, password }, options = {}) {
+        const client = getClient(options);
+        return client.post({
+          path: "/auth/register",
+          body: { email, password },
+          skipTokenRefresh: true,
+          skipAuthErrorHandling: true,
+        });
+      }
+    covers:
+      - output: session_token
+    line_range:
+      start: 42
+      end: 50
+  - path: src/features/auth/api/sessionBootstrap.js
+    snippet: |
+      export async function bootstrapLoginSession(options = {}) {
+        const { loginResponse, stageSession, routes } = options;
+        return bootstrapSession({
+          authResponse: loginResponse,
+          stageSession,
+          routes,
+          source: "login",
+        });
+      }
+    covers:
+      - transition: login_success
+      - transition: bootstrap_complete
+    line_range:
+      start: 189
+      end: 198
+  - path: src/features/auth/api/tokenService.js
+    snippet: |
+      export function setToken(tokenPayload) {
+        log("setToken() called");
+        const normalized = setAuthSession(tokenPayload);
+        log("Auth session set:", normalized ? "success" : "failed");
+        if (!normalized) {
+          log("No normalized token - skipping cookie and broadcast");
+          return;
+        }
+        log("Writing user cookie...");
+        setBrowserUserCookie(normalized);
+        broadcastAuthChange("login");
+      }
+    covers:
+      - output: session_token
+      - output: user_cookie
+      - output: login_broadcast
+    line_range:
+      start: 200
+      end: 216
+confidence: 0.95
+confidence_rationale: >
+  Login flow fully traced across LoginPageContent component, auth-service API,
+  sessionBootstrap module, and tokenService. All transitions confirmed with
+  code evidence. Session bootstrap handles multiple envelope formats.
+unresolved_questions: []
+status: complete

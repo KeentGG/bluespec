@@ -13,7 +13,8 @@ function validateStepOutput(output, expectedSchema) {
     return { valid: true, errors: [] };
   }
 
-  const validate = ajv.compile(expectedSchema);
+  const schema = normalizeExpectedSchema(expectedSchema);
+  const validate = ajv.compile(schema);
   const valid = validate(output);
 
   if (!valid) {
@@ -29,6 +30,19 @@ function validateStepOutput(output, expectedSchema) {
   }
 
   return { valid: true, errors: [] };
+}
+
+function normalizeExpectedSchema(expectedSchema) {
+  if (expectedSchema.type || expectedSchema.properties || expectedSchema.required || expectedSchema.oneOf || expectedSchema.anyOf || expectedSchema.allOf) {
+    return expectedSchema;
+  }
+
+  return {
+    type: 'object',
+    properties: expectedSchema,
+    required: Object.keys(expectedSchema),
+    additionalProperties: true,
+  };
 }
 
 module.exports = {

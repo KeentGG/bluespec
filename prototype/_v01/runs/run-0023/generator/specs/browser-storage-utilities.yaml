@@ -1,0 +1,130 @@
+id: browser-storage-utilities
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: browser_storage_utilities
+    coverage: full
+    notes: "Safe wrappers for localStorage and sessionStorage access"
+description: >
+  Provides try-catch protected utilities for accessing browser storage APIs.
+  Handles SSR environments, private browsing mode, and storage quota errors
+  gracefully by returning null or false instead of throwing.
+conditions:
+  - id: resolveBrowserStorage
+    description: "Safely accesses localStorage"
+    trigger: "Storage access needed"
+    guards:
+      - field: storage
+        condition: "window.localStorage is accessible"
+    then:
+      - "Return localStorage object"
+    else:
+      - "Return null"
+  - id: resolveSessionStorage
+    description: "Safely accesses sessionStorage"
+    trigger: "Storage access needed"
+    guards:
+      - field: storage
+        condition: "window.sessionStorage is accessible"
+    then:
+      - "Return sessionStorage object"
+    else:
+      - "Return null"
+  - id: getLocalStorageItem
+    description: "Safely reads item from localStorage"
+    trigger: "Item read needed"
+    guards:
+      - field: value
+        condition: "localStorage.getItem succeeds"
+    then:
+      - "Return item value"
+    else:
+      - "Return null"
+  - id: setLocalStorageItem
+    description: "Safely writes item to localStorage"
+    trigger: "Item write needed"
+    guards:
+      - field: success
+        condition: "localStorage.setItem succeeds"
+    then:
+      - "Return true"
+    else:
+      - "Return false"
+  - id: removeLocalStorageItem
+    description: "Safely removes item from localStorage"
+    trigger: "Item removal needed"
+    guards:
+      - field: success
+        condition: "localStorage.removeItem succeeds"
+    then:
+      - "Return true"
+    else:
+      - "Return false"
+inputs:
+  - id: key
+    type: string
+    source: "Storage key"
+    required: true
+  - id: value
+    type: string
+    source: "Value to store"
+    required: false
+outputs:
+  - id: result
+    type: "string | boolean | null"
+    destination: "Caller"
+    lifespan: "Immediate"
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/browser/storage.ts
+    snippet: |
+      export function resolveBrowserStorage(): Storage | null {
+        try {
+          return window.localStorage;
+        } catch (_e) {
+          return null;
+        }
+      }
+      export function resolveSessionStorage(): Storage | null {
+        try {
+          return window.sessionStorage;
+        } catch (_e) {
+          return null;
+        }
+      }
+      export function getLocalStorageItem(key: string): string | null {
+        try {
+          return window.localStorage.getItem(key);
+        } catch (_e) {
+          return null;
+        }
+      }
+      export function setLocalStorageItem(key: string, value: string): boolean {
+        try {
+          window.localStorage.setItem(key, value);
+          return true;
+        } catch (_e) {
+          return false;
+        }
+      }
+      export function removeLocalStorageItem(key: string): boolean {
+        try {
+          window.localStorage.removeItem(key);
+          return true;
+        } catch (_e) {
+          return false;
+        }
+      }
+    covers:
+      - "condition:resolveBrowserStorage"
+      - "condition:resolveSessionStorage"
+      - "condition:getLocalStorageItem"
+      - "condition:setLocalStorageItem"
+      - "condition:removeLocalStorageItem"
+confidence: 0.98
+confidence_rationale: >
+  All utility functions confirmed with explicit try-catch error handling.
+  SSR and private browsing scenarios properly handled.
+  Return types match documented behavior.
+unresolved_questions: []
+status: complete

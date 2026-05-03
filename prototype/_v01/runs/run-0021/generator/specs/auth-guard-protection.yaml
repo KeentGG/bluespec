@@ -1,0 +1,125 @@
+id: auth-guard-protection
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: auth_guard_protection
+    coverage: full
+    notes: Three-layer protection: Edge middleware, authGuard function, AuthGuard component
+description: >
+  Route protection via three layers: Edge middleware for server-side guards,
+  pure authGuard function for decision logic, and client-side AuthGuard component
+  with loading spinner. Anonymous users on protected routes are redirected to
+  /login. Authenticated users on /login are redirected to /companies.
+conditions:
+  - id: isChecking
+    description: Session verification in progress, show loading spinner
+    trigger: Page load on protected route
+    guards:
+      - field: isChecking
+        condition: equals true
+    then:
+      - Show loading spinner with "Verifying session..." text
+    else:
+      - Proceed to render children
+  - id: isAuthenticated_false_with_error
+    description: Session check failed, redirect to login
+    trigger: Session verification completes without valid token
+    guards:
+      - field: isAuthenticated
+        condition: equals false
+      - field: error
+        condition: not null
+    then:
+      - Redirect to /login
+  - id: isAuthenticated_true
+    description: Session valid, render protected content
+    trigger: Session verification completes with valid token
+    guards:
+      - field: isAuthenticated
+        condition: equals true
+    then:
+      - Render AuthSyncBootstrap component
+      - Render children (protected content)
+inputs:
+  - id: pathname
+    type: string
+    source: current URL path
+    required: true
+  - id: session
+    type: object
+    source: in-memory session store
+    required: false
+outputs:
+  - id: guard_decision
+    type: allow or redirect
+    destination: navigation controller
+evidence_refs:
+  - path: src/features/auth/components/AuthGuard.tsx
+    snippet: |
+      export function AuthGuard({ children }: AuthGuardProps) {
+        const { isChecking } = useAuthRedirect();
+        if (isChecking) {
+          return (
+            <main className="min-h-screen bg-surface-page flex flex-col items-center justify-center">
+              <div className="flex flex-col items-center gap-4">
+                <div className="w-8 h-8 border-4 border-brand-primary border-t-transparent rounded-full animate-spin" />
+                <p className="text-text-muted">Verifying session...</p>
+              </div>
+            </main>
+          );
+        }
+        return (
+          <>
+            <AuthSyncBootstrap />
+            {children}
+          </>
+        );
+      }
+    covers:
+      - condition: isChecking
+      - condition: isAuthenticated_true
+    line_range:
+      start: 10
+      end: 30
+  - path: src/features/auth/api/authGuard.js
+    snippet: |
+      export async function authGuard(options = {}) {
+        const { pathname = "/", session = null, routes = DEFAULT_ROUTES, protectedPaths = DEFAULT_PROTECTED_PATHS } = options;
+        const resolvedPath = normalizePathname(pathname);
+        const resolvedSession = normalizeSession(session);
+        const protectedRoute = isProtectedRoute(resolvedPath, protectedPaths);
+        if (!resolvedSession) {
+          if (protectedRoute) {
+            return redirect(routes.login, "anonymous_redirect_login", clearSessionCookie);
+          }
+          return allow("anonymous_allow_public", clearSessionCookie);
+        }
+        if (resolvedPath === routes.login) {
+          return redirect(routes.companies, "authenticated_redirect_companies", clearSessionCookie);
+        }
+        return allow("authenticated_allow_route", clearSessionCookie);
+      }
+    covers:
+      - condition: isAuthenticated_false_with_error
+      - condition: isAuthenticated_true
+    line_range:
+      start: 69
+      end: 95
+  - path: src/app/(dashboard)/layout.tsx
+    snippet: |
+      export default function DashboardLayout({ children }) {
+        return <AuthGuard>{children}</AuthGuard>;
+      }
+    covers:
+      - condition: isAuthenticated_true
+    line_range:
+      start: 1
+      end: 10
+confidence: 0.95
+confidence_rationale: >
+  AuthGuard component, authGuard function, and dashboard layout wrapper all
+  confirmed with code evidence. Three-layer protection pattern is clear:
+  Edge middleware → authGuard function → AuthGuard component.
+unresolved_questions: []
+status: complete

@@ -1,0 +1,38 @@
+primary_failure_type: recognition_failure
+diagnosis: >
+  The spec generator found relevant files but produced inaccurate evidence
+  snippets that don't match actual implementation. Two distinct failure modes
+  occurred:
+
+  1. YAML format failures: Unquoted colons in notes fields caused parse errors
+  in auth-guard-protection.yaml and auth-password-reset.yaml.
+     Example: "notes: Three-layer protection: Edge middleware..." - the colon after "protection" breaks YAML parsing.
+
+  2. Evidence accuracy failures: Multiple specs contain evidence snippets that
+  don't match actual source code:
+     - auth-login-flow shows registerUser function instead of loginRequest (the actual login API call)
+     - stateful-dashboard-shell shows simplified logout flow missing company logout coordination contract and localStorage cleanup
+     - stateful-reports-page-controller shows simplified listState derivation missing listContract.ui.showTable and hasSelectedBusiness checks
+     - infrastructure-shared-components shows different CVA base classes and variant styles than actual Button.tsx
+
+  The verify step should have caught these inaccuracies but appears to be
+  failing or not validating evidence accuracy.
+affected_steps:
+  - draft
+  - verify
+suggested_mutation:
+  type: step_management
+  target_step: verify
+  change: >
+    Enhance the verify step to include evidence accuracy validation. Before
+    finalizing specs, the verifier should: 1. Check YAML syntax (detect unquoted
+    colons in string values) 2. For each evidence_ref snippet, verify the
+    snippet exists at the specified line_range in the actual source file 3.
+    Compare key function names, variable names, and class names between snippet
+    and actual code 4. Flag any discrepancies as evidence_accuracy_failure 5. If
+    evidence_accuracy_failure count > 0, mark spec as incomplete and return to
+    draft step
+
+    This creates a feedback loop where the draft step must produce accurate
+    evidence snippets.
+confidence: 0.85

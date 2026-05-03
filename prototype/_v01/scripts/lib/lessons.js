@@ -1,3 +1,5 @@
+const fs = require('fs');
+
 const {
   readText,
   readYamlFile,
@@ -125,8 +127,83 @@ function summarizeLessonsForFailureType(index, failureType) {
   };
 }
 
+function getLessonFiles() {
+  const doc = loadLessonPolicy();
+  return doc.files || {
+    learned: 'lessons/learned.jsonl',
+    failed: 'lessons/failed.jsonl',
+  };
+}
+
+function appendLesson(lesson) {
+  const files = getLessonFiles();
+  const bucket = lesson.result === 'FAILED' ? files.failed : files.learned;
+
+  // Enforce append-only invariant
+  const policy = loadLessonPolicy();
+  if (policy.policy?.append_only !== true) {
+    throw new Error('Append-only policy not set in lessons/index.yaml. Refusing to write.');
+  }
+
+  // Validate required fields
+  const required = ['failure_type', 'teaching_method', 'result'];
+  for (const key of required) {
+    if (!lesson[key]) throw new Error(`Lesson missing required field: ${key}`);
+  }
+
+  // Validate result enum
+  if (!['PASSED', 'FAILED', 'PARTIAL'].includes(lesson.result)) {
+    throw new Error(`Invalid lesson result: ${lesson.result}. Must be PASSED, FAILED, or PARTIAL.`);
+  }
+
+  // Build the JSONL line
+  const entry = {
+    failure_type: lesson.failure_type,
+    scenario: lesson.scenario || '',
+    teaching_method: lesson.teaching_method,
+    result: lesson.result,
+    works_on: lesson.works_on || [],
+    run_id: lesson.run_id || null,
+    discovered_criterion: lesson.discovered_criterion || null,
+    recorded_at: new Date().toISOString(),
+  };
+
+  // Append to bucket file
+  const bucketPath = resolveWorkspacePath(bucket);
+  fs.appendFileSync(bucketPath, JSON.stringify(entry) + '\n', 'utf8');
+
+  // Refresh index
+  refreshLessonIndex();
+
+  console.log(`[Lessons] Recorded: ${lesson.result} — ${lesson.failure_type}/${lesson.teaching_method} (${lesson.run_id || 'no run'})`);
+}
+
+function buildLessonsContext(lessons) {
+  if (!lessons || !lessons.lookup) return 'No lesson data available.';
+
+  const byType = lessons.lookup.by_failure_type || {};
+  const typeSummaries = [];
+
+  for (const [failureType, bucket] of Object.entries(byType)) {
+    const methodSummaries = [];
+    for (const [method, methodBucket] of Object.entries(bucket.teaching_methods || {})) {
+      const failedCount = methodBucket.results.FAILED || 0;
+      const passedCount = methodBucket.results.PASSED || 0;
+      methodSummaries.push(`  - ${method}: ${passedCount} passed, ${failedCount} failed`);
+    }
+    typeSummaries.push(`- ${failureType} (${bucket.total} lessons):\n${methodSummaries.join('\n')}`);
+  }
+
+  return typeSummaries.length > 0
+    ? `## Known Lessons (${lessons.stats?.total_lessons || 0} total)\n\n${typeSummaries.join('\n')}\n`
+    : 'No lesson data available.';
+}
+
 module.exports = {
   findLessons,
   refreshLessonIndex,
   summarizeLessonsForFailureType,
+  appendLesson,
+  getLessonFiles,
+  buildLessonsContext,
 };

@@ -1,0 +1,164 @@
+id: stateful-routing-gates
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_routing_gates
+    coverage: full
+    notes: Route entry state management for gate pages with validation
+description: >
+  Route entry state management for gate pages (new/edit) with validation.
+  State machine with phases: pending_router, initializing, ready, fallback,
+  error. Rollback gate checks at every entry point. Origin validation
+  for external calculator handoffs. Progress route mapping per calculator type.
+state_machine:
+  initial: pending_router
+  states:
+    - id: pending_router
+      description: Waiting for Next.js router to be ready
+    - id: initializing
+      description: Running initialization checks
+    - id: ready
+      description: Entry validated, ready to redirect
+    - id: fallback
+      description: Validation failed, showing fallback UI
+    - id: error
+      description: Initialization error
+  transitions:
+    - id: router_ready
+      from: pending_router
+      to: initializing
+      trigger: Next.js router is ready
+      effects:
+        - Run one-shot guard to prevent double execution
+    - id: validation_passed
+      from: initializing
+      to: ready
+      trigger: Rollback gate allows, origin valid, query params valid
+      effects:
+        - Redirect to calculator with handoff data
+    - id: validation_failed
+      from: initializing
+      to: fallback
+      trigger: Rollback gate blocks or validation fails
+      effects:
+        - Show fallback UI with destination link
+    - id: init_error
+      from: initializing
+      to: error
+      trigger: Initialization throws error
+      effects:
+        - Show error message
+inputs:
+  - id: searchParams
+    type: URLSearchParams
+    source: URL query params
+    required: true
+outputs:
+  - id: redirect_url
+    type: string
+    destination: calculator app
+    lifespan: immediate
+evidence_refs:
+  - path: src/features/routing/hooks/useGateNewEntryState.ts
+    snippet: |
+      export function useGateNewEntryState() {
+        const [phase, setPhase] = useState<"pending_router" | "initializing" | "ready" | "fallback" | "error">("pending_router");
+        const router = useRouter();
+        const searchParams = useSearchParams();
+        useEffect(() => {
+          if (!isRouterReady(router)) return;
+          if (!runOnceWhenRouterReady("gate-new", () => { /* guard */ })) return;
+          setPhase("initializing");
+          try {
+            const rollbackCheck = resolveRollbackRouteContract();
+            if (!rollbackCheck.allowed) { setPhase("fallback"); return; }
+            const target = searchParams.get("target");
+            const source = searchParams.get("source");
+            if (!target || !source) { setPhase("fallback"); return; }
+            const handoffUrl = buildGateNewUrl({ target, source, ... });
+            setPhase("ready");
+            window.location.href = handoffUrl;
+          } catch (error) {
+            setPhase("error");
+          }
+        }, [router, searchParams]);
+        return { phase, ... };
+      }
+    covers:
+      - state: pending_router
+      - state: initializing
+      - state: ready
+      - state: fallback
+      - state: error
+    line_range:
+      start: 106
+      end: 214
+  - path: src/features/routing/hooks/useGateEditEntryState.ts
+    snippet: |
+      export function useGateEditEntryState() {
+        const [phase, setPhase] = useState<"pending_router" | "initializing" | "ready" | "fallback" | "error">("pending_router");
+        const router = useRouter();
+        const searchParams = useSearchParams();
+        useEffect(() => {
+          if (!isRouterReady(router)) return;
+          if (!runOnceWhenRouterReady("gate-edit", () => { /* guard */ })) return;
+          setPhase("initializing");
+          try {
+            const rollbackCheck = resolveRollbackRouteContract();
+            if (!rollbackCheck.allowed) { setPhase("fallback"); return; }
+            const reportId = searchParams.get("reportId");
+            if (!reportId) { setPhase("fallback"); return; }
+            const report = fetchReport(reportId);
+            if (!report) { setPhase("fallback"); return; }
+            const progressRoute = resolveProgressRoute(report);
+            setPhase("ready");
+            window.location.href = progressRoute;
+          } catch (error) {
+            setPhase("error");
+          }
+        }, [router, searchParams]);
+        return { phase, ... };
+      }
+    covers:
+      - state: pending_router
+      - state: initializing
+      - state: ready
+      - state: fallback
+      - state: error
+    line_range:
+      start: 89
+      end: 210
+  - path: src/shared/lib/routing/initGuards.js
+    snippet: |
+      export function isRouterReady(router) {
+        return router && typeof router.push === "function";
+      }
+      export function createOneShotGuard(key) {
+        const guards = new Set();
+        return () => {
+          if (guards.has(key)) return false;
+          guards.add(key);
+          return true;
+        };
+      }
+      export function runOnceWhenRouterReady(key, fn) {
+        if (!isRouterReady(router)) return false;
+        const guard = createOneShotGuard(key);
+        if (!guard()) return false;
+        fn();
+        return true;
+      }
+    covers:
+      - state: pending_router
+      - state: initializing
+    line_range:
+      start: 13
+      end: 94
+confidence: 0.8
+confidence_rationale: >
+  Routing gates fully traced across useGateNewEntryState, useGateEditEntryState,
+  and initGuards. Five-phase state machine with rollback gate checks confirmed.
+  One-shot guard for Strict Mode double-invocation verified.
+unresolved_questions: []
+status: complete

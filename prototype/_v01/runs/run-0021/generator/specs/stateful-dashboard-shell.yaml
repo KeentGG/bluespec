@@ -1,0 +1,100 @@
+id: stateful-dashboard-shell
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_dashboard_shell
+    coverage: full
+    notes: Dashboard shell state for sidebar navigation and page layout
+description: >
+  Dashboard shell state for sidebar navigation and page layout. Manages
+  isSidebarOpen and userEmail states. Sidebar toggle/close actions.
+  Logout flow with API call, session clear, toast notification, and
+  redirect. Layout includes header with logo, progress bar, sidebar,
+  main content area, and toast container.
+conditions:
+  - id: sidebar_open
+    description: Sidebar is visible
+    trigger: User clicks hamburger menu
+    guards:
+      - field: isSidebarOpen
+        condition: equals true
+    then:
+      - Show sidebar overlay
+      - Animate sidebar enter
+  - id: sidebar_closed
+    description: Sidebar is hidden
+    trigger: User clicks close button or outside
+    guards:
+      - field: isSidebarOpen
+        condition: equals false
+    then:
+      - Animate sidebar exit
+      - Hide sidebar overlay
+inputs:
+  - id: isSidebarOpen
+    type: boolean
+    source: toggle button
+    required: false
+outputs:
+  - id: layout
+    type: JSX
+    destination: page layout
+    lifespan: session
+evidence_refs:
+  - path: src/features/shell/hooks/useDashboardShell.ts
+    snippet: |
+      export function useDashboardShell() {
+        const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+        const [userEmail, setUserEmail] = useState("");
+        const toggleSidebar = useCallback(() => setIsSidebarOpen(prev => !prev), []);
+        const closeSidebar = useCallback(() => setIsSidebarOpen(false), []);
+        const executeLogout = useCallback(async () => {
+          try {
+            await logoutUser();
+            clearToken();
+            toast.success("Logged out successfully");
+            window.location.href = withBasePath("/login");
+          } catch (error) {
+            toast.error("Logout failed");
+          }
+        }, []);
+        return { isSidebarOpen, userEmail, toggleSidebar, closeSidebar, executeLogout };
+      }
+    covers:
+      - condition: sidebar_open
+      - condition: sidebar_closed
+    line_range:
+      start: 30
+      end: 88
+  - path: src/features/shell/components/DashboardShell.tsx
+    snippet: |
+      export function DashboardShell({ children, activeNavItemId = "dashboard" }) {
+        const { isSidebarOpen, userEmail, toggleSidebar, closeSidebar, executeLogout } = useDashboardShell();
+        return (
+          <main className="min-h-screen bg-surface-page flex flex-col">
+            <header className="sticky top-0 z-20">
+              <Button onClick={toggleSidebar}>☰</Button>
+              <a href={withBasePath("/companies")}><Image src={LOGO_HORIZONTAL_URL} /></a>
+            </header>
+            <div className="flex flex-1">
+              <Sidebar isOpen={isSidebarOpen} onClose={closeSidebar} userEmail={userEmail} onLogout={executeLogout} activeItemId={activeNavItemId} />
+              {children}
+            </div>
+            <ToastContainer position="top-right" autoClose={3000} />
+          </main>
+        );
+      }
+    covers:
+      - condition: sidebar_open
+      - condition: sidebar_closed
+    line_range:
+      start: 39
+      end: 122
+confidence: 0.8
+confidence_rationale: >
+  Dashboard shell fully traced across hook and component. Sidebar toggle
+  state, logout flow, and layout structure confirmed. Toast integration
+  and progress bar (disabled) documented.
+unresolved_questions: []
+status: complete

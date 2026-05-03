@@ -1,0 +1,15 @@
+'spec_files':
+  - '/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0023/generator/specs/auth-flow.yaml'
+  - '/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0023/generator/specs/middleware-auth-guard.yaml'
+  - '/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0023/generator/specs/stateful-ui-reports.yaml'
+  - '/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0023/generator/specs/stateful-ui-pdf-generation.yaml'
+  - '/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0023/generator/specs/stateful-ui-company-management.yaml'
+  - '/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0023/generator/specs/cross-tab-session-sync.yaml'
+  - '/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0023/generator/specs/routing-contracts.yaml'
+  - '/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0023/generator/specs/report-lifecycle-management.yaml'
+  - '/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0023/generator/specs/api-client-with-token-refresh.yaml'
+  - '/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0023/generator/specs/stale-response-guards.yaml'
+  - '/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0023/generator/specs/browser-storage-utilities.yaml'
+'summary': 'Drafted 11 behavioral specs covering the dashboard-v2 codebase. Each spec includes evidence from source files with code snippets and line references. Specs cover authentication flows, route guards, UI state management for reports/company/PDF features, cross-tab synchronization, routing contracts, API client with token refresh, stale response guards, and browser storage utilities. All specs follow the behavioral spec schema with state machines, conditions, inputs/outputs, and confidence scores.
+
+  '

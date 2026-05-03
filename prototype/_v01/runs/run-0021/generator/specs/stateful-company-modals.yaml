@@ -1,0 +1,114 @@
+id: stateful-company-modals
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_company_modals
+    coverage: full
+    notes: Multiple modal management with activeModal pattern via useState hooks
+description: >
+  Company page modal state management for three independent modals: add/edit,
+  delete, and create report. Each modal has its own isOpen flag and identity
+  payload. Uses useState hooks with semantic actions (openAdd, openEdit, close).
+  PendingAction pattern defers modal opening to useEffect.
+conditions:
+  - id: activeModal_addEdit
+    description: Add/Edit company modal is open
+    trigger: User clicks Add Company or Edit on a row
+    guards:
+      - field: activeModal
+        condition: equals "addEdit"
+    then:
+      - Render AddEditCompanyModal
+      - If editBusinessId set, load existing company data
+  - id: activeModal_delete
+    description: Delete company modal is open
+    trigger: User clicks Delete on a row
+    guards:
+      - field: activeModal
+        condition: equals "delete"
+    then:
+      - Render DeleteCompanyModal with target company
+  - id: activeModal_createReport
+    description: Create report modal is open
+    trigger: User clicks Create Report on a row
+    guards:
+      - field: activeModal
+        condition: equals "createReport"
+    then:
+      - Render CreateReportModal with businessId
+  - id: activeModal_none
+    description: No modal is open
+    trigger: All modals closed
+    guards:
+      - field: activeModal
+        condition: equals null
+    then:
+      - Do not render any modal
+inputs:
+  - id: businessId
+    type: string
+    source: company row
+    required: false
+  - id: calculatorId
+    type: string
+    source: company row
+    required: false
+outputs:
+  - id: modal_state
+    type: object
+    destination: modal components
+    lifespan: session
+evidence_refs:
+  - path: src/features/company/hooks/useCompanyModals.ts
+    snippet: |
+      export function useCompanyModals(): UseCompanyModalsReturn {
+        const [isAddEditOpen, setIsAddEditOpen] = useState(false);
+        const [editBusinessId, setEditBusinessId] = useState<string | null>(null);
+        const openAdd = useCallback(() => { setEditBusinessId(null); setIsAddEditOpen(true); }, []);
+        const openEdit = useCallback((businessId: string) => { setEditBusinessId(businessId); setIsAddEditOpen(true); }, []);
+        const closeAddEdit = useCallback(() => { setIsAddEditOpen(false); setEditBusinessId(null); }, []);
+        const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+        const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+        const openDelete = useCallback((businessId: string) => { setDeleteTargetId(businessId); setIsDeleteOpen(true); }, []);
+        const closeDelete = useCallback(() => { setIsDeleteOpen(false); setDeleteTargetId(null); }, []);
+        const [isCreateReportOpen, setIsCreateReportOpen] = useState(false);
+        const [createReportBusinessId, setCreateReportBusinessId] = useState("");
+        const [createReportCalculatorId, setCreateReportCalculatorId] = useState("1");
+        const openCreateReport = useCallback((businessId: string, calculatorId = "1") => { ... }, []);
+        const closeCreateReport = useCallback(() => { setIsCreateReportOpen(false); }, []);
+        return { addEdit: { isOpen: isAddEditOpen, editBusinessId, openAdd, openEdit, close: closeAddEdit }, delete: { isOpen: isDeleteOpen, targetId: deleteTargetId, open: openDelete, close: closeDelete }, createReport: { isOpen: isCreateReportOpen, businessId: createReportBusinessId, calculatorId: createReportCalculatorId, open: openCreateReport, close: closeCreateReport } };
+      }
+    covers:
+      - condition: activeModal_addEdit
+      - condition: activeModal_delete
+      - condition: activeModal_createReport
+      - condition: activeModal_none
+    line_range:
+      start: 35
+      end: 106
+  - path: src/features/company/components/CompanyModals.tsx
+    snippet: |
+      export function CompanyModals({ modals, onAdd, onEdit, onDelete, onCreateReport, ... }) {
+        return (
+          <>
+            {modals.addEdit.isOpen && <AddEditCompanyModal isOpen={modals.addEdit.isOpen} businessId={modals.addEdit.editBusinessId} onClose={modals.addEdit.close} />}
+            {modals.delete.isOpen && <DeleteCompanyModal isOpen={modals.delete.isOpen} targetId={modals.delete.targetId} onClose={modals.delete.close} />}
+            {modals.createReport.isOpen && <CreateReportModal isOpen={modals.createReport.isOpen} businessId={modals.createReport.businessId} calculatorId={modals.createReport.calculatorId} onClose={modals.createReport.close} />}
+          </>
+        );
+      }
+    covers:
+      - condition: activeModal_addEdit
+      - condition: activeModal_delete
+      - condition: activeModal_createReport
+    line_range:
+      start: 119
+      end: 263
+confidence: 0.9
+confidence_rationale: >
+  Company modals fully traced across useCompanyModals hook and CompanyModals
+  component. Three independent modal states with semantic actions confirmed.
+  PendingAction pattern for deferred modal opening documented.
+unresolved_questions: []
+status: complete

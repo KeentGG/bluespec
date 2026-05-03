@@ -1,0 +1,90 @@
+'run_id': 'run-0023'
+'golden_set_version': 'v001'
+'discovered_at': '2026-04-30T14:21:43.977Z'
+'new_behaviors':
+  - 'id': 'api-client-with-token-refresh'
+    'description': 'Core HTTP client that automatically handles JWT token injection, CSRF token injection, and automatic token refresh when backend returns 401. Coordinates cross-tab refresh to prevent multiple simultane'
+    'evidence_refs': []
+    'confidence': 0.96
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'browser-storage-utilities'
+    'description': 'Provides try-catch protected utilities for accessing browser storage APIs. Handles SSR environments, private browsing mode, and storage quota errors gracefully by returning null or false instead of th'
+    'evidence_refs': []
+    'confidence': 0.98
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'cross-tab-session-sync'
+    'description': 'Synchronizes authentication state across browser tabs using BroadcastChannel API with localStorage fallback for Safari compatibility. Handles logout events to redirect protected tabs and login events '
+    'evidence_refs': []
+    'confidence': 0.93
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'middleware-auth-guard'
+    'description': 'Server-side route guard that determines whether to allow access, redirect to login, or redirect to companies based on session state. Handles rollback routes, session refresh attempts, and fallback des'
+    'evidence_refs': []
+    'confidence': 0.92
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'report-lifecycle-management'
+    'description': 'Manages report data hydration from either imported data (source parameter) or default values. Determines hydration mode based on presence of source query parameter and loads appropriate data according'
+    'evidence_refs': []
+    'confidence': 0.85
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'routing-contracts'
+    'description': 'Validates routing parameters for gate entry points including edit and new report flows. Checks query parameters, validates allowed origins, and resolves handoff routes with progress mapping.
+
+      '
+    'evidence_refs': []
+    'confidence': 0.88
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stale-response-guards'
+    'description': 'Guards against stale report list responses when user rapidly switches companies or changes filters. Uses versioned intent tokens to determine which response is "latest" and silently discards out-of-or'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-ui-company-management'
+    'description': 'Manages UI state for company-related modals including add/edit form, delete confirmation, and report creation. Tracks which modal is open and whether an operation is in progress.
+
+      '
+    'evidence_refs': []
+    'confidence': 0.95
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-ui-pdf-generation'
+    'description': 'Manages the PDF generation lifecycle including status polling, celebration animation, download button display, and error handling. Uses localStorage to persist generation state across page refreshes.
+
+      '
+    'evidence_refs': []
+    'confidence': 0.96
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-ui-reports'
+    'description': 'Manages UI state for report-related modals including delete confirmation, email sending, and report creation. Each modal tracks open/close state and operation-in-progress status to prevent duplicate s'
+    'evidence_refs': []
+    'confidence': 0.94
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'

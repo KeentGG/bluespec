@@ -1,0 +1,143 @@
+id: feature-photo-editor
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: feature_photo_editor
+    coverage: full
+    notes: Photo editor with drag/pan interaction and canvas-based image manipulation
+description: >
+  Photo editor component for company logo uploads. Provides square-crop
+  editor with 256x256 viewport, 200x200 crop zone, zoom slider (1x-3x),
+  drag-to-pan via useDragPan hook, canvas-based crop generation, and
+  Reset/Remove controls. Integrated into CompanyModals for logo upload.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: Image loaded, ready for editing
+    - id: dragging
+      description: User is dragging to pan image
+    - id: cropping
+      description: Generating cropped image via canvas
+    - id: error
+      description: Image load or processing failed
+  transitions:
+    - id: image_loaded
+      from: idle
+      to: idle
+      trigger: File selected or dropped
+      effects:
+        - Load image into canvas
+        - Calculate initial crop rect
+    - id: drag_start
+      from: idle
+      to: dragging
+      trigger: Mouse/touch down on crop area
+      effects:
+        - Record start position
+    - id: drag_end
+      from: dragging
+      to: idle
+      trigger: Mouse/touch up
+      effects:
+        - Update crop rect with new position
+        - Generate cropped image via canvas
+    - id: zoom_changed
+      from: idle
+      to: idle
+      trigger: User adjusts zoom slider
+      effects:
+        - Calculate new crop size
+        - Clamp crop rect to image bounds
+        - Generate cropped image
+inputs:
+  - id: file
+    type: File
+    source: file input
+    required: true
+outputs:
+  - id: croppedFile
+    type: File
+    destination: parent component
+    lifespan: session
+evidence_refs:
+  - path: src/features/photo-editor/components/LogoPhotoEditor.tsx
+    snippet: |
+      const generateCroppedImage = useCallback(() => {
+        canvas.width = CROP_SIZE;
+        canvas.height = CROP_SIZE;
+        const { sourceX, sourceY, sourceWidth, sourceHeight } = getCanvasDrawParams(cropRect);
+        ctx.drawImage(img, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, CROP_SIZE, CROP_SIZE);
+        canvas.toBlob((blob) => {
+          const croppedFile = new File([blob], originalFile.name, { type: "image/png" });
+          onChangeRef.current(croppedFile, userEdited);
+        }, "image/png");
+      }, [imageUrl, isImageLoaded, cropRect, originalFile, zoomFactor]);
+    covers:
+      - state: idle
+      - state: cropping
+    line_range:
+      start: 74
+      end: 108
+  - path: src/features/photo-editor/hooks/useDragPan.ts
+    snippet: |
+      export function useDragPan({ cropRect, setCropRect, imageSize }) {
+        const [isDragging, setIsDragging] = useState(false);
+        const startPos = useRef({ x: 0, y: 0 });
+        const startCrop = useRef({ x: 0, y: 0 });
+        const handlePointerDown = useCallback((e) => {
+          setIsDragging(true);
+          startPos.current = { x: e.clientX, y: e.clientY };
+          startCrop.current = { x: cropRect.x, y: cropRect.y };
+        }, [cropRect]);
+        const handlePointerMove = useCallback((e) => {
+          if (!isDragging) return;
+          const deltaX = e.clientX - startPos.current.x;
+          const deltaY = e.clientY - startPos.current.y;
+          const newX = startCrop.current.x + deltaX;
+          const newY = startCrop.current.y + deltaY;
+          const clamped = clampCropRect({ x: newX, y: newY, size: cropRect.size }, imageSize);
+          setCropRect(clamped);
+        }, [isDragging, cropRect.size, imageSize]);
+        const handlePointerUp = useCallback(() => { setIsDragging(false); }, []);
+        return { isDragging, handlePointerDown, handlePointerMove, handlePointerUp };
+      }
+    covers:
+      - state: idle
+      - state: dragging
+    line_range:
+      start: 1
+      end: 98
+  - path: src/features/photo-editor/lib/constants.ts
+    snippet: |
+      export const CROP_SIZE = 200;
+      export const VIEWPORT_SIZE = 256;
+      export const MIN_ZOOM = 1;
+      export const MAX_ZOOM = 3;
+    covers:
+      - state: idle
+    line_range:
+      start: 1
+      end: 4
+  - path: src/features/company/components/CompanyModals.tsx
+    snippet: |
+      {form.logoFile ? (
+        <LogoPhotoEditor
+          file={form.logoFile}
+          onChange={(croppedFile, hasChanges) => { form.handleLogoCrop(croppedFile, hasChanges); }}
+          onRemove={form.handleLogoRemove}
+        />
+      ) : (/* drop zone */)}
+    covers:
+      - state: idle
+    line_range:
+      start: 162
+      end: 171
+confidence: 0.85
+confidence_rationale: >
+  Photo editor fully traced across LogoPhotoEditor, useDragPan, constants,
+  and CompanyModals integration. Canvas-based crop generation, drag-to-pan,
+  and zoom controls confirmed. Integration point with company form verified.
+unresolved_questions: []
+status: complete

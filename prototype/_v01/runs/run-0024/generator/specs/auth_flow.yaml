@@ -1,0 +1,273 @@
+id: auth_flow
+version: '1.0'
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: auth_flow
+    coverage: full
+    notes: 'Covers middleware token refresh, AuthGuard client check, useAuthRedirect flow, and auth guard decision engine'
+description: |
+  Authenticates users across three protection layers. The Edge middleware verifies session cookies and silently refreshes tokens. The client-side AuthGuard wraps dashboard routes, checking the in-memory token and optionally triggering a refresh. The useAuthRedirect hook orchestrates the client-side check with token validation and refresh attempt before redirecting to login on failure.
+state_machine:
+  initial: checking
+  states:
+    - id: checking
+      description: 'AuthGuard is verifying session — spinner shown'
+    - id: authenticated
+      description: 'Valid token present; children + AuthSyncBootstrap rendered'
+    - id: unauthenticated
+      description: 'No valid session; redirect to login'
+    - id: refreshing
+      description: 'Token refresh in progress (in-tab dedup via isRefreshing/refreshPromise)'
+    - id: awaiting_other_tab
+      description: 'Another tab holds refresh lock; waiting for its result'
+  transitions:
+    - id: token_valid
+      from: checking
+      to: authenticated
+      trigger: 'useAuthRedirect sees token._id && token.accessToken'
+      guards:
+        - field: hasValidToken
+          condition: 'token?._id && token?.accessToken'
+      effects:
+        - 'setIsAuthenticated(true)'
+        - 'setIsChecking(false)'
+    - id: attempt_refresh
+      from: checking
+      to: refreshing
+      trigger: 'No valid token and attemptTokenRefresh is true'
+      guards:
+        - field: attemptTokenRefresh
+          condition: 'attemptTokenRefresh === true'
+    - id: refresh_success
+      from: refreshing
+      to: authenticated
+      trigger: 'refreshAccessToken returns success with token'
+      guards:
+        - field: refreshResult.success
+          condition: 'refreshResult.success && refreshResult.token'
+      effects:
+        - 'setIsAuthenticated(true)'
+        - 'setIsChecking(false)'
+    - id: refresh_failed
+      from: refreshing
+      to: unauthenticated
+      trigger: 'Refresh fails or times out'
+      guards:
+        - field: refreshResult.success
+          condition: '!refreshResult.success'
+      effects:
+        - 'handleAuthError({ redirectUrl: withBasePath(redirectTo), reason: "session_expired" })'
+        - 'setError(refreshResult.error || "Session expired")'
+    - id: skip_refresh_redirect
+      from: checking
+      to: unauthenticated
+      trigger: 'No valid token and attemptTokenRefresh is false'
+      effects:
+        - 'window.location.replace(redirectUrl)'
+    - id: cross_tab_refresh
+      from: refreshing
+      to: awaiting_other_tab
+      trigger: 'acquireRefreshLock returns false'
+      guards:
+        - field: acquireRefreshLock
+          condition: 'acquireRefreshLock() === false'
+    - id: wait_result
+      from: awaiting_other_tab
+      to: authenticated
+      trigger: 'Other tab refresh succeeds and result is applied'
+      guards:
+        - field: waitResult.success
+          condition: 'waitResult && waitResult.success'
+      effects:
+        - 'setToken(result.token)'
+    - id: wait_timeout
+      from: awaiting_other_tab
+      to: refreshing
+      trigger: 'waitForResult returns null on timeout'
+conditions:
+  - id: middleware_anon_protected
+    description: 'Anonymous user on protected route → redirect to login'
+    trigger: 'Next.js middleware runs on every matched page request'
+    guards:
+      - field: resolvedSession
+        condition: '!resolvedSession'
+      - field: protectedRoute
+        condition: 'protectedRoute === true'
+    then:
+      - 'Redirect to /login'
+  - id: middleware_anon_public
+    description: 'Anonymous user on public route → allow'
+    trigger: 'Next.js middleware runs on every matched page request'
+    guards:
+      - field: resolvedSession
+        condition: '!resolvedSession'
+      - field: protectedRoute
+        condition: 'protectedRoute === false'
+    then:
+      - 'Allow access'
+  - id: middleware_auth_login
+    description: 'Authenticated user on login → redirect to companies'
+    trigger: 'Next.js middleware runs on every matched page request'
+    guards:
+      - field: resolvedPath
+        condition: 'resolvedPath === routes.login'
+      - field: resolvedSession
+        condition: 'resolvedSession is truthy'
+    then:
+      - 'Redirect to /companies'
+  - id: middleware_auth_allow
+    description: 'Authenticated user on non-login route → allow'
+    trigger: 'Next.js middleware runs on every matched page request'
+    guards:
+      - field: resolvedSession
+        condition: 'resolvedSession is truthy'
+      - field: resolvedPath
+        condition: 'resolvedPath !== routes.login'
+    then:
+      - 'Allow access'
+  - id: middleware_silent_refresh
+    description: 'No session but refreshToken cookie present → attempt silent refresh'
+    trigger: 'Session missing and route needs resolution'
+    guards:
+      - field: shouldResolveSession
+        condition: 'shouldResolveSession(pathname) === true'
+      - field: hasRefreshToken
+        condition: 'cookieHeader includes "refreshToken=" AND !session'
+    then:
+      - 'Call POST /auth/refresh with credentials'
+      - 'Set user, csrfToken, refreshToken cookies on response'
+      - 'Re-run authGuard with new session'
+inputs:
+  - id: session_cookie
+    type: 'JWT access token in "user" cookie (non-httpOnly, 7-day TTL)'
+    source: 'Browser cookie set by backend on login/refresh'
+    required: false
+  - id: refresh_token_cookie
+    type: 'JWT refresh token (httpOnly, set by backend)'
+    source: 'Browser cookie from Set-Cookie header'
+    required: false
+  - id: pathname
+    type: 'Current URL path'
+    source: 'Next.js request URL'
+    required: true
+  - id: redirect_to
+    type: 'URL string (default /login)'
+    source: 'Component prop or constant'
+    required: false
+outputs:
+  - id: access_decision
+    type: '{ action: "allow" | "redirect", destination: string | null, reason: string }'
+    destination: 'Next.js response (redirect or next)'
+    lifespan: immediate
+  - id: session_token
+    type: 'JWT access token in memory (authSession variable)'
+    destination: 'JavaScript module variable (NOT localStorage)'
+    lifespan: session
+evidence_refs:
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/authGuard.js'
+    snippet: |
+      export async function authGuard(options = {}) {
+        const resolvedPath = normalizePathname(pathname);
+        const resolvedSession = normalizeSession(session);
+        const protectedRoute = isProtectedRoute(resolvedPath, protectedPaths);
+        if (!resolvedSession) {
+          if (protectedRoute) {
+            return redirect(routes.login, "anonymous_redirect_login", clearSessionCookie);
+          }
+          return allow("anonymous_allow_public", clearSessionCookie);
+        }
+        if (resolvedPath === routes.login) {
+          return redirect(routes.companies, "authenticated_redirect_companies", clearSessionCookie);
+        }
+        return allow("authenticated_allow_route", clearSessionCookie);
+      }
+    covers:
+      - 'condition:middleware_anon_protected'
+      - 'condition:middleware_anon_public'
+      - 'condition:middleware_auth_login'
+      - 'condition:middleware_auth_allow'
+    line_range:
+      start: 69
+      end: 95
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/hooks/useAuthRedirect.ts'
+    snippet: |
+      export function useAuthRedirect(options = {}) {
+        const { redirectTo = "/login", attemptTokenRefresh = true } = options;
+        const [isChecking, setIsChecking] = useState(true);
+        useEffect(() => {
+          let cancelled = false;
+          async function checkAuth() {
+            const token = getToken();
+            const hasValidToken = token?._id && token?.accessToken;
+            if (hasValidToken) {
+              if (!cancelled) { setIsAuthenticated(true); setIsChecking(false); }
+              return;
+            }
+            if (attemptTokenRefresh) {
+              const refreshAccessToken = await getRefreshAccessToken();
+              const refreshResult = await refreshAccessToken();
+              if (refreshResult.success && refreshResult.token) {
+                if (!cancelled) { setIsAuthenticated(true); setIsChecking(false); }
+                return;
+              }
+              await handleAuthError({ redirectUrl: withBasePath(redirectTo), reason: "session_expired" });
+            }
+          }
+          checkAuth();
+          return () => { cancelled = true; };
+        }, []);
+        return { isChecking, isAuthenticated, error };
+      }
+    covers:
+      - 'transition:token_valid'
+      - 'transition:attempt_refresh'
+      - 'transition:refresh_success'
+      - 'transition:refresh_failed'
+      - 'transition:skip_refresh_redirect'
+    line_range:
+      start: 32
+      end: 121
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/tokenRefresher.js'
+    snippet: |
+      export async function refreshAccessToken(options = {}) {
+        if (isRefreshing || refreshPromise) {
+          return refreshPromise || Promise.resolve({ success: false, error: "Refresh in progress" });
+        }
+        isRefreshing = true;
+        refreshPromise = performCoordinatedRefresh(apiClient).finally(() => { isRefreshing = false; refreshPromise = null; });
+        return refreshPromise;
+      }
+    covers:
+      - 'transition:cross_tab_refresh'
+      - 'transition:wait_result'
+      - 'transition:wait_timeout'
+    line_range:
+      start: 139
+      end: 160
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/middleware.js'
+    snippet: |
+      let session = shouldResolveSession(pathname)
+        ? await fetchSessionByRefresh({ cookieHeader, requestOrigin, fetchImpl: fetch })
+        : null;
+      if (!session && shouldResolveSession(pathname)) {
+        const hasRefreshToken = cookieHeader.includes(`${REFRESH_TOKEN_COOKIE}=`);
+        if (hasRefreshToken) {
+          const refreshResult = await attemptSilentRefresh({ cookieHeader, requestOrigin, fetchImpl: fetch });
+          if (refreshResult?.session) {
+            session = refreshResult.session;
+            // Set cookies and re-run authGuard
+          }
+        }
+      }
+      const decision = await authGuard({ pathname, routes: ROUTES, protectedPaths: PROTECTED_PATHS, session });
+    covers:
+      - 'condition:middleware_silent_refresh'
+    line_range:
+      start: 424
+      end: 503
+confidence: 0.95
+confidence_rationale: |
+  All state transitions confirmed across 4 source files. Guard conditions directly extracted from code. Cross-tab refresh coordination confirmed in tokenRefresher.js. Cookie handling confirmed in middleware.js. Only uncertainty: exact error rendering during spinner phase (implied by spinner UI but not confirmed as separate error state).
+unresolved_questions: []
+status: complete

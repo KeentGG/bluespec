@@ -1,0 +1,107 @@
+id: routing-contracts
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: routing_contracts
+    coverage: full
+    notes: "Gate entry routing with query validation and origin checks"
+description: >
+  Validates routing parameters for gate entry points including edit and new
+  report flows. Checks query parameters, validates allowed origins, and
+  resolves handoff routes with progress mapping.
+conditions:
+  - id: gateQueryIsValid
+    description: "Validates required query parameters for gate entry"
+    trigger: "Gate page loads"
+    guards:
+      - field: gateQuery
+        condition: "gateQuery.isValid === true"
+    then:
+      - "Proceed with gate initialization"
+    else:
+      - "Redirect to fallback destination"
+  - id: normalizedCurrentOriginInResolvedAllowedOrigins
+    description: "Checks if current origin is in allowed origins list"
+    trigger: "Gate validation"
+    guards:
+      - field: normalizedCurrentOrigin
+        condition: "normalizedCurrentOrigin in resolvedAllowedOrigins"
+    then:
+      - "Allow gate entry"
+    else:
+      - "Redirect to fallback"
+  - id: isAllowedReferrerPath
+    description: "Validates referrer path against allowed patterns"
+    trigger: "Gate validation"
+    guards:
+      - field: isAllowedReferrerPath
+        condition: "isAllowedReferrerPath(parsedReferrer.pathname)"
+    then:
+      - "Allow gate entry"
+    else:
+      - "Redirect to fallback"
+  - id: normalizedReferrerNull
+    description: "Allows entry when referrer is unavailable (browser privacy)"
+    trigger: "Gate validation"
+    guards:
+      - field: normalizedReferrer
+        condition: "normalizedReferrer === null → allow (browser privacy)"
+    then:
+      - "Allow gate entry without referrer validation"
+inputs:
+  - id: searchParams
+    type: "URLSearchParams"
+    source: "URL query string"
+    required: true
+  - id: calculatorId
+    type: string
+    source: "Query parameter"
+    required: true
+  - id: target
+    type: string
+    source: "Query parameter"
+    required: true
+outputs:
+  - id: resolution
+    type: "GateResolution object"
+    destination: "Router redirect"
+    lifespan: "Immediate"
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/routing/hooks/useGateEditEntryState.ts
+    snippet: |
+      export function useGateEditEntryState() {
+        const searchParams = useSearchParams();
+        // ...
+        executeGateEditInitialization({
+          router,
+          guard: guardRef.current,
+          query: searchParams,
+          fallbackBusinessId,
+          fetchReport: async ({ target }) => {
+            // Fetch report by ID
+          },
+          resolveProgressRoute: ({ report }) => {
+            // Map saved route to calculator resume point
+          },
+          navigate: (destination) => {
+            if (destination.startsWith("http")) {
+              window.location.replace(destination);
+            } else {
+              router.replace(destination);
+            }
+          },
+        });
+      }
+    covers:
+      - "condition:gateQueryIsValid"
+confidence: 0.88
+confidence_rationale: >
+  Gate entry hooks confirmed with query parameter validation.
+  Rollback route handling verified.
+  Progress route resolution logic confirmed.
+  Some validation contracts are in shared/lib modules not fully inspected.
+unresolved_questions:
+  - "Exact allowed origins list not visible in frontend code"
+  - "Referrer validation logic details in shared/lib"
+status: partial

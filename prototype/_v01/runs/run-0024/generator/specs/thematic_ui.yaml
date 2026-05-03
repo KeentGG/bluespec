@@ -1,0 +1,149 @@
+id: thematic_ui
+version: '1.0'
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: thematic_ui
+    coverage: full
+    notes: 'Covers ErrorFallback action button logic: primary action, reset boundary fallback, secondary action, default page refresh'
+description: |
+  The ErrorFallback component renders a consistent error UI with configurable action buttons. The primary button is shown when onPrimaryAction is provided, otherwise resetErrorBoundary triggers a reset. The secondary button is shown when onSecondaryAction is provided, otherwise defaults to window.location.reload() as a "Refresh Page" fallback. The ErrorBoundary wraps the entire app layout to catch render exceptions. The component uses a centered card layout with error icon, title, description, monospace error message, and action buttons.
+conditions:
+  - id: primary_action_custom
+    description: 'Show custom primary action button when onPrimaryAction provided'
+    trigger: 'ErrorFallback render'
+    guards:
+      - field: onPrimaryAction
+        condition: 'onPrimaryAction is defined (truthy)'
+    then:
+      - 'Render <Button onClick={onPrimaryAction} variant="primary">{primaryActionLabel}</Button>'
+  - id: reset_boundary_default
+    description: 'Show resetErrorBoundary button as primary when no custom primary action'
+    trigger: 'ErrorFallback render'
+    guards:
+      - field: resetErrorBoundary
+        condition: 'resetErrorBoundary is defined AND onPrimaryAction is not defined'
+    then:
+      - 'Render <Button onClick={resetErrorBoundary} variant="primary">{primaryActionLabel}</Button>'
+  - id: secondary_action_custom
+    description: 'Show custom secondary button when onSecondaryAction provided'
+    trigger: 'ErrorFallback render'
+    guards:
+      - field: onSecondaryAction
+        condition: 'onSecondaryAction is defined (truthy)'
+    then:
+      - 'Render <Button onClick={onSecondaryAction} variant="secondary">{secondaryActionLabel}</Button>'
+  - id: secondary_default_refresh
+    description: 'Show default refresh page button when no custom secondary action'
+    trigger: 'ErrorFallback render'
+    guards:
+      - field: onSecondaryAction
+        condition: '!onSecondaryAction'
+    then:
+      - 'Render <Button onClick={() => window.location.reload()} variant="secondary">{secondaryActionLabel}</Button>'
+inputs:
+  - id: error_object
+    type: 'Error instance with message string'
+    source: 'React ErrorBoundary or direct ErrorFallback usage'
+    required: true
+  - id: on_primary_action
+    type: 'Callback function or undefined'
+    source: 'Parent component (e.g., app/error.tsx passes "reset")'
+    required: false
+  - id: on_secondary_action
+    type: 'Callback function or undefined'
+    source: 'Parent component'
+    required: false
+  - id: reset_error_boundary
+    type: 'Function from react-error-boundary'
+    source: 'ErrorBoundary FallbackComponent prop injection'
+    required: false
+outputs:
+  - id: error_ui
+    type: 'Centered card with icon, title, description, error message, and action buttons'
+    destination: 'DOM'
+    lifespan: immediate
+evidence_refs:
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/components/ErrorFallback.tsx'
+    snippet: |
+      export function ErrorFallback({ error, resetErrorBoundary, title, description, primaryActionLabel, secondaryActionLabel, onPrimaryAction, onSecondaryAction }: ErrorFallbackProps) {
+        return (
+          <div className="min-h-screen flex items-center justify-center bg-surface-page p-4">
+            <div className="max-w-md w-full bg-surface-card rounded-lg shadow-lg p-6">
+              <div className="flex items-center gap-3 mb-4">
+                <svg className="w-8 h-8 text-red-500">...</svg>
+                <h2 className="text-xl font-semibold text-text-primary">{title}</h2>
+              </div>
+              <p className="text-text-muted mb-4">{description}</p>
+              <div className="bg-surface-muted rounded p-3 mb-4">
+                <p className="text-sm font-mono text-red-600 break-words">{error.message}</p>
+              </div>
+              <div className="flex gap-3">
+                {onPrimaryAction && (<Button onClick={onPrimaryAction} variant="primary">{primaryActionLabel}</Button>)}
+                {resetErrorBoundary && !onPrimaryAction && (<Button onClick={resetErrorBoundary} variant="primary">{primaryActionLabel}</Button>)}
+                {onSecondaryAction && (<Button onClick={onSecondaryAction} variant="secondary">{secondaryActionLabel}</Button>)}
+                {!onSecondaryAction && (<Button onClick={() => window.location.reload()} variant="secondary">{secondaryActionLabel}</Button>)}
+              </div>
+            </div>
+          </div>
+        );
+      }
+    covers:
+      - 'condition:primary_action_custom'
+      - 'condition:reset_boundary_default'
+      - 'condition:secondary_action_custom'
+      - 'condition:secondary_default_refresh'
+    line_range:
+      start: 16
+      end: 77
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/components/ErrorBoundary.tsx'
+    snippet: |
+      function BoundaryFallback({ error, resetErrorBoundary }: FallbackProps) {
+        return (
+          <ErrorFallback error={error} resetErrorBoundary={resetErrorBoundary}
+            title="Something went wrong"
+            description="The application encountered an unexpected error. You can try recovering or refresh the page."
+            primaryActionLabel="Try Again"
+            secondaryActionLabel="Refresh Page"
+          />
+        );
+      }
+      export function ErrorBoundary({ children }: ErrorBoundaryProps) {
+        return (
+          <ReactErrorBoundary FallbackComponent={BoundaryFallback} onReset={() => {}}
+            onError={(error, errorInfo) => { console.error("ErrorBoundary caught an error:", error, errorInfo); }}>
+            {children}
+          </ReactErrorBoundary>
+        );
+      }
+    covers:
+      - 'condition:reset_boundary_default'
+    line_range:
+      start: 11
+      end: 43
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/app/error.tsx'
+    snippet: |
+      "use client";
+      import { ErrorFallback } from "@/shared/components";
+      export default function Error({ error, reset }: { error: Error; reset: () => void }) {
+        return (
+          <ErrorFallback error={error} title="Something went wrong"
+            description="An unexpected error occurred. Please try again or go back to the home page."
+            onPrimaryAction={reset}
+            onSecondaryAction={() => (window.location.href = "/dashboard")}
+            primaryActionLabel="Try Again"
+            secondaryActionLabel="Go Home"
+          />
+        );
+      }
+    covers:
+      - 'condition:primary_action_custom'
+      - 'condition:secondary_action_custom'
+    line_range:
+      start: 7
+      end: 27
+confidence: 0.95
+confidence_rationale: |
+  All four button visibility conditions confirmed in ErrorFallback.tsx via explicit conditional rendering logic. ErrorBoundary usage confirmed in ErrorBoundary.tsx (default fallback) and app/error.tsx (custom route error with Go Home secondary). Button display order: primary first, secondary second. No ambiguity — button visibility is deterministic based on which props are provided.
+unresolved_questions: []
+status: complete

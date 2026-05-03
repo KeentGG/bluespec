@@ -1,0 +1,163 @@
+id: auth-error-handling
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: auth_error_handling
+    coverage: full
+    notes: Global 401/403 response handling with session cleanup and redirect
+description: >
+  Centralized authentication error handling across all API calls. Detects
+  401, 403, and 500 responses with auth-related messages. Clears session
+  tokens, cookies, and localStorage. Redirects to /login with reason param.
+  Prevents concurrent handling via module-level flag.
+conditions:
+  - id: statusCode_401
+    description: Unauthorized response detected
+    trigger: API response with statusCode 401
+    guards:
+      - field: statusCode
+        condition: equals 401
+    then:
+      - Clear client data cache
+      - Clear auth session from memory
+      - Clear user cookie
+      - Clear known auth localStorage keys
+      - Redirect to /login?reason=session_expired
+  - id: statusCode_403_csrf
+    description: CSRF token invalid or missing
+    trigger: API response with statusCode 403 and message containing "csrf"
+    guards:
+      - field: statusCode
+        condition: equals 403
+      - field: message
+        condition: includes "csrf"
+    then:
+      - Retry with refreshed CSRF token
+  - id: statusCode_500_jwt_expired
+    description: JWT expired error on 500 response
+    trigger: API response with statusCode 500 and message containing "jwt expired"
+    guards:
+      - field: statusCode
+        condition: equals 500
+      - field: message
+        condition: includes "jwt expired"
+    then:
+      - Retry with refreshed token
+  - id: skipAuthErrorHandling
+    description: Skip auth error handling for specific endpoints
+    trigger: skipAuthErrorHandling option is true
+    guards:
+      - field: skipAuthErrorHandling
+        condition: equals true
+    then:
+      - Do not call handleAuthError
+  - id: isRefreshEndpoint
+    description: Skip handling for refresh endpoint itself
+    trigger: Request path is /auth/refresh
+    guards:
+      - field: isRefreshEndpoint
+        condition: equals true
+    then:
+      - Do not call handleAuthError
+inputs:
+  - id: response
+    type: object
+    source: API response
+    required: true
+outputs:
+  - id: session_clear
+    type: event
+    destination: memory store + cookies + localStorage
+    lifespan: immediate
+  - id: redirect
+    type: URL
+    destination: window.location
+    lifespan: immediate
+evidence_refs:
+  - path: src/features/auth/api/authErrorHandler.js
+    snippet: |
+      export function isAuthError(response) {
+        if (!response || typeof response !== "object") return false;
+        if (response.statusCode === 401 || response.statusCode === 403) return true;
+        if (response.taxonomyBucket === "auth/session") return true;
+        const message = typeof response.message === "string" ? response.message.toLowerCase() : "";
+        const authKeywords = ["unauthorized", "unauthenticated", "invalid token", "token expired", "jwt expired", "session expired", "not authenticated", "auth required", "forbidden"];
+        if (response.statusCode === 500 || !response.statusCode) {
+          return authKeywords.some(keyword => message.includes(keyword));
+        }
+        return authKeywords.some(keyword => message.includes(keyword));
+      }
+    covers:
+      - condition: statusCode_401
+      - condition: statusCode_403_csrf
+      - condition: statusCode_500_jwt_expired
+    line_range:
+      start: 32
+      end: 69
+  - path: src/features/auth/api/authErrorHandler.js
+    snippet: |
+      export async function handleAuthError(options = {}) {
+        const { redirectUrl = "/login", reason = "session_expired", skipRedirect = false } = options;
+        if (isAuthErrorHandling) return { handled: false, reason: "already_handling" };
+        isAuthErrorHandling = true;
+        try {
+          await clearClientDataCache();
+          clearToken();
+          if (typeof window !== "undefined") {
+            try {
+              for (const key of EOYT_AUTH_KEYS) {
+                try { window.localStorage.removeItem(key); } catch (_e) {}
+              }
+            } catch (_e) {}
+          }
+          if (!skipRedirect && typeof window !== "undefined") {
+            const separator = redirectUrl.includes("?") ? "&" : "?";
+            const fullUrl = `${withBasePath(redirectUrl)}${separator}reason=${encodeURIComponent(reason)}`;
+            window.location.replace(fullUrl);
+          }
+          return { handled: true, redirectUrl: skipRedirect ? null : redirectUrl, reason };
+        } catch (error) {
+          return { handled: false, error: error.message, reason: "handler_error" };
+        } finally {
+          setTimeout(() => { isAuthErrorHandling = false; }, 100);
+        }
+      }
+    covers:
+      - condition: statusCode_401
+      - condition: skipAuthErrorHandling
+    line_range:
+      start: 80
+      end: 144
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      const shouldRetryAfterRefresh =
+        !retriedAfterRefresh && !skipRefresh && !isRefreshEndpoint &&
+        (Number(result.statusCode ?? result.status) === 401 ||
+          (Number(result.statusCode ?? result.status) === 500 &&
+            typeof result.message === "string" && result.message.includes("jwt expired")) ||
+          isCsrfFailure);
+      if (shouldRetryAfterRefresh) {
+        const refreshAccessToken = await getRefreshAccessToken();
+        const refreshResult = await refreshAccessToken({ apiClient: { request, get, post, patch, delete: remove } });
+        if (refreshResult.success && refreshResult.token) {
+          return executeRequest<T>(retryOptions, { retriedAfterRefresh: true });
+        }
+        if (!requestOptions.skipAuthErrorHandling) {
+          await handleAuthError({ redirectUrl: "/login", reason: "session_expired", skipRedirect: false });
+        }
+      }
+    covers:
+      - condition: statusCode_401
+      - condition: statusCode_500_jwt_expired
+      - condition: isRefreshEndpoint
+    line_range:
+      start: 545
+      end: 597
+confidence: 0.9
+confidence_rationale: >
+  Error handling fully traced across authErrorHandler.js and apiClient.ts.
+  Detection logic, cleanup flow, and redirect behavior confirmed.
+  Concurrent handling prevention via module-level flag verified.
+unresolved_questions: []
+status: complete

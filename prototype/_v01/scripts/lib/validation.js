@@ -31,6 +31,10 @@ function validateFile(fileRelativePath, schemaRelativePath, label = fileRelative
   }
 
   const data = readYamlFile(absolutePath);
+  return validateData(data, schemaRelativePath, label, fileRelativePath);
+}
+
+function validateData(data, schemaRelativePath, label = schemaRelativePath, fileRelativePath = label) {
   const validate = loadSchema(schemaRelativePath);
   const valid = validate(data);
 
@@ -65,6 +69,7 @@ function validateArtifactsForRun(runId, currentState) {
 }
 
 module.exports = {
+  validateData,
   validateArtifactsForRun,
   validateFile,
 };

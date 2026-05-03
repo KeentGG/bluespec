@@ -1,0 +1,31 @@
+'run_id': 'run-0022'
+'generator': 'orchestrator'
+'status': 'complete'
+'formula_id': 'frontend-derived'
+'formula_version': 'v004'
+'steps_completed': 4
+'failed_at_step': null
+'error_reason': null
+'overall_confidence': 0.5
+'steps':
+  - 'step_id': 'explore'
+    'step_number': 1
+    'status': 'complete'
+    'confidence': 0.5
+    'summary': ''
+  - 'step_id': 'analyze'
+    'step_number': 2
+    'status': 'complete'
+    'confidence': 0.5
+    'summary': ''
+  - 'step_id': 'draft'
+    'step_number': 3
+    'status': 'complete'
+    'confidence': 0.5
+    'summary': 'Drafted two behavioral specs for auth_flow and stateful_ui behaviors. Auth-flow spec captures route protection, token lifecycle, JWT refresh with cross-tab coordination, and session synchronization. Stateful-ui spec covers SWR data fetching, action state management, inline rename editing with debounce, and download capability. Both specs include state machines where applicable, evidence refs from source code, and confidence scores reflecting verification completeness.'
+  - 'step_id': 'verify'
+    'step_number': 4
+    'status': 'complete'
+    'confidence': 0.5
+    'summary': ''
+'generated_at': '2026-04-30T12:11:06.690Z'

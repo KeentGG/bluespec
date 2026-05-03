@@ -1,0 +1,110 @@
+predicate_inventory:
+  - behavior_id: auth_guard_protection
+    predicates:
+      - isChecking === true
+      - isAuthenticated === false && error !== null
+      - isAuthenticated === true
+    render_mode: visible-enabled
+  - behavior_id: auth_token_refresh
+    predicates:
+      - isRefreshing === true (within same tab)
+      - acquireRefreshLock() returns false (another tab holds lock)
+      - acquireRefreshLock() returns true (lock acquired or expired)
+      - performRefresh() returns success === true
+      - performRefresh() returns success === false
+    render_mode: hidden
+  - behavior_id: auth_error_handling
+    predicates:
+      - statusCode === 401
+      - statusCode === 403 && message includes csrf
+      - statusCode === 500 && message includes jwt expired
+      - skipAuthErrorHandling === true
+      - isRefreshEndpoint === true
+    render_mode: hidden
+  - behavior_id: auth_csrf_protection
+    predicates:
+      - withBody === true (POST/PATCH/DELETE)
+      - hasCsrfToken() returns false
+      - isCsrfTokenValid(token) returns false
+      - canRetry() returns true (first attempt)
+    render_mode: hidden
+  - behavior_id: stateful_pdf_download
+    predicates:
+      - isGenerating === true
+      - dlStatus === waiting
+      - dlStatus === finished
+      - dlStatus === failed
+      - dlStatus === completed
+    render_mode: visible-enabled
+  - behavior_id: stateful_report_actions
+    predicates:
+      - anyActionInProgress(reportId) returns true
+      - isDownloading(reportId) returns true
+      - isRenaming(reportId) returns true
+      - isDeleting(reportId) returns true
+      - isEmailing(reportId) returns true
+    render_mode: visible-enabled
+  - behavior_id: stateful_delete_dialog
+    predicates:
+      - reportId is set (dialog open)
+      - reportId is null (dialog closed)
+    render_mode: visible-enabled
+  - behavior_id: stateful_email_modal
+    predicates:
+      - reportId is set (modal open)
+      - reportId is null (modal closed)
+    render_mode: visible-enabled
+  - behavior_id: stateful_create_report_modal
+    predicates:
+      - isOpen === true
+      - isOpen === false
+    render_mode: visible-enabled
+  - behavior_id: stateful_company_modals
+    predicates:
+      - activeModal !== null (modal open)
+      - activeModal === null (modal closed)
+    render_mode: visible-enabled
+behaviors_to_spec:
+  - auth_login_flow
+  - auth_signup_flow
+  - auth_guard_protection
+  - auth_token_refresh
+  - auth_cross_tab_sync
+  - auth_password_reset
+  - auth_error_handling
+  - auth_csrf_protection
+  - auth_session_memory_store
+  - auth_user_data_fetch
+  - stateful_reports_list
+  - stateful_report_actions
+  - stateful_pdf_download
+  - stateful_create_report_modal
+  - stateful_company_modals
+  - stateful_company_list
+  - stateful_reports_toolbar
+  - stateful_reports_page_controller
+  - stateful_delete_dialog
+  - stateful_email_modal
+  - stateful_company_form
+  - stateful_dashboard_shell
+  - stateful_routing_gates
+  - infrastructure_api_client
+  - infrastructure_routing
+  - infrastructure_qfm
+  - infrastructure_contracts
+  - infrastructure_shared_components
+  - feature_photo_editor
+  - feature_profile
+  - feature_reports_templates
+needs_deeper_exploration:
+  - auth_cross_tab_sync (BroadcastChannel implementation details and
+    localStorage fallback edge cases)
+  - auth_password_reset (token validation logic and expiration handling)
+  - infrastructure_qfm (failure taxonomy classification rules and rollback gate
+    conditions)
+  - feature_photo_editor (canvas interaction model and drag/pan state machine)
+  - stateful_routing_gates (validation rules for gate pages)
+  - stateful_reports_page_controller (business selection state propagation)
+  - stateful_company_form (validation schema and error state handling)
+  - feature_reports_templates (template rendering differences across calculator
+    types)

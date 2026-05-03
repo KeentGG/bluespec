@@ -1,0 +1,127 @@
+id: auth-session-memory-store
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: auth_session_memory_store
+    coverage: full
+    notes: In-memory session storage for auth tokens to prevent XSS access
+description: >
+  In-memory session store for the current user's auth state. Tokens are stored
+  in a JavaScript variable (NOT localStorage) to prevent XSS attacks from
+  accessing them. The refresh token is stored in an HTTP-only cookie set by
+  the backend, which JavaScript cannot read. Cross-tab sync handled via
+  authBroadcast module.
+state_machine:
+  initial: empty
+  states:
+    - id: empty
+      description: No session stored
+    - id: active
+      description: Session with user data and access token
+  transitions:
+    - id: set_session
+      from: empty
+      to: active
+      trigger: Login or token refresh succeeds
+      effects:
+        - Normalize payload
+        - Store in authSession variable
+        - Write user cookie
+        - Broadcast login to other tabs
+    - id: clear_session
+      from: active
+      to: empty
+      trigger: Logout, auth error, or token expiration
+      effects:
+        - Broadcast logout to other tabs
+        - Clear authSession variable
+        - Clear user cookie
+inputs:
+  - id: sessionPayload
+    type: object
+    source: login response or token refresh
+    required: true
+    validation:
+      _id: required string
+      accessToken: required string
+      email: optional string
+outputs:
+  - id: session
+    type: object
+    destination: JavaScript variable (not persistent)
+    lifespan: session
+  - id: user_cookie
+    type: JSON string
+    destination: document.cookie
+    lifespan: 7 days
+evidence_refs:
+  - path: src/features/auth/api/authMemorySession.js
+    snippet: |
+      let authSession = null;
+      export function setAuthSession(candidate) {
+        const normalized = normalizeSessionPayload(candidate);
+        authSession = normalized;
+        return authSession;
+      }
+      export function getAuthSession() {
+        return authSession;
+      }
+      export function clearAuthSession() {
+        authSession = null;
+      }
+    covers:
+      - state: empty
+      - state: active
+      - transition: set_session
+      - transition: clear_session
+    line_range:
+      start: 42
+      end: 105
+  - path: src/features/auth/api/tokenService.js
+    snippet: |
+      export function getToken() {
+        return getAuthSession();
+      }
+      export function setToken(tokenPayload) {
+        const normalized = setAuthSession(tokenPayload);
+        if (!normalized) return;
+        setBrowserUserCookie(normalized);
+        broadcastAuthChange("login");
+      }
+      export function clearToken() {
+        broadcastAuthChange("logout");
+        clearAuthSession();
+        clearBrowserUserCookie();
+      }
+    covers:
+      - transition: set_session
+      - transition: clear_session
+    line_range:
+      start: 164
+      end: 236
+  - path: src/features/auth/api/tokenService.js
+    snippet: |
+      export function applyAuthHeaders(baseHeaders = {}, tokenPayload) {
+        const headers = { ...baseHeaders };
+        if (!tokenPayload || typeof tokenPayload.accessToken !== "string" || tokenPayload.accessToken.length === 0) {
+          return headers;
+        }
+        headers.Authorization = `Bearer ${tokenPayload.accessToken}`;
+        if (typeof tokenPayload._id === "string" && tokenPayload._id.length > 0) {
+          headers.userId = tokenPayload._id;
+        }
+        return headers;
+      }
+    covers:
+      - state: active
+    line_range:
+      start: 238
+      end: 256
+confidence: 0.95
+confidence_rationale: >
+  In-memory session store fully traced across authMemorySession.js and
+  tokenService.js. JavaScript variable storage (not localStorage) confirmed
+  for XSS prevention. Cookie persistence and broadcast integration verified.
+unresolved_questions: []
+status: complete

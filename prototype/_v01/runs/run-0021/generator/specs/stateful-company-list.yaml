@@ -1,0 +1,112 @@
+id: stateful-company-list
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_company_list
+    coverage: full
+    notes: Company listing with search, sort, pagination via SWR and useState hooks
+description: >
+  Company list data fetching with search, sort, and pagination. Uses SWR
+  for server data and useState hooks for local UI state (search query,
+  debounced search, sort, error state, logo failures). Derived listState
+  determines which UI to render (skeleton, table, empty, error).
+state_machine:
+  initial: loading
+  states:
+    - id: loading
+      description: Initial data fetch in progress
+    - id: ready
+      description: Companies loaded and displayed
+    - id: empty
+      description: No companies found
+    - id: error
+      description: Data fetch failed
+  transitions:
+    - id: data_loaded
+      from: loading
+      to: ready
+      trigger: SWR returns company list
+      effects:
+        - Populate companyList state
+    - id: no_companies
+      from: loading
+      to: empty
+      trigger: SWR returns empty list
+    - id: fetch_error
+      from: loading
+      to: error
+      trigger: SWR returns error
+      effects:
+        - Set runtimeErrorMessage
+    - id: search_changed
+      from: ready
+      to: loading
+      trigger: User types in search input
+      effects:
+        - Debounce 300ms
+        - Update debouncedSearchQuery
+        - Re-fetch with new search
+inputs:
+  - id: searchQuery
+    type: string
+    source: search input
+    required: false
+  - id: sortBy
+    type: string
+    source: sort selector
+    required: false
+  - id: sortOrder
+    type: string
+    source: sort direction
+    required: false
+outputs:
+  - id: companyList
+    type: array
+    destination: CompaniesTable component
+    lifespan: session
+evidence_refs:
+  - path: src/features/company/hooks/useCompaniesPage.ts
+    snippet: |
+      const [searchQuery, setSearchQuery] = useState("");
+      const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+      const [sortBy, setSortBy] = useState("updatedAt");
+      const [sortOrder, setSortOrder] = useState("desc");
+      const [runtimeErrorMessage, setRuntimeErrorMessage] = useState(null);
+      const [logoLoadFailuresByBusinessId, setLogoLoadFailuresByBusinessId] = useState({});
+      const listState = useMemo(() => {
+        if (runtimeErrorMessage) return { showTable: false, showError: true, ... };
+        if (swrLoading && !companyList.length) return { showSkeleton: true, ... };
+        if (!companyList.length) return { showNoResults: true, ... };
+        return { showTable: true, ... };
+      }, [runtimeErrorMessage, swrLoading, companyList.length]);
+    covers:
+      - state: loading
+      - state: ready
+      - state: empty
+      - state: error
+    line_range:
+      start: 81
+      end: 176
+  - path: src/features/company/components/CompaniesTable.tsx
+    snippet: |
+      if (listState.showSkeleton) return <CompaniesTableSkeleton />;
+      if (listState.showError) return <Alert variant="error">{runtimeErrorMessage}</Alert>;
+      if (listState.showNoResults) return <p>No companies found.</p>;
+      if (listState.showOnboardingEmpty) return <OnboardingEmptyState />;
+      if (listState.showTable) return <table>...</table>;
+    covers:
+      - state: loading
+      - state: ready
+      - state: empty
+      - state: error
+    line_range:
+      start: 104
+      end: 200
+confidence: 0.9
+confidence_rationale: >
+  Company list fully traced across useCompaniesPage hook and CompaniesTable
+  component. Derived listState with skeleton/table/empty/error states confirmed.
+  Debounced search and sort integration verified.
+unresolved_questions: []
+status: complete

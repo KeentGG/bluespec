@@ -1,0 +1,87 @@
+id: stale-response-guards
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stale_response_guards
+    coverage: full
+    notes: "Prevents stale API responses from overwriting current data"
+description: >
+  Guards against stale report list responses when user rapidly switches
+  companies or changes filters. Uses versioned intent tokens to determine
+  which response is "latest" and silently discards out-of-order responses.
+conditions:
+  - id: createGuard
+    description: "Creates a stale response guard instance"
+    trigger: "Component mount"
+    guards:
+      - field: guard
+        condition: "Guard instance created"
+    then:
+      - "Initialize intent request guard with configuration"
+  - id: beginRequest
+    description: "Starts a new request with intent token"
+    trigger: "API request initiated"
+    guards:
+      - field: token
+        condition: "Token acquired from guard.beginRequest()"
+    then:
+      - "Attach intent token to request metadata"
+  - id: commitIfLatestIntent
+    description: "Commits response only if intent is still latest"
+    trigger: "API response received"
+    guards:
+      - field: isLatest
+        condition: "guard.commitIfLatestIntent(token) returns true"
+    then:
+      - "Apply response data to state"
+    else:
+      - "Silently discard stale response"
+inputs:
+  - id: intentKey
+    type: string
+    source: "Request identifier"
+    required: true
+  - id: businessId
+    type: string
+    source: "Current business context"
+    required: false
+outputs:
+  - id: guard
+    type: "StaleResponseGuard object"
+    destination: "Request lifecycle"
+    lifespan: "Request duration"
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/api/stale-response-guard.js
+    snippet: |
+      export const REPORT_LIST_STALE_RESPONSE_SCHEMA = "reports.list.stale-response.v1";
+      export const REPORT_LIST_STALE_RESPONSE_BUCKET = "stale state";
+      export const REPORT_LIST_STALE_RESPONSE_FAILURE_MODE_ID = "FM-STALE-001";
+      export const REPORT_LIST_STALE_RESPONSE_REASON_CODE = "stale_or_out_of_order_state";
+      const REPORT_LIST_GUARD_CONFIG = Object.freeze({
+        schema: REPORT_LIST_STALE_RESPONSE_SCHEMA,
+        taxonomyBucket: REPORT_LIST_STALE_RESPONSE_BUCKET,
+        failureModeId: REPORT_LIST_STALE_RESPONSE_FAILURE_MODE_ID,
+        reasonCode: REPORT_LIST_STALE_RESPONSE_REASON_CODE,
+        defaultFlowId: "reports.list.fetch",
+        eventPrefix: "reports.list",
+        intentKeyFields: Object.freeze(["intentKey", "businessId", "requestKey"]),
+        nonceSeed: 2000,
+      });
+      export function createReportListRequestGuard(options = {}) {
+        return createIntentRequestGuard(REPORT_LIST_GUARD_CONFIG, options);
+      }
+    covers:
+      - "condition:createGuard"
+      - "condition:beginRequest"
+      - "condition:commitIfLatestIntent"
+confidence: 0.90
+confidence_rationale: >
+  Stale response guard configuration confirmed with schema and taxonomy.
+  Request guard factory function verified.
+  Intent-based versioning mechanism observed.
+  Implementation details in shared/lib module not fully inspected.
+unresolved_questions:
+  - "Exact versioning algorithm in shared/lib/request-intent-guard.js"
+  - "Additional guard instances for other features"
+status: partial

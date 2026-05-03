@@ -1,0 +1,238 @@
+id: api_client_with_auth
+version: '1.0'
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: api_client_with_auth
+    coverage: full
+    notes: 'Covers fetch wrapper with JWT/CSRF injection, 401 retry via token refresh, abort handling, and auth error redirect'
+description: |
+  All HTTP requests flow through a custom fetch wrapper (createApiClient). The client injects JWT Bearer + userId headers from in-memory token store, attaches CSRF tokens from cookies for state-changing methods, and intercepts 401/403 responses to trigger an automatic token refresh with cross-tab coordination. After refresh, the original request is retried once. Auth errors after retry redirect to login. Aborted requests are caught and returned gracefully.
+state_machine:
+  initial: constructing_request
+  states:
+    - id: constructing_request
+      description: 'Building URL, headers, resolving token and base URL'
+    - id: refreshing_token
+      description: 'Token refresh in progress — cross-tab coordination via localStorage lock'
+    - id: retrying_request
+      description: 'Original request being retried with new token'
+    - id: completed
+      description: 'Response returned (success or handled failure)'
+    - id: error_redirect
+      description: 'Auth error — redirecting to login'
+    - id: aborted
+      description: 'Request cancelled via AbortController'
+  transitions:
+    - id: missing_base_url
+      from: constructing_request
+      to: completed
+      trigger: 'resolveRequestUrl returns null'
+      guards:
+        - field: requestUrl
+          condition: '!requestUrl'
+      effects:
+        - 'Return ApiResult { ok: false, statusCode: 503, reason: "missing_api_base_url" }'
+    - id: csrf_attach
+      from: constructing_request
+      to: constructing_request
+      trigger: 'State-changing method (POST/PATCH/DELETE) with CSRF cookie present'
+      guards:
+        - field: withBody
+          condition: 'method !== "GET" && method !== "HEAD"'
+        - field: csrfToken
+          condition: 'csrfToken present in cookie'
+      effects:
+        - 'headers["x-csrf-token"] = csrfToken'
+    - id: csrf_proactive_refresh
+      from: constructing_request
+      to: refreshing_token
+      trigger: 'State-changing method with no CSRF token and not yet retried'
+      guards:
+        - field: withBody
+          condition: 'method !== "GET" && method !== "HEAD"'
+        - field: csrfToken
+          condition: '!csrfToken && !retriedAfterRefresh'
+        - field: skipRefresh
+          condition: '!skipRefresh && !isRefreshEndpoint'
+      effects:
+        - 'Call refreshAccessToken() to obtain CSRF token'
+    - id: request_failed_401
+      from: constructing_request
+      to: refreshing_token
+      trigger: 'Response is 401, or 500 with "jwt expired", or CSRF 403'
+      guards:
+        - field: shouldRetry
+          condition: '!retriedAfterRefresh && !skipRefresh && !isRefreshEndpoint && (statusCode 401 || (statusCode 500 && "jwt expired") || csrfFailure)'
+      effects:
+        - 'Call refreshAccessToken()'
+    - id: retry_with_new_token
+      from: refreshing_token
+      to: retrying_request
+      trigger: 'refreshResult.success && refreshResult.token'
+      guards:
+        - field: refreshResult.success
+          condition: 'refreshResult.success && refreshResult.token'
+      effects:
+        - 'executeRequest(retryOptions, { retriedAfterRefresh: true })'
+    - id: refresh_failed_redirect
+      from: refreshing_token
+      to: error_redirect
+      trigger: 'Refresh fails and auth error handling not skipped'
+      guards:
+        - field: refreshResult.success
+          condition: '!refreshResult.success'
+        - field: skipAuthErrorHandling
+          condition: '!skipAuthErrorHandling'
+      effects:
+        - 'handleAuthError({ redirectUrl: "/login", reason: "session_expired" })'
+    - id: auth_error_direct
+      from: retrying_request
+      to: error_redirect
+      trigger: 'Response is an auth error after retry'
+      guards:
+        - field: isAuthError
+          condition: 'isAuthError(result) && !isRefreshEndpoint && !skipAuthErrorHandling'
+      effects:
+        - 'handleAuthError({ redirectUrl: "/login" })'
+    - id: request_aborted
+      from: constructing_request
+      to: aborted
+      trigger: 'Fetch throws AbortError'
+      guards:
+        - field: error.name
+          condition: 'error.name === "AbortError"'
+      effects:
+        - 'Return ApiResult { ok: false, aborted: true, reason: "aborted" }'
+conditions:
+  - id: skip_token_refresh
+    description: 'skipTokenRefresh flag suppresses automatic 401 retry — used by /auth/refresh, /auth/register, /auth/request-link, /auth/update-password'
+    trigger: 'Request options include skipTokenRefresh: true'
+    guards:
+      - field: skipTokenRefresh
+        condition: 'skipTokenRefresh === true'
+    then:
+      - 'Skip token refresh on 401'
+      - 'Skip auth error handling if skipAuthErrorHandling also true'
+inputs:
+  - id: api_base_url
+    type: 'String URL of backend API server'
+    source: 'Env var NEXT_PUBLIC_APP_API_URL or client constructor option'
+    required: true
+  - id: auth_token
+    type: 'JWT access token from in-memory session'
+    source: 'getToken() → authMemorySession.js'
+    required: false
+  - id: csrf_cookie
+    type: 'csrfToken from non-httpOnly browser cookie'
+    source: 'document.cookie'
+    required: false
+  - id: request_options
+    type: 'RequestOptions { path, method, body, headers, query, signal, cache, skipTokenRefresh, skipAuthErrorHandling }'
+    source: 'Caller (service layer)'
+    required: true
+outputs:
+  - id: api_result
+    type: 'ApiResult<T> { ok, statusCode, message, data, error, aborted, taxonomyBucket, envelopeType }'
+    destination: 'Caller (service layer → hook → component)'
+    lifespan: immediate
+evidence_refs:
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/api/apiClient.ts'
+    snippet: |
+      const method = normalizeRequestMethod(requestOptions.method);
+      const withBody = method !== "GET" && method !== "HEAD";
+      const isRefreshEndpoint = requestOptions.path === "/auth/refresh";
+      const skipRefresh = requestOptions.skipTokenRefresh === true;
+      if (withBody && !hasHeader(headers, "x-csrf-token") && !skipRefresh && !isRefreshEndpoint) {
+        let csrfToken = getCsrfToken();
+        if (!csrfToken && !retriedAfterRefresh) {
+          const refreshAccessToken = await getRefreshAccessToken();
+          const refreshResult = await refreshAccessToken({ apiClient: ... });
+          if (refreshResult.success) { csrfToken = getCsrfToken(); }
+        }
+        if (csrfToken) { headers["x-csrf-token"] = csrfToken; }
+      }
+    covers:
+      - 'transition:csrf_attach'
+      - 'transition:csrf_proactive_refresh'
+    line_range:
+      start: 468
+      end: 493
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/api/apiClient.ts'
+    snippet: |
+      const shouldRetryAfterRefresh =
+        !retriedAfterRefresh && !skipRefresh && !isRefreshEndpoint &&
+        (Number(result.statusCode ?? result.status) === 401 ||
+          (Number(result.statusCode ?? result.status) === 500 &&
+            typeof result.message === "string" && result.message.includes("jwt expired")) ||
+          isCsrfFailure);
+      if (shouldRetryAfterRefresh) {
+        const refreshResult = await refreshAccessToken({ apiClient: ... });
+        if (refreshResult.success && refreshResult.token) {
+          return executeRequest<T>(retryOptions, { retriedAfterRefresh: true });
+        }
+        if (!requestOptions.skipAuthErrorHandling) {
+          await handleAuthError({ redirectUrl: "/login", reason: "session_expired" });
+        }
+      }
+    covers:
+      - 'transition:request_failed_401'
+      - 'transition:retry_with_new_token'
+      - 'transition:refresh_failed_redirect'
+    line_range:
+      start: 545
+      end: 597
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/api/apiClient.ts'
+    snippet: |
+      } catch (error) {
+        const aborted = Boolean(
+          error && typeof error === "object" && (error as Error).name === "AbortError",
+        );
+        return createResult<T>({
+          ok: false, statusCode: null,
+          message: aborted ? "Request was aborted." : "Request failed.",
+          error: error instanceof Error ? error : null,
+          aborted, url: requestUrl,
+          reason: aborted ? "aborted" : "request_failed",
+        });
+      }
+    covers:
+      - 'transition:request_aborted'
+    line_range:
+      start: 608
+      end: 622
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/api/apiClient.ts'
+    snippet: |
+      const requestUrl = resolveRequestUrl(requestOptions, options);
+      if (!requestUrl) {
+        return createResult<T>({
+          ok: false, statusCode: 503,
+          message: "API service is unavailable.",
+          reason: "missing_api_base_url",
+        });
+      }
+    covers:
+      - 'transition:missing_base_url'
+    line_range:
+      start: 455
+      end: 463
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/auth-service.js'
+    snippet: |
+      export async function refreshToken(paramsOrOptions = {}, maybeOptions = {}) {
+        return client.post({
+          path: "/auth/refresh", body: null,
+          headers: applyCsrfHeaders(),
+          skipTokenRefresh: true,
+          skipAuthErrorHandling: true,
+        });
+      }
+    covers:
+      - 'condition:skip_token_refresh'
+    line_range:
+      start: 92
+      end: 108
+confidence: 0.92
+confidence_rationale: |
+  All transitions confirmed in apiClient.ts source code. CSRF end-to-end flow confirmed in csrfHelper.js and apiClient.ts. Token refresh coordination confirmed in tokenRefresher.js. Auth error redirect pattern confirmed in authErrorHandler.js. One ambiguity: exact retry-after-refresh header injection order for CSRF failures depends on runtime cookie state but main path is clear.
+unresolved_questions: []
+status: complete

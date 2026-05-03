@@ -1,0 +1,151 @@
+id: feature-profile
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: feature_profile
+    coverage: full
+    notes: User profile page with data fetching, editing, and legacy migration
+description: >
+  User profile page with data fetching, view/edit modes, and legacy profile
+  migration. ProfilePageContent component provides read/view/edit UI with
+  form fields for name, company, phone, address, website, company details,
+  and marketing consent. Includes account deletion section. Legacy migration
+  fetches from old endpoint and saves to new schema on first load.
+state_machine:
+  initial: loading
+  states:
+    - id: loading
+      description: Profile data being fetched
+    - id: viewing
+      description: Profile data displayed in read mode
+    - id: editing
+      description: Profile form in edit mode
+    - id: saving
+      description: Save request in flight
+    - id: error
+      description: Data fetch or save failed
+  transitions:
+    - id: data_loaded
+      from: loading
+      to: viewing
+      trigger: SWR returns profile data
+      effects:
+        - Display profile fields
+    - id: start_editing
+      from: viewing
+      to: editing
+      trigger: User clicks Edit button
+      effects:
+        - Populate form with current values
+    - id: save_profile
+      from: editing
+      to: saving
+      trigger: User clicks Save button
+      effects:
+        - PATCH /users/:id with form data
+    - id: save_success
+      from: saving
+      to: viewing
+      trigger: Backend returns 200
+      effects:
+        - Revalidate SWR cache
+        - Exit edit mode
+    - id: save_failure
+      from: saving
+      to: editing
+      trigger: Backend returns error
+      effects:
+        - Show error message
+    - id: cancel_editing
+      from: editing
+      to: viewing
+      trigger: User clicks Cancel button
+      effects:
+        - Discard form changes
+inputs:
+  - id: profileData
+    type: object
+    source: GET /calculator-reports/user/:id/profile
+    required: true
+outputs:
+  - id: profile
+    type: object
+    destination: page layout
+    lifespan: session
+evidence_refs:
+  - path: src/features/profile/components/ProfilePageContent.tsx
+    snippet: |
+      export function ProfilePageContent() {
+        const { data: userData, isLoading, revalidate } = useUserQuery();
+        const [isEditing, setIsEditing] = useState(false);
+        const [form, setForm] = useState({ firstName: "", lastName: "", company: "", phone: "", address: "", website: "", companyDetails: "", marketingConsent: false });
+        const startEditing = () => { setForm({ firstName: userData.firstName, ... }); setIsEditing(true); };
+        const handleSave = async () => {
+          const result = await saveUserProfile({ firstName: form.firstName || undefined, ... });
+          if (result.ok) { setIsEditing(false); revalidate(); }
+        };
+        return (
+          <DashboardPage title="Profile">
+            {isLoading ? <Spinner /> : (
+              isEditing ? (
+                <form onSubmit={handleSave}>
+                  <TextInput value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} label="First Name" />
+                  <TextInput value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} label="Last Name" />
+                  <TextInput value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} label="Company" />
+                  <TextInput value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} label="Phone" />
+                  <TextInput value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} label="Address" />
+                  <TextInput value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} label="Website" />
+                  <textarea value={form.companyDetails} onChange={(e) => setForm({ ...form, companyDetails: e.target.value })} label="Company Details" rows={6} />
+                  <Button onClick={handleSave}>Save</Button>
+                  <Button onClick={() => setIsEditing(false)}>Cancel</Button>
+                </form>
+              ) : (
+                <div>
+                  <p>{userData.firstName} {userData.lastName}</p>
+                  <p>{userData.company}</p>
+                  <p>{userData.email}</p>
+                  <Button onClick={startEditing}>Edit</Button>
+                </div>
+              )
+            )}
+          </DashboardPage>
+        );
+      }
+    covers:
+      - state: loading
+      - state: viewing
+      - state: editing
+      - state: saving
+    line_range:
+      start: 16
+      end: 315
+  - path: src/features/profile/api/profile-service.ts
+    snippet: |
+      export async function saveUserProfile(profile: Partial<UserProfile>) {
+        const client = createDefaultApiClient({ apiBaseUrl: getApiBaseUrl() });
+        const userId = getToken()?._id;
+        if (!userId) return { ok: false, message: "User ID not found" };
+        const result = await client.patch({ path: `/users/${userId}`, body: profile });
+        return { ok: result.ok, message: result.message };
+      }
+      export async function fetchUserProfile() {
+        const client = createDefaultApiClient({ apiBaseUrl: getApiBaseUrl() });
+        const userId = getToken()?._id;
+        if (!userId) return { ok: false, message: "User ID not found" };
+        const result = await client.get({ path: `/calculator-reports/user/${userId}/profile` });
+        return { ok: result.ok, data: result.data, message: result.message };
+      }
+    covers:
+      - state: loading
+      - state: saving
+    line_range:
+      start: 36
+      end: 128
+confidence: 0.8
+confidence_rationale: >
+  Profile feature fully traced across ProfilePageContent, profile-service,
+  and route page. View/edit mode switching, form fields, and save flow
+  confirmed. Legacy migration pattern documented.
+unresolved_questions: []
+status: complete

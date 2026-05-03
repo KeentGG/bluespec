@@ -1,0 +1,207 @@
+id: data_crud
+version: '1.0'
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: data_crud
+    coverage: full
+    notes: 'Covers stale response guard (request-intent-guard), API response handling (ok/error/aborted), and report CRUD service calls'
+description: |
+  The data layer guards against stale API responses overwriting fresh data using a request-intent versioning system (request-intent-guard.js). Each request gets a version number; only the latest version's response is accepted — older responses are silently discarded. The reports controller processes API responses: on ok, populates the report list; on error (with reason other than "aborted"), surfaces an error message; on aborted, silently drops. Report CRUD (create, rename, delete, email) flows through the API client via report-service.js which uses the shared apiClient with automatic auth, CSRF, and retry.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: 'No request in flight'
+    - id: request_started
+      description: 'SWR or manual fetch initiated — intent token created'
+    - id: response_received
+      description: 'API response arrived — intent match check'
+    - id: processing
+      description: 'Response being applied to state'
+    - id: stale_ignored
+      description: 'Response discarded because a newer request superseded it'
+  transitions:
+    - id: begin_request
+      from: idle
+      to: request_started
+      trigger: 'SWR fetcher called or manual fetch triggered'
+      effects:
+        - 'guard.beginRequest(intent) → token with version ++'
+    - id: response_arrives
+      from: request_started
+      to: response_received
+      trigger: 'API response received'
+    - id: intent_matches
+      from: response_received
+      to: processing
+      trigger: 'Response intent version matches latest active request'
+      guards:
+        - field: requestIntent
+          condition: 'requestIntent matches stored active request version'
+      effects:
+        - 'guard.commitIfLatestIntent(token, callback) → committed: true'
+    - id: intent_mismatch
+      from: response_received
+      to: stale_ignored
+      trigger: 'Response intent version is older than latest active request'
+      guards:
+        - field: requestIntent
+          condition: 'requestIntent differs from stored active request intent'
+      effects:
+        - 'guard.commitIfLatestIntent(token, callback) → committed: false, stale: true'
+        - 'Ignore result silently'
+    - id: response_ok
+      from: processing
+      to: idle
+      trigger: 'result.ok === true'
+      effects:
+        - 'Populate data into state (setReportList, etc.)'
+        - 'Clear runtime error message'
+    - id: response_error
+      from: processing
+      to: idle
+      trigger: 'result.ok === false && reason !== "aborted"'
+      effects:
+        - 'Set runtimeErrorMessage from result.message'
+    - id: response_aborted
+      from: processing
+      to: idle
+      trigger: 'result.reason === "aborted"'
+      effects:
+        - 'Silently ignore — do not surface error'
+conditions:
+  - id: stale_response_guard
+    description: 'Request-intent versioning prevents stale responses from overwriting fresh data'
+    trigger: 'commitIfLatestIntent called when API response arrives'
+    guards:
+      - field: token_version
+        condition: 'normalizedToken.version === activeRequest.version'
+    then:
+      - 'commit() callback executes — update state'
+    else:
+      - 'Return { committed: false, stale: true } — discard response'
+  - id: report_create
+    description: 'Create report via POST /calculator-reports/create'
+    trigger: 'CreateReportModal submit'
+    effects:
+      - 'apiClient.post with businessId, name, calculatorId, userId, reportProgress'
+  - id: report_delete
+    description: 'Delete report via DELETE /calculator-reports/:id/business/:businessId'
+    trigger: 'DeleteReportModal confirm'
+    effects:
+      - 'apiClient.delete with calcReportId, businessId'
+  - id: report_rename
+    description: 'Rename report via PATCH /calculator-reports/'
+    trigger: 'Inline rename confirm (Enter or blur with debounce check)'
+    effects:
+      - 'apiClient.patch with _id, userId, name'
+  - id: report_email
+    description: 'Email report via POST /calculator-reports-pdf/start-generate-pdf/:userId/user/:reportId/report'
+    trigger: 'EmailReportModal send'
+    effects:
+      - 'apiClient.post with userId, reportId, optional email recipients'
+inputs:
+  - id: request_intent
+    type: 'Object or string key identifying the logical request'
+    source: 'Service layer (list-service.js) or SWR key'
+    required: true
+  - id: api_response
+    type: 'ApiResult<T> from apiClient'
+    source: 'API client'
+    required: true
+  - id: signal
+    type: 'AbortSignal for request cancellation'
+    source: 'SWR or manual AbortController'
+    required: false
+outputs:
+  - id: report_data
+    type: 'Array of report records or single report'
+    destination: 'React state (useState) or Zustand store'
+    lifespan: 'Until next data fetch'
+evidence_refs:
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/shared/request-intent-guard.js'
+    snippet: |
+      export function createIntentRequestGuard(config, options = {}) {
+        let versionCounter = versionSeed;
+        let activeRequest = null;
+        function beginRequest(intent = {}) {
+          versionCounter += 1;
+          activeRequest = { version: versionCounter, nonce: nonceCounter, intentKey: normalizeIntentKey(intent, versionCounter, config.intentKeyFields), issuedAt: String(now()), context };
+          return copyRequestToken(activeRequest);
+        }
+        function commitIfLatestIntent(requestToken, commit = () => undefined, metadataOptions = {}) {
+          const metadata = createResponseMetadata(requestToken, metadataOptions);
+          if (metadata.stale) return { committed: false, stale: true, reason: PHASE_STALE_IGNORED, value: undefined, metadata };
+          return { committed: true, stale: false, reason: "latest_intent_committed", value: commit({...}), metadata };
+        }
+      }
+    covers:
+      - 'condition:stale_response_guard'
+      - 'transition:intent_matches'
+      - 'transition:intent_mismatch'
+    line_range:
+      start: 189
+      end: 274
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/controllers/useReportsPageController.ts'
+    snippet: |
+      useEffect(() => {
+        if (selection.selectedBusinessId === REPORTS_ALL_BUSINESSES_ID) {
+          setReportList([]);
+          accumulatedReportsRef.current = [];
+          setRuntimeErrorMessage("");
+          return;
+        }
+        const result = reportsListQuery.data;
+        if (!result) return;
+        if (result.ok) {
+          accumulatedReportsRef.current = result.reports || [];
+          setReportList(accumulatedReportsRef.current);
+          setRuntimeErrorMessage("");
+        } else {
+          if (result.reason !== "aborted") {
+            setRuntimeErrorMessage(result.message || "Unable to load reports.");
+          }
+        }
+      }, [reportsListQuery.data, selection.selectedBusinessId]);
+    covers:
+      - 'transition:response_ok'
+      - 'transition:response_error'
+      - 'transition:response_aborted'
+    line_range:
+      start: 56
+      end: 76
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/api/report-service.js'
+    snippet: |
+      export async function createReport({ businessId, name, calculatorId, userId, reportProgress }, options = {}) {
+        return client.post({ path: "/calculator-reports/create", body: { businessId, name, calculatorId, userId, reportProgress } });
+      }
+      export async function deleteReport({ calcReportId, businessId }, options = {}) {
+        return client.delete({ path: `/calculator-reports/${calcReportId}/business/${businessId}` });
+      }
+      export async function patchReport({ _id, userId, name }, options = {}) {
+        return client.patch({ path: "/calculator-reports/", body: { _id, userId, name } });
+      }
+    covers:
+      - 'condition:report_create'
+      - 'condition:report_delete'
+      - 'condition:report_rename'
+    line_range:
+      start: 29
+      end: 63
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/api/stale-response-guard.js'
+    snippet: |
+      export function createReportListRequestGuard(options = {}) {
+        return createIntentRequestGuard(REPORT_LIST_GUARD_CONFIG, options);
+      }
+    covers:
+      - 'condition:stale_response_guard'
+    line_range:
+      start: 45
+      end: 47
+confidence: 0.88
+confidence_rationale: |
+  Request-intent-guard versioning mechanism confirmed in request-intent-guard.js. Report CRUD endpoints confirmed in report-service.js. Response processing (ok/error/aborted) confirmed in useReportsPageController.ts. Stale response guard integration confirmed in stale-response-guard.js. Gap: exact usage of createReportListRequestGuard in the reports list service is referenced but the actual call site in list-service.js uses cumulative mode pagination — the stale guard pattern is defined but specific call sites for commitIfLatestIntent within the SWR hook are implicit.
+unresolved_questions:
+  - 'Exact integration point of stale-response-guard with SWR-based list fetching (may be in list-service.js or in hook level)'
+status: complete

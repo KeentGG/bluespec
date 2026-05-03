@@ -1,0 +1,148 @@
+id: auth-flow
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: auth_flow
+    coverage: full
+    notes: "Complete auth flow with checking, authenticated, and unauthenticated states"
+description: >
+  Manages the authentication lifecycle including session verification,
+  token refresh, and redirect behavior. Shows loading state during
+  session checks, renders protected content when authenticated,
+  and redirects to login when unauthenticated.
+state_machine:
+  initial: checking
+  states:
+    - id: checking
+      description: "Session verification in progress, showing loading spinner"
+    - id: authenticated
+      description: "Valid session exists, rendering protected content"
+    - id: unauthenticated
+      description: "No valid session, redirecting to login"
+  transitions:
+    - id: session_verified
+      from: checking
+      to: authenticated
+      trigger: "Token exists with valid _id and accessToken"
+      guards:
+        - field: token
+          condition: "token._id is non-empty string AND token.accessToken is non-empty string"
+      effects:
+        - "Set isAuthenticated=true, isChecking=false"
+    - id: token_refresh_success
+      from: checking
+      to: authenticated
+      trigger: "Refresh token exchange succeeds"
+      guards:
+        - field: refreshResult
+          condition: "refreshResult.success === true AND refreshResult.token exists"
+      effects:
+        - "Set isAuthenticated=true, isChecking=false"
+    - id: session_expired
+      from: checking
+      to: unauthenticated
+      trigger: "No valid token and refresh fails"
+      guards:
+        - field: refreshResult
+          condition: "refreshResult.success === false OR no token exists"
+      effects:
+        - "Call handleAuthError with redirect to /login"
+        - "Set isAuthenticated=false"
+    - id: auth_error
+      from: checking
+      to: unauthenticated
+      trigger: "Exception during auth check"
+      effects:
+        - "Set error message"
+        - "Redirect to /login"
+conditions:
+  - id: isChecking
+    description: "Shows loading spinner while session verification is in progress"
+    trigger: "Component mounts, auth check begins"
+    guards:
+      - field: isChecking
+        condition: "isChecking === true"
+    then:
+      - "Render loading spinner with 'Verifying session...' text"
+    else:
+      - "Proceed to render children or redirect"
+  - id: isAuthenticated
+    description: "Renders protected content when user has valid session"
+    trigger: "isChecking becomes false"
+    guards:
+      - field: isAuthenticated
+        condition: "isAuthenticated === true AND isChecking === false"
+    then:
+      - "Render AuthSyncBootstrap component"
+      - "Render children (protected content)"
+  - id: isUnauthenticated
+    description: "Redirects to login when no valid session exists"
+    trigger: "isChecking becomes false"
+    guards:
+      - field: isAuthenticated
+        condition: "isAuthenticated === false AND isChecking === false"
+    then:
+      - "Redirect to /login via window.location.replace"
+inputs:
+  - id: options
+    type: "UseAuthRedirectOptions object"
+    source: "Component props"
+    required: false
+    validation:
+      redirectTo: "Default '/login'"
+      attemptTokenRefresh: "Default true"
+      minLoadingDelay: "Default 0"
+outputs:
+  - id: authState
+    type: "UseAuthRedirectResult object"
+    destination: "Component state"
+    lifespan: "Session duration"
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/hooks/useAuthRedirect.ts
+    snippet: |
+      export function useAuthRedirect(options: UseAuthRedirectOptions = {}): UseAuthRedirectResult {
+        const { redirectTo = "/login", attemptTokenRefresh = true, minLoadingDelay = 0 } = options;
+        const [isChecking, setIsChecking] = useState(true);
+        const [isAuthenticated, setIsAuthenticated] = useState(false);
+        // ...
+        if (hasValidToken) {
+          setIsAuthenticated(true);
+          setIsChecking(false);
+          return;
+        }
+    covers:
+      - "condition:isChecking"
+      - "condition:isAuthenticated"
+      - "transition:session_verified"
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/components/AuthGuard.tsx
+    snippet: |
+      export function AuthGuard({ children }: AuthGuardProps) {
+        const { isChecking } = useAuthRedirect();
+        if (isChecking) {
+          return (
+            <main className="min-h-screen bg-surface-page flex flex-col items-center justify-center">
+              <div className="flex flex-col items-center gap-4">
+                <div className="w-8 h-8 border-4 border-brand-primary border-t-transparent rounded-full animate-spin" />
+                <p className="text-text-muted">Verifying session...</p>
+              </div>
+            </main>
+          );
+        }
+        return (
+          <>
+            <AuthSyncBootstrap />
+            {children}
+          </>
+        );
+      }
+    covers:
+      - "condition:isChecking"
+      - "condition:isAuthenticated"
+confidence: 0.95
+confidence_rationale: >
+  State transitions confirmed in useAuthRedirect.ts and AuthGuard.tsx.
+  Token validation logic verified in tokenService.js.
+  All three states (checking, authenticated, unauthenticated) are explicitly handled.
+unresolved_questions: []
+status: complete

@@ -1,0 +1,242 @@
+id: error_handling
+version: '1.0'
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: error_handling
+    coverage: full
+    notes: 'Covers ErrorBoundary UI, handleAuthError redirect logic, QFM taxonomy classification, and primary/secondary action button logic'
+description: |
+  Error handling operates at two levels. The React ErrorBoundary (using react-error-boundary) catches render-time exceptions and displays an ErrorFallback card with configurable primary and secondary action buttons. The auth error handler (authErrorHandler.js) detects 401/403 responses via status code, QFM taxonomy bucket, or keyword matching, then clears tokens and localStorage auth keys before redirecting to login via window.location.replace. The QFM failure taxonomy (failureTaxonomy.js) classifies errors into 7 buckets using status codes and keyword matching on error signals. A concurrency guard prevents duplicate auth error handling.
+state_machine:
+  initial: normal_operation
+  states:
+    - id: normal_operation
+      description: 'No error — children rendered normally'
+    - id: error_caught
+      description: 'ErrorBoundary caught an error — ErrorFallback shown'
+    - id: auth_error_detected
+      description: '401/403 response identified'
+    - id: handling_auth_error
+      description: 'Clearing session and redirecting'
+    - id: error_redirected
+      description: 'User redirected to /login?reason=...'
+  transitions:
+    - id: render_error_caught
+      from: normal_operation
+      to: error_caught
+      trigger: 'React throws during render phase'
+      effects:
+        - 'ErrorBoundary renders ErrorFallback'
+        - 'Hide children'
+    - id: error_recovered
+      from: error_caught
+      to: normal_operation
+      trigger: 'User clicks resetErrorBoundary or onPrimaryAction'
+      effects:
+        - 'ReactErrorBoundary resets internal state'
+        - 'Re-render children'
+    - id: auth_error_detected
+      from: normal_operation
+      to: auth_error_detected
+      trigger: 'API response has statusCode 401 or 403, or taxonomyBucket "auth/session", or auth keywords in message'
+      guards:
+        - field: is_auth_error
+          condition: 'statusCode === 401 || statusCode === 403 || taxonomyBucket === "auth/session" || authKeywords in message'
+    - id: handle_auth
+      from: auth_error_detected
+      to: handling_auth_error
+      trigger: 'handleAuthError called'
+      guards:
+        - field: not_already_handling
+          condition: 'isAuthErrorHandling === false'
+      effects:
+        - 'clearClientDataCache()'
+        - 'clearToken()'
+        - 'Remove EOYT_AUTH_KEYS from localStorage'
+        - 'window.location.replace(redirectUrl?reason=...)'
+    - id: skip_duplicate
+      from: auth_error_detected
+      to: auth_error_detected
+      trigger: 'handleAuthError called while already handling'
+      guards:
+        - field: already_handling
+          condition: 'isAuthErrorHandling === true'
+      effects:
+        - 'Return { handled: false, reason: "already_handling" }'
+conditions:
+  - id: primary_action_visible
+    description: 'Show primary action button when onPrimaryAction provided'
+    trigger: 'ErrorFallback render'
+    guards:
+      - field: onPrimaryAction
+        condition: 'onPrimaryAction is defined'
+    then:
+      - 'Show primary button with primaryActionLabel'
+  - id: reset_boundary_fallback
+    description: 'Show resetErrorBoundary button when no onPrimaryAction provided'
+    trigger: 'ErrorFallback render'
+    guards:
+      - field: resetErrorBoundary
+        condition: 'resetErrorBoundary && !onPrimaryAction'
+    then:
+      - 'Show reset button calling resetErrorBoundary'
+  - id: secondary_action
+    description: 'Show secondary button when onSecondaryAction provided'
+    trigger: 'ErrorFallback render'
+    guards:
+      - field: onSecondaryAction
+        condition: 'onSecondaryAction is defined'
+    then:
+      - 'Show secondary button calling onSecondaryAction'
+  - id: default_refresh
+    description: 'Show default refresh button when no secondary action'
+    trigger: 'ErrorFallback render'
+    guards:
+      - field: no_secondary
+        condition: '!onSecondaryAction'
+    then:
+      - 'Show refresh button calling window.location.reload()'
+  - id: qfm_explicit_bucket
+    description: 'Use explicit taxonomy bucket if provided in failure object'
+    trigger: 'classifyQfmFailure called'
+    guards:
+      - field: explicitBucket
+        condition: 'explicitBucket present in failureLike'
+    then:
+      - 'Use explicitBucket as classification'
+  - id: qfm_auth_status
+    description: 'Classify as auth/session if statusCode is 401 or 403'
+    trigger: 'classifyQfmFailure — resolveBucket'
+    guards:
+      - field: auth_status
+        condition: 'AUTH_FAILURE_STATUS_CODES.includes(statusCode) === true'
+    then:
+      - 'Return bucket: "auth/session"'
+  - id: qfm_auth_keywords
+    description: 'Classify as auth/session if signal contains auth keywords'
+    trigger: 'classifyQfmFailure — resolveBucket'
+    guards:
+      - field: auth_keyword_match
+        condition: 'includesKeyword(signal, AUTH_KEYWORDS) === true'
+    then:
+      - 'Return bucket: "auth/session"'
+  - id: qfm_stale
+    description: 'Classify as stale state if signal contains stale keywords'
+    trigger: 'classifyQfmFailure — resolveBucket'
+    guards:
+      - field: stale_keyword_match
+        condition: 'includesKeyword(signal, STALE_KEYWORDS) === true'
+    then:
+      - 'Return bucket: "stale state"'
+inputs:
+  - id: error_object
+    type: 'Error instance from React render phase'
+    source: 'React ErrorBoundary onError callback'
+    required: false
+  - id: api_response
+    type: 'ApiResult with statusCode, message, taxonomyBucket'
+    source: 'apiClient.ts executeRequest result'
+    required: false
+  - id: failure_like
+    type: 'Object with statusCode, reason, message, signal fields'
+    source: 'classifyQfmFailure parameter'
+    required: false
+outputs:
+  - id: error_ui
+    type: 'ErrorFallback component with title, description, error message, action buttons'
+    destination: 'DOM'
+    lifespan: immediate
+  - id: redirect
+    type: 'window.location.replace to /login?reason=session_expired'
+    destination: 'Browser navigation'
+    lifespan: immediate
+evidence_refs:
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/components/ErrorFallback.tsx'
+    snippet: |
+      export function ErrorFallback({ error, resetErrorBoundary, title, description, primaryActionLabel, secondaryActionLabel, onPrimaryAction, onSecondaryAction }) {
+        return (
+          <div className="min-h-screen flex items-center justify-center">
+            <div className="flex gap-3">
+              {onPrimaryAction && (<Button onClick={onPrimaryAction} variant="primary">{primaryActionLabel}</Button>)}
+              {resetErrorBoundary && !onPrimaryAction && (<Button onClick={resetErrorBoundary} variant="primary">{primaryActionLabel}</Button>)}
+              {onSecondaryAction && (<Button onClick={onSecondaryAction} variant="secondary">{secondaryActionLabel}</Button>)}
+              {!onSecondaryAction && (<Button onClick={() => window.location.reload()} variant="secondary">{secondaryActionLabel}</Button>)}
+            </div>
+          </div>
+        );
+      }
+    covers:
+      - 'condition:primary_action_visible'
+      - 'condition:reset_boundary_fallback'
+      - 'condition:secondary_action'
+      - 'condition:default_refresh'
+    line_range:
+      start: 16
+      end: 77
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/components/ErrorBoundary.tsx'
+    snippet: |
+      export function ErrorBoundary({ children }: ErrorBoundaryProps) {
+        return (
+          <ReactErrorBoundary FallbackComponent={BoundaryFallback} onReset={() => {}}
+            onError={(error, errorInfo) => { console.error("ErrorBoundary caught an error:", error, errorInfo); }}>
+            {children}
+          </ReactErrorBoundary>
+        );
+      }
+    covers:
+      - 'transition:render_error_caught'
+      - 'transition:error_recovered'
+    line_range:
+      start: 28
+      end: 43
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/authErrorHandler.js'
+    snippet: |
+      export function isAuthError(response) {
+        if (response.statusCode === 401 || response.statusCode === 403) return true;
+        if (response.taxonomyBucket === "auth/session") return true;
+        const authKeywords = ["unauthorized", "unauthenticated", "invalid token", "token expired", "jwt expired", "session expired", "not authenticated", "auth required", "forbidden"];
+        return authKeywords.some(keyword => message.includes(keyword));
+      }
+      export async function handleAuthError(options = {}) {
+        if (isAuthErrorHandling) return { handled: false, reason: "already_handling" };
+        isAuthErrorHandling = true;
+        await clearClientDataCache();
+        clearToken();
+        if (!skipRedirect && typeof window !== "undefined") {
+          window.location.replace(fullUrl);
+        }
+      }
+    covers:
+      - 'transition:auth_error_detected'
+      - 'transition:handle_auth'
+      - 'transition:skip_duplicate'
+    line_range:
+      start: 32
+      end: 143
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/qfm/failureTaxonomy.js'
+    snippet: |
+      const AUTH_FAILURE_STATUS_CODES = [401, 403];
+      const AUTH_KEYWORDS = Object.freeze(["auth", "session", "token", "cookie", "unauthorized", "forbidden", "login", "no-access"]);
+      const STALE_KEYWORDS = Object.freeze(["stale", "out of order", "race", "superseded", "abort", "canceled", "version"]);
+      function resolveBucket({ explicitBucket, statusCode, signal }) {
+        if (explicitBucket) return explicitBucket;
+        if (AUTH_FAILURE_STATUS_CODES.includes(statusCode)) return "auth/session";
+        if (includesKeyword(signal, AUTH_KEYWORDS)) return "auth/session";
+        if (includesKeyword(signal, STALE_KEYWORDS)) return "stale state";
+        // ... 5 more keyword categories
+        return "data contract";
+      }
+    covers:
+      - 'condition:qfm_explicit_bucket'
+      - 'condition:qfm_auth_status'
+      - 'condition:qfm_auth_keywords'
+      - 'condition:qfm_stale'
+    line_range:
+      start: 102
+      end: 291
+confidence: 0.94
+confidence_rationale: |
+  All conditions confirmed in source code. ErrorBoundary button logic verified in ErrorFallback.tsx. Auth error detection confirmed in authErrorHandler.js with 9 auth keywords. QFM taxonomy with 7 buckets, 2 status codes, and 6 keyword lists confirmed. Concurrency guard isAuthErrorHandling verified. Skip redirect logic confirmed. Missing: no explicit error logging service beyond console.error.
+unresolved_questions: []
+status: complete

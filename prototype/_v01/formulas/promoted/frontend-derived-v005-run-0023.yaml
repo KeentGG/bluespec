@@ -1,0 +1,333 @@
+'id': 'frontend-derived-v005-run-0023'
+'version': 'v005'
+'ecosystem': 'frontend'
+'extends': 'formulas/promoted/frontend-derived-v004.yaml'
+'parent': 'frontend-derived-v004'
+'fine_tune_run': 'run-0023'
+'execution':
+  'orchestrator_version': 'v2'
+  'agent_provider': 'opencode'
+  'max_step_retries': 3
+'steps':
+  - 'id': 'explore'
+    'name': 'Explore codebase structure and behavioral surfaces'
+    'agent': 'codebase-explorer'
+    'tools':
+      - 'glob'
+      - 'grep'
+      - 'read'
+    'max_tokens': 8000
+    'prompt': "Explore the codebase at {{project.codebase_path}}.
+
+
+      Focus on these behavioral shapes: {{project.behavior_shapes}}
+
+
+      Your task:
+
+      1. List ALL source files (file_tree)
+
+      2. Identify potential behavioral areas (auth, state, UI, API, etc.)
+
+      3. For each area, list evidence files that contain the behavior
+
+      4. Flag files that are clearly infrastructure vs business logic
+
+
+      Output as YAML:
+
+      file_tree: []
+
+      behavior_candidates:
+
+      \  - id: string
+
+      \    description: string
+
+      \    evidence_refs: []
+
+      \    confidence: 0.0-1.0\n"
+    'outputs':
+      'file_tree':
+        'type': 'array'
+        'items':
+          'type': 'string'
+      'behavior_candidates':
+        'type': 'array'
+        'items':
+          'type': 'object'
+          'properties':
+            'id':
+              'type': 'string'
+            'description':
+              'type': 'string'
+            'evidence_refs':
+              'type': 'array'
+              'items':
+                'type': 'string'
+            'confidence':
+              'type': 'number'
+          'required':
+            - 'id'
+            - 'description'
+            - 'evidence_refs'
+  - 'id': 'analyze'
+    'name': 'Analyze discovered behaviors for spec-worthiness'
+    'agent': 'behavior-analyzer'
+    'tools':
+      - 'read'
+    'max_tokens': 12000
+    'prompt': "Analyze these behavior candidates from the exploration step:
+
+      {{prior_outputs.explore.behavior_candidates}}
+
+
+      Your task:
+
+      1. Filter candidates to those with high confidence (>0.6)
+
+      2. For conditional flows, produce a predicate_inventory:
+
+      \   - List each gate predicate separately
+
+      \   - Label render mode: hidden, visible-disabled, visible-enabled
+
+      \   - Note: this is LIVE CODE analysis, not golden-set matching
+
+      3. Flag behaviors that need deeper exploration
+
+
+      Output as YAML:
+
+      predicate_inventory: []
+
+      behaviors_to_spec: []
+
+      needs_deeper_exploration: []\n"
+    'outputs':
+      'predicate_inventory':
+        'type': 'array'
+        'items':
+          'type': 'object'
+          'properties':
+            'behavior_id':
+              'type': 'string'
+            'predicates':
+              'type': 'array'
+              'items':
+                'type': 'string'
+            'render_mode':
+              'type': 'string'
+              'enum':
+                - 'hidden'
+                - 'visible-disabled'
+                - 'visible-enabled'
+      'behaviors_to_spec':
+        'type': 'array'
+        'items':
+          'type': 'string'
+      'needs_deeper_exploration':
+        'type': 'array'
+        'items':
+          'type': 'string'
+  - 'id': 'draft'
+    'name': 'Draft behavioral specs with verification crosscheck'
+    'agent': 'spec-writer'
+    'tools':
+      - 'read'
+      - 'write'
+    'max_tokens': 16000
+    'prompt': "Draft specs for these behaviors:
+
+      {{prior_outputs.analyze.behaviors_to_spec}}
+
+
+      Predicate inventory:
+
+      {{prior_outputs.analyze.predicate_inventory}}
+
+
+      Use schema: schemas/spec.schema.yaml
+
+      Write specs to: runs/{{run_id}}/generator/specs/
+
+
+      Each spec must include:
+
+      - id, type, version
+
+      - behaviors[] with evidence_refs
+
+      - state_transitions where applicable
+
+      - confidence score
+
+      - evidence_refs[].covers[] as strings only, e.g. \"condition:route_protection\" or \"transition:login_success\". Do not write covers as mappings like { condition: route_protection } or list items like \"- condition: route_protection\".
+
+
+      YAML safety rules:
+
+      - Quote every inline string containing \":\", \"|\", \"{\", \"}\", \"[\", \"]\", \"#\", or TypeScript union text.
+
+      - For prose/code containing JSON-like objects, write quoted strings, e.g. 'Return { success: false, reason: \"too_soon\" }'.
+
+      - Prefer block scalars for long notes and snippets.
+
+
+      MANDATORY VERIFICATION CROSSCHECK (recognition_failure prevention):
+
+
+      After drafting each spec, you MUST perform this verification step before finalizing:
+
+
+      1. For each behavior claim in your spec (conditions, guards, state transitions, function signatures):
+
+      \   - Re-read the exact evidence_ref file you cited
+
+      \   - Verify the claim is DIRECTLY OBSERVABLE in that file
+
+      \   - If the claim references behavior from a DIFFERENT file, REMOVE it or move it to a separate spec with the correct evidence_ref
+
+
+      2. Specific verification rules:
+
+      \   - Do NOT infer behavior from related files unless you explicitly read them
+
+      \   - Do NOT attribute conditions/guards to a file unless they appear in that file's code
+
+      \   - Do NOT show function signatures that differ from the actual implementation
+
+      \   - If a behavior spans multiple files, list EACH file separately with its specific contribution
+
+
+      3. Rejection criteria (MUST reject if any apply):
+
+      \   - A condition name appears in spec but NOT in the evidence_ref file
+
+      \   - A function signature in spec differs from the actual export
+
+      \   - A state transition is claimed but the code shows different logic
+
+      \   - Evidence_ref points to file A but behavior is actually in file B
+
+
+      4. Final verification output format (append to each spec):
+
+      \   verification:
+
+      \     source_file: \"path/to/file.js\"
+
+      \     verified_claims:
+
+      \       - claim: \"description of behavior\"
+
+      \         line_range: \"L10-L25\"
+
+      \         status: \"confirmed\" | \"removed\" | \"corrected\"
+
+      \     removed_claims:
+
+      \       - claim: \"original claim\"
+
+      \         reason: \"not found in source or misattributed\"
+
+
+      Output as YAML:
+
+      spec_files: []
+
+      summary: string\n"
+    'outputs':
+      'spec_files':
+        'type': 'array'
+        'items':
+          'type': 'string'
+      'summary':
+        'type': 'string'
+  - 'id': 'verify'
+    'name': 'Verify specs against schema'
+    'agent': null
+    'tool': 'schema-validator'
+    'inputs':
+      'specs_dir': 'runs/{{run_id}}/generator/specs/'
+      'schema': 'schemas/spec.schema.yaml'
+    'prompt': 'Validate all specs in runs/{{run_id}}/generator/specs/ against schemas/spec.schema.yaml.
+
+      '
+    'outputs':
+      'validation_report':
+        'type': 'object'
+        'properties':
+          'valid_specs':
+            'type': 'array'
+            'items':
+              'type': 'string'
+          'invalid_specs':
+            'type': 'array'
+            'items':
+              'type': 'object'
+              'properties':
+                'file':
+                  'type': 'string'
+                'errors':
+                  'type': 'array'
+                  'items':
+                    'type': 'string'
+          'all_valid':
+            'type': 'boolean'
+'validations':
+  - 'schema_valid'
+  - 'references_resolve'
+'evaluation':
+  'recall':
+    'weight': 0.4
+    'description': 'Coverage of known golden behaviors'
+  'precision':
+    'mechanical':
+      'weight': 0.7
+      'checks':
+        - 'id': 'behavior_exists'
+          'description': 'Every behavior claimed in spec exists in code'
+        - 'id': 'evidence_ref_valid'
+          'description': 'Every evidence_ref points to a file containing the behavior'
+    'agent':
+      'weight': 0.3
+      'prompt': 'Review these specs for business logic hallucinations that AST extraction might miss.'
+      'agent': 'spec-reviewer'
+  'discovery':
+    'weight': 0.3
+    'description': 'New behaviors found that aren''t in golden set'
+    'criteria':
+      - 'behavior_must_have_evidence_refs'
+      - 'behavior_must_have_state_machine_or_conditions'
+      - 'behavior_must_not_be_duplicate_of_existing'
+'mutation_tiers':
+  - 'prompt_tweak'
+  - 'step_management'
+  - 'parent_guideline'
+  - 'schema_change'
+  - 'tool_change'
+  - 'rubric_mutation'
+'specializations':
+  - 'component_state_tracking'
+  - 'conditional_rendering_checks'
+  - 'accessibility_review'
+  - 'data_table_behavior'
+'status': 'active'
+'discovered_in_run': 'run-0023'
+'created_at': '2026-04-30T00:00:00Z'
+'governance_notes': ''
+'consolidated_mutations':
+  - 'run_id': 'run-0023'
+    'timestamp': '2026-04-30T14:30:00Z'
+    'type': 'step_management'
+    'target_step': 'draft'
+    'change': 'Added mandatory verification crosscheck prompt block to draft step. Forces spec writer to re-read each evidence_ref file and verify every condition, guard, state transition, and function signature claim is directly observable in the source code. Includes rejection criteria and verification output format.'
+    'rationale': 'Analyzer identified recognition_failure where spec generator hallucinated behaviors (conditions like hasRefreshTokenNoSession, refreshResultNotNull) not present in authGuard.js. Generator inferred behaviors from related files and incorrectly attributed them to the target file. Verification crosscheck forces line-by-line verification against source. Previous step_management attempt got PARTIAL result (run-0022), but this attempt combines step_management mutation type with proven verification_crosscheck teaching method (1 PASS, 0 FAIL for recognition_failure).'
+    'previous_attempt': 'run-0022 step_management PARTIAL'
+    'teaching_method_applied': 'verification_crosscheck'
+    'lesson_reference': 'learned.jsonl#1 - verification_crosscheck PASSED for recognition_failure'
+    'affected_files':
+      - 'runs/run-0023/mutator/formula-candidate.yaml'
+    'expected_impact': 'Prevents hallucinated behaviors from being included in specs by forcing evidence-based verification against source files'
+'promoted_at': '2026-04-30T15:30:46.688Z'

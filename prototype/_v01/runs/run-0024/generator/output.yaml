@@ -1,0 +1,28 @@
+'run_id': 'run-0024'
+'generator': 'orchestrator'
+'status': 'failed'
+'formula_id': 'frontend-derived'
+'formula_version': 'v004'
+'steps_completed': 3
+'failed_at_step': 4
+'error_reason': 'Schema validation failed: report_lifecycle.yaml: /state_machine/transitions/1/from must be string; /state_machine/transitions/5/from must be string | search_and_filter.yaml: /state_machine/transitions/1/from must be string | stateful_ui.yaml: /state_machine/transitions/1/from must be string'
+'overall_confidence': 0.5
+'steps':
+  - 'step_id': 'explore'
+    'step_number': 1
+    'status': 'complete'
+    'confidence': 0.5
+    'summary': ''
+  - 'step_id': 'analyze'
+    'step_number': 2
+    'status': 'complete'
+    'confidence': 0.5
+    'summary': ''
+  - 'step_id': 'draft'
+    'step_number': 3
+    'status': 'complete'
+    'confidence': 0.5
+    'summary': 'Drafted 11 behavioral specs from the dashboard-v2 codebase, each with evidence_refs containing exact source code snippets and line ranges. Behaviors covered: auth_flow (3-layer protection: middleware + AuthGuard + useAuthRedirect), api_client_with_auth (fetch wrapper with JWT/CSRF, 401 retry, abort handling), route_protection (Edge middleware guard + client AuthGuard + rollback gate), cross_tab_sync (BroadcastChannel + localStorage with refresh lock coordination), error_handling (ErrorBoundary UI + auth error redirect + QFM 7-bucket taxonomy), logout_flow (API call + cross-tab broadcast + fail-safe force-clear), report_lifecycle (5 listState modes, delete/email modals, pagination), stateful_ui (per-state rendering + per-row action progress), data_crud (request-intent stale guard + CRUD endpoints), search_and_filter (SWR gating by business selection + filter params), thematic_ui (ErrorFallback button visibility logic). Confidence scores range from 0.88 to 0.95. All evidence snippets are verbatim source code from the dashboard-v2 codebase with specific file paths and line ranges.
+
+      '
+'generated_at': '2026-04-30T16:16:15.093Z'

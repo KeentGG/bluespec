@@ -1,0 +1,253 @@
+id: cross_tab_sync
+version: '1.0'
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: cross_tab_sync
+    coverage: full
+    notes: 'Covers BroadcastChannel with localStorage fallback, logout/login sync with debounce, token refresh cross-tab lock coordination, and redirect loop protection'
+description: |
+  Cross-tab synchronization uses BroadcastChannel (with localStorage fallback for Safari and older browsers) to coordinate logout, login, and token refresh across browser tabs. Logout events trigger session clearing and redirect to login on protected routes. Login events trigger auth state refresh and redirect to companies from login page. Token refresh uses a localStorage-based mutex lock so only one tab calls POST /auth/refresh — other tabs wait for the result via polling and BroadcastChannel listeners. Debounce timers prevent redirect loops from rapid events. All listeners are lazily imported to avoid Edge Runtime issues in Next.js middleware.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: 'No cross-tab event in progress'
+    - id: broadcasting
+      description: 'Sending message to other tabs via BroadcastChannel + localStorage'
+    - id: listening
+      description: 'Listening for events from other tabs'
+    - id: handling_logout
+      description: 'Received logout event — clearing session, possibly redirecting'
+    - id: handling_login
+      description: 'Received login event — refreshing auth state, possibly redirecting'
+    - id: acquiring_lock
+      description: 'Tab trying to acquire refresh lock via localStorage'
+    - id: refreshing_leader
+      description: 'Tab holds lock — performing actual token refresh'
+    - id: waiting_follower
+      description: 'Another tab holds lock — waiting for its refresh result'
+  transitions:
+    - id: skip_server
+      from: idle
+      to: idle
+      trigger: 'typeof window === "undefined" (SSR/Edge)'
+      guards:
+        - field: window
+          condition: 'typeof window === "undefined"'
+      effects:
+        - 'Return no-op cleanup function'
+    - id: broadcast_logout
+      from: idle
+      to: broadcasting
+      trigger: 'clearToken() called → broadcastLogout()'
+      effects:
+        - 'Write to BroadcastChannel + localStorage key eoyt-logout-{timestamp}'
+        - 'Auto-cleanup after 100ms'
+    - id: broadcast_login
+      from: idle
+      to: broadcasting
+      trigger: 'setToken() called → broadcastLogin()'
+      effects:
+        - 'Write to BroadcastChannel + localStorage key eoyt-login-{timestamp}'
+        - 'Auto-cleanup after 100ms'
+    - id: receive_logout
+      from: listening
+      to: handling_logout
+      trigger: 'BroadcastChannel message or localStorage event with logout type'
+      guards:
+        - field: debounce
+          condition: 'now - lastRedirectTime >= REDIRECT_DEBOUNCE_MS (1000ms)'
+      effects:
+        - 'Call callback (clearAuthSession + clearBrowserUserCookie)'
+        - 'If on protected route (/companies or /reports): redirect to /login'
+    - id: ignore_logout_debounce
+      from: listening
+      to: listening
+      trigger: 'Logout event within debounce window'
+      guards:
+        - field: too_soon
+          condition: 'now - lastRedirectTime < REDIRECT_DEBOUNCE_MS'
+    - id: receive_login
+      from: listening
+      to: handling_login
+      trigger: 'BroadcastChannel message or localStorage event with login type'
+      guards:
+        - field: debounce
+          condition: 'now - lastLoginTime >= LOGIN_DEBOUNCE_MS (1000ms)'
+      effects:
+        - 'Call callback if provided'
+        - 'If on /login page: redirect to /companies'
+    - id: acquire_lock
+      from: idle
+      to: acquiring_lock
+      trigger: '401 received, token refresh needed'
+      effects:
+        - 'acquireRefreshLock() — write eoyt-refresh-lock with { timestamp, tabId }'
+    - id: become_leader
+      from: acquiring_lock
+      to: refreshing_leader
+      trigger: 'Lock acquired — no other tab holds valid lock'
+      guards:
+        - field: lock_acquired
+          condition: 'acquireRefreshLock() === true'
+      effects:
+        - 'Call POST /auth/refresh'
+        - 'Broadcast TOKEN_REFRESHED result to other tabs'
+        - 'releaseRefreshLock()'
+    - id: become_follower
+      from: acquiring_lock
+      to: waiting_follower
+      trigger: 'Lock not acquired — another tab is refreshing'
+      guards:
+        - field: lock_not_acquired
+          condition: 'acquireRefreshLock() === false'
+      effects:
+        - 'waitForResult({ storageKey: eoyt-refresh-result, eventType: TOKEN_REFRESHED, timeoutMs: 8000 })'
+    - id: follower_apply
+      from: waiting_follower
+      to: idle
+      trigger: 'waitResult.success — other tab completed refresh'
+      guards:
+        - field: wait_success
+          condition: 'waitResult && waitResult.success'
+      effects:
+        - 'setToken(result.token)'
+    - id: follower_timeout
+      from: waiting_follower
+      to: acquiring_lock
+      trigger: 'waitForResult timed out'
+      guards:
+        - field: wait_timeout
+          condition: 'waitResult timed out or null'
+      effects:
+        - 'Retry lock acquisition'
+conditions:
+  - id: broadcast_supported
+    description: 'BroadcastChannel available in this browser'
+    trigger: 'Any cross-tab operation'
+    guards:
+      - field: not_edge
+        condition: 'typeof EdgeRuntime === "undefined"'
+      - field: has_window
+        condition: 'typeof window !== "undefined"'
+      - field: has_bc
+        condition: 'typeof globalThis.BroadcastChannel !== "undefined"'
+    then:
+      - 'Use BroadcastChannel for primary communication'
+      - 'Write to localStorage as fallback'
+    else:
+      - 'Use localStorage-only fallback'
+inputs:
+  - id: window_object
+    type: 'Browser window global'
+    source: 'Browser runtime'
+    required: true
+  - id: localStorage
+    type: 'Browser localStorage API'
+    source: 'Browser runtime'
+    required: false
+  - id: broadcast_channel
+    type: 'BroadcastChannel API'
+    source: 'Browser runtime'
+    required: false
+outputs:
+  - id: session_state
+    type: 'Auth session cleared or refreshed'
+    destination: 'All open tabs'
+    lifespan: immediate
+evidence_refs:
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/lib/crossTab.js'
+    snippet: |
+      export function isBroadcastSupported() {
+        const isEdgeRuntime = typeof EdgeRuntime !== "undefined";
+        return (!isEdgeRuntime && typeof window !== "undefined" && typeof globalThis.BroadcastChannel !== "undefined");
+      }
+      export function broadcastMessage({ channelName, eventType, data, storageKey, cleanupMs = 500 }) {
+        if (typeof window === "undefined") return;
+        if (isBroadcastSupported()) {
+          const BC = getBroadcastChannelConstructor();
+          const channel = new BC(channelName);
+          channel.postMessage({ type: eventType, data });
+          channel.close();
+        }
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem(storageKey, JSON.stringify(data));
+          setTimeout(() => { localStorage.removeItem(storageKey); }, cleanupMs);
+        }
+      }
+      export function waitForResult({ storageKey, channelName, eventType, timeoutMs = 8000, pollIntervalMs = 100 }) {
+        return new Promise((resolve) => {
+          if (typeof window === "undefined") { resolve(null); return; }
+          // Immediate check, BroadcastChannel listener, localStorage poll
+          const interval = setInterval(() => {
+            const result = checkStorage();
+            if (result !== null) { cleanup(); resolve(result); return; }
+            if (Date.now() - startTime > timeoutMs) { cleanup(); resolve(null); }
+          }, pollIntervalMs);
+        });
+      }
+    covers:
+      - 'transition:skip_server'
+      - 'transition:broadcast_logout'
+      - 'transition:broadcast_login'
+      - 'condition:broadcast_supported'
+      - 'transition:become_follower'
+      - 'transition:follower_timeout'
+    line_range:
+      start: 16
+      end: 255
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/lib/authBroadcast.js'
+    snippet: |
+      let lastRedirectTime = 0;
+      let lastLoginTime = 0;
+      const REDIRECT_DEBOUNCE_MS = 1000;
+      const LOGIN_DEBOUNCE_MS = 1000;
+      function handleLogoutEvent(callback) {
+        const now = Date.now();
+        if (now - lastRedirectTime < REDIRECT_DEBOUNCE_MS) return;
+        lastRedirectTime = now;
+        const currentPath = window.location.pathname;
+        const isProtected = currentPath.includes("/companies") || currentPath.includes("/reports");
+        if (isProtected) window.location.href = loginPath;
+        if (typeof callback === "function") callback();
+      }
+      function handleLoginEvent(callback) {
+        const now = Date.now();
+        if (now - lastLoginTime < LOGIN_DEBOUNCE_MS) return;
+        lastLoginTime = now;
+        const isLoginPage = currentPath.includes("/login");
+        if (isLoginPage) window.location.href = companiesPath;
+        if (typeof callback === "function") callback();
+      }
+    covers:
+      - 'transition:receive_logout'
+      - 'transition:receive_login'
+      - 'transition:ignore_logout_debounce'
+    line_range:
+      start: 217
+      end: 305
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/tokenRefresher.js'
+    snippet: |
+      function acquireRefreshLock() {
+        if (typeof window === "undefined") return true;
+        const now = Date.now();
+        const existing = localStorage.getItem(REFRESH_LOCK_KEY);
+        if (existing) {
+          const { timestamp } = JSON.parse(existing);
+          if (now - timestamp < LOCK_TIMEOUT_MS) return false;
+        }
+        localStorage.setItem(REFRESH_LOCK_KEY, JSON.stringify({ timestamp: now, tabId: getTabId() }));
+        return true;
+      }
+    covers:
+      - 'transition:acquire_lock'
+      - 'transition:become_leader'
+    line_range:
+      start: 74
+      end: 99
+confidence: 0.93
+confidence_rationale: |
+  All transitions confirmed in crossTab.js, authBroadcast.js, and tokenRefresher.js. BroadcastChannel + localStorage dual-path confirmed. Debounce timers verified (1000ms for both login and logout). Refresh lock with 10s LOCK_TIMEOUT_MS, 8s waitForResult timeout, 100ms poll interval all confirmed. Tab ID via sessionStorage confirmed. Auto-cleanup of localStorage broadcast keys confirmed.
+unresolved_questions: []
+status: complete

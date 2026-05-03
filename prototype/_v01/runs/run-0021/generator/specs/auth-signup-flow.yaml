@@ -1,0 +1,182 @@
+id: auth-signup-flow
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: auth_signup_flow
+    coverage: full
+    notes: Complete signup flow with registration, session bootstrap, and redirect
+description: >
+  New user registration via email/password signup form. Submits credentials to
+  POST /auth/register, bootstraps session from response envelope, stores token
+  in memory, writes user cookie, broadcasts login to other tabs, and redirects
+  to /companies.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: Form ready for input
+    - id: submitting
+      description: Registration request in flight
+    - id: session_staging
+      description: Token extracted, session being bootstrapped
+    - id: success
+      description: Session established, redirect pending
+    - id: error
+      description: Registration failed, error displayed
+  transitions:
+    - id: form_submit
+      from: idle
+      to: submitting
+      trigger: User clicks Create Account button
+      guards:
+        - field: email
+          condition: non-empty
+        - field: password
+          condition: non-empty
+      effects:
+        - POST /auth/register with email, password
+    - id: signup_success
+      from: submitting
+      to: session_staging
+      trigger: Backend returns 200 with user envelope
+      effects:
+        - Extract token payload from response
+        - Set token in memory via tokenService
+        - Write user cookie
+        - Broadcast login to other tabs
+    - id: bootstrap_complete
+      from: session_staging
+      to: success
+      trigger: Session staging callback completes
+      effects:
+        - Clear client data cache
+        - Router.replace(/companies)
+    - id: signup_failure
+      from: submitting
+      to: error
+      trigger: Backend returns non-200 or envelope missing
+      effects:
+        - Display error message to user
+    - id: retry
+      from: error
+      to: idle
+      trigger: User edits form and resubmits
+inputs:
+  - id: email
+    type: string
+    source: email input field
+    required: true
+    validation:
+      format: email
+      trim: true
+  - id: password
+    type: string
+    source: password input field
+    required: true
+outputs:
+  - id: session_token
+    type: JWT string
+    destination: in-memory session store
+    lifespan: session
+  - id: user_cookie
+    type: JSON object
+    destination: document.cookie (user cookie)
+    lifespan: 7 days
+  - id: login_broadcast
+    type: event
+    destination: BroadcastChannel + localStorage
+    lifespan: 100ms
+evidence_refs:
+  - path: src/features/auth/components/SignupPageContent.tsx
+    snippet: |
+      async function handleSubmit(event: React.FormEvent) {
+        event.preventDefault();
+        if (isLoading) return;
+        setErrorMessage("");
+        setIsLoading(true);
+        const trimmedEmail = email.trim();
+        try {
+          const response = await registerUser({ email: trimmedEmail, password }, { client: apiClient });
+          const signupResponse =
+            response.raw && typeof response.raw === "object"
+              ? response.raw
+              : { statusCode: response.statusCode ?? (response.aborted ? 499 : 503), message: response.message || "Signup request failed." };
+          const decision = await bootstrapSignupSession({
+            signupResponse,
+            stageSession: async (sessionPayload) => { await clearClientDataCache(); },
+          });
+          if (!decision.sessionStaged) {
+            setErrorMessage(typeof signupResponse?.message === "string" && signupResponse.message.length > 0 ? signupResponse.message : "Unable to complete signup.");
+            return;
+          }
+          if (decision.action === "redirect" && typeof decision.destination === "string") {
+            router.replace(decision.destination);
+            return;
+          }
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    covers:
+      - transition: form_submit
+      - transition: signup_success
+      - transition: signup_failure
+    line_range:
+      start: 80
+      end: 126
+  - path: src/features/auth/api/auth-service.js
+    snippet: |
+      export async function registerUser({ email, password }, options = {}) {
+        const client = getClient(options);
+        return client.post({
+          path: "/auth/register",
+          body: { email, password },
+          skipTokenRefresh: true,
+          skipAuthErrorHandling: true,
+        });
+      }
+    covers:
+      - transition: form_submit
+    line_range:
+      start: 42
+      end: 50
+  - path: src/features/auth/api/sessionBootstrap.js
+    snippet: |
+      export async function bootstrapSignupSession(options = {}) {
+        const { signupResponse, stageSession, routes } = options;
+        return bootstrapSession({
+          authResponse: signupResponse,
+          stageSession,
+          routes,
+          source: "signup",
+        });
+      }
+    covers:
+      - transition: signup_success
+      - transition: bootstrap_complete
+    line_range:
+      start: 200
+      end: 209
+  - path: src/features/auth/api/tokenService.js
+    snippet: |
+      export function setToken(tokenPayload) {
+        const normalized = setAuthSession(tokenPayload);
+        if (!normalized) return;
+        setBrowserUserCookie(normalized);
+        broadcastAuthChange("login");
+      }
+    covers:
+      - output: session_token
+      - output: user_cookie
+      - output: login_broadcast
+    line_range:
+      start: 200
+      end: 216
+confidence: 0.9
+confidence_rationale: >
+  Signup flow fully traced across SignupPageContent component, auth-service API,
+  sessionBootstrap module, and tokenService. Uses same session bootstrap as login.
+  Marketing sidebar and privacy notices are UI-only, not behavioral.
+unresolved_questions: []
+status: complete

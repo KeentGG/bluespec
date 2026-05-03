@@ -10,6 +10,7 @@
  */
 
 const path = require('path');
+const fs = require('fs');
 const { spawn } = require('child_process');
 const YAML = require('yaml');
 
@@ -28,6 +29,9 @@ const {
 
 const { executeAgentStep } = require('./lib/agent');
 const { validateStepOutput } = require('./lib/schema-validator');
+const { buildLessonsContext, refreshLessonIndex } = require('./lib/lessons');
+const { loadEvolutionContext } = require('./lib/evolution');
+const { validateData } = require('./lib/validation');
 
 // ─── Configuration ─────────────────────────────────────────────────────────
 
@@ -61,7 +65,7 @@ function renderTemplate(template, context) {
 
 // ─── Phase Execution ───────────────────────────────────────────────────────
 
-async function executePhase({ phaseId, formula, runId, project, state }) {
+async function executePhase({ phaseId, formula, runId, project, state, lessons, evolutionContext }) {
   console.log(`\n[Orchestrator] Phase: ${phaseId}`);
 
   switch (phaseId) {
@@ -78,10 +82,9 @@ async function executePhase({ phaseId, formula, runId, project, state }) {
       return executeEvaluatePhase({ formula, runId, project });
 
     case 'analyze':
-      return executeAnalyzePhase({ formula, runId, project });
-
+      return executeAnalyzePhase({ formula, runId, project, lessons, evolutionContext });
     case 'mutate':
-      return executeMutatePhase({ formula, runId, project });
+      return executeMutatePhase({ formula, runId, project, lessons, evolutionContext });
 
     case 'register':
       return executeRegisterPhase({ runId });
@@ -159,6 +162,10 @@ async function executeGeneratePhase({ formula, runId, project }) {
       attempts++;
 
       try {
+        if (step.id === 'draft') {
+          clearGeneratedSpecs(runId);
+        }
+
         if (step.agent) {
           // AI agent step
           result = await executeAgentStep({
@@ -169,6 +176,7 @@ async function executeGeneratePhase({ formula, runId, project }) {
             maxTokens: step.max_tokens || 16000,
             agentRole: step.agent,
             codebasePath: project.codebase_path,
+            savePromptTo: path.join(runRoot, 'prompts', `generate-step-${stepNumber}-${step.id}.md`),
           });
         } else if (step.tool) {
           // Deterministic tool step
@@ -185,6 +193,10 @@ async function executeGeneratePhase({ formula, runId, project }) {
         const validation = validateStepOutput(result, step.outputs);
         if (!validation.valid) {
           throw new Error(`Output validation failed: ${validation.errors.join('; ')}`);
+        }
+
+        if (step.id === 'draft') {
+          validateDraftedSpecs(runId);
         }
 
         console.log(`[Orchestrator]   ✓ ${step.id} (attempt ${attempts}/${MAX_STEP_RETRIES})`);
@@ -295,7 +307,13 @@ async function executeEvaluatePhase({ formula, runId, project }) {
 
   const newDiscoveries = specFiles
     .map(f => {
-      const spec = readYamlFile(path.join(specsDir, f));
+      let spec = null;
+      try {
+        spec = readYamlFile(path.join(specsDir, f));
+      } catch (err) {
+        console.error(`[Orchestrator] Warning: Skipping unparseable spec ${f}: ${err.message}`);
+        return null;
+      }
       if (!spec) return null;
 
       const id = f.replace('.yaml', '');
@@ -367,6 +385,7 @@ async function executeEvaluatePhase({ formula, runId, project }) {
     codebasePath: project.codebase_path,
     prompt: formula.evaluation?.precision?.agent?.prompt,
     agentRole: formula.evaluation?.precision?.agent?.agent || 'spec-reviewer',
+    savePromptTo: path.join(runRoot, 'prompts', 'evaluate-agent-review.md'),
   });
 
   const mechanicalWeight = formula.evaluation?.precision?.mechanical?.weight || 0.7;
@@ -436,7 +455,7 @@ function incrementVersion(version) {
 
 // ─── Phase: analyze ────────────────────────────────────────────────────────
 
-async function executeAnalyzePhase({ formula, runId, project }) {
+async function executeAnalyzePhase({ formula, runId, project, lessons, evolutionContext }) {
   console.log(`[Orchestrator] Analyzing run: ${runId}`);
 
   const runRoot = resolveWorkspacePath(path.posix.join('runs', runId));
@@ -470,6 +489,12 @@ ${YAML.stringify(evaluation.agent_issues)}
 ## Formula Steps
 ${formula.steps.map(s => `- ${s.id}: ${s.name}`).join('\n')}
 
+## Lesson History
+${lessons ? buildLessonsContext(lessons) : 'No lesson data available.'}
+
+## Evolution Context (Cross-Run State)
+${evolutionContext || 'No evolution context available.'}
+
 ## Your Task
 1. Identify the primary failure type:
    - search_failure: didn't find relevant files
@@ -484,6 +509,12 @@ ${formula.steps.map(s => `- ${s.id}: ${s.name}`).join('\n')}
    - type: prompt_tweak | step_management | schema_change
    - target_step: which step to modify
    - change: exactly what to add/change/remove
+
+### Lesson-Aware Diagnosis
+- Check if this failure type has been seen before. What teaching methods have already been tried?
+- If a previous attempt with the same (failure_type, teaching_method) already FAILED, flag it and suggest a different approach.
+- Consider escalating mutation tiers: prompt_tweak → step_management → parent_guideline → schema_change → tool_change → rubric_mutation.
+- **Anti-contamination: Classify the failure TYPE and suggest methodological improvements, NOT specific missed behaviors. The formula must evolve to discover behaviors better, not to be pre-primed with what it missed.**
 
 Write your diagnosis to: ${path.join(analyzerDir, 'output.yaml')}
 `;
@@ -508,6 +539,7 @@ Write your diagnosis to: ${path.join(analyzerDir, 'output.yaml')}
       confidence: { type: 'number' },
     },
     agentRole: 'behavior-analyzer',
+    savePromptTo: path.join(runRoot, 'prompts', 'analyze.md'),
   });
 
   writeYamlFile(path.join(analyzerDir, 'output.yaml'), result);
@@ -519,7 +551,7 @@ Write your diagnosis to: ${path.join(analyzerDir, 'output.yaml')}
 
 // ─── Phase: mutate ─────────────────────────────────────────────────────────
 
-async function executeMutatePhase({ formula, runId, project }) {
+async function executeMutatePhase({ formula, runId, project, lessons, evolutionContext }) {
   console.log(`[Orchestrator] Mutating formula for run: ${runId}`);
 
   const runRoot = resolveWorkspacePath(path.posix.join('runs', runId));
@@ -558,6 +590,12 @@ Change: ${analysis.suggested_mutation.change}
 ## Current Formula Steps
 ${YAML.stringify(formula.steps)}
 
+## Lesson History
+${lessons ? buildLessonsContext(lessons) : 'No lesson data available.'}
+
+## Evolution Context (Cross-Run State)
+${evolutionContext || 'No evolution context available.'}
+
 ## Your Task
 1. Apply the suggested mutation to the formula
 2. Produce the COMPLETE updated formula YAML
@@ -568,6 +606,11 @@ Rules:
 - Preserve all other steps exactly
 - Update the version number
 - Add a mutation record to consolidated_mutations
+- **Check lesson history for each (failure_type, teaching_method) pair you consider**
+- If your proposed approach already FAILED for the same failure_type, you MUST:
+  a) Propose a different approach (escalate to next mutation tier), OR
+  b) Provide explicit justification for retrying (include in proposed_change.rationale)
+- **Anti-contamination: The lesson history shows failure types and success/failure rates, NOT specific behaviors to hunt for. Do NOT encode specific behavioral findings from past runs into the formula. Improve the exploration METHOD (coverage breadth, pattern recognition, schema compliance), not specific targets.**
 `;
 
   const result = await executeAgentStep({
@@ -587,7 +630,24 @@ Rules:
       confidence: { type: 'number' },
     },
     agentRole: 'formula-mutator',
+    savePromptTo: path.join(runRoot, 'prompts', 'mutate.md'),
   });
+
+  const violation = validateInsanityCheck(result, lessons);
+  if (violation) {
+    console.error(`[Orchestrator] ⚠ INSANITY CHECK FAILED: ${violation}`);
+    console.error(`[Orchestrator] Marking mutation as inconclusive. Stopping.`);
+
+    writeYamlFile(path.join(mutatorDir, 'output.yaml'), {
+      run_id: runId,
+      status: 'insanity_check_failed',
+      proposed_change: null,
+      reason: violation,
+      mutator_original: result,
+    });
+
+    return { status: 'complete', mutation: null };
+  }
 
   writeYamlFile(path.join(mutatorDir, 'output.yaml'), {
     run_id: runId,
@@ -617,10 +677,53 @@ async function executeRegisterPhase({ runId }) {
   const mutatorOutput = readYamlFile(mutatorOutputPath);
 
   if (mutatorOutput.proposed_change && fileExists(formulaCandidatePath)) {
-    await execCli('register_formula_candidate', { file: formulaCandidatePath });
+    const registrationFile = prepareFormulaCandidateForRegistration(formulaCandidatePath, runId);
+    await execCli('register_formula_candidate', { file: registrationFile });
+
+    // Auto-advance: next run picks up the mutated formula without human gate.
+    // Human promotion is only for convergence (v02 ARCHITECTURE.md §6).
+    const versionedId = path.basename(registrationFile, '.yaml');
+    console.log(`[Orchestrator] Auto-advancing formula: ${versionedId}`);
+    await execCli('advance_formula', { id: versionedId });
   }
 
   return { status: 'complete' };
+}
+
+function prepareFormulaCandidateForRegistration(formulaCandidatePath, runId = null) {
+  const candidate = readYamlFile(formulaCandidatePath);
+  if (!candidate?.id) {
+    throw new Error(`Formula candidate is missing id: ${formulaCandidatePath}`);
+  }
+
+  const candidatePath = resolveWorkspacePath(path.posix.join('formulas', 'candidates', `${candidate.id}.yaml`));
+  if (!fileExists(candidatePath)) {
+    return formulaCandidatePath;
+  }
+
+  const versionSuffix = candidate.version ? String(candidate.version).replace(/^v/, 'v') : null;
+  const idParts = [candidate.id];
+  if (versionSuffix && !candidate.id.endsWith(`-${versionSuffix}`)) {
+    idParts.push(versionSuffix);
+  }
+  if (runId && !candidate.id.endsWith(`-${runId}`)) {
+    idParts.push(runId);
+  }
+
+  let versionedId = idParts.join('-');
+  if (fileExists(resolveWorkspacePath(path.posix.join('formulas', 'candidates', `${versionedId}.yaml`)))) {
+    versionedId = `${versionedId}-${Date.now()}`;
+  }
+
+  const versionedPath = path.join(path.dirname(formulaCandidatePath), `${versionedId}.yaml`);
+
+  writeYamlFile(versionedPath, {
+    ...candidate,
+    id: versionedId,
+  });
+
+  console.log(`[Orchestrator] Formula candidate id ${candidate.id} already exists. Registering as ${versionedId}.`);
+  return versionedPath;
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -648,8 +751,152 @@ async function execCli(command, args) {
   });
 }
 
+function clearGeneratedSpecs(runId) {
+  const specsDir = resolveWorkspacePath(path.posix.join('runs', runId, 'generator', 'specs'));
+  ensureDir(specsDir);
+
+  for (const file of fs.readdirSync(specsDir)) {
+    if (file.endsWith('.yaml')) {
+      fs.unlinkSync(path.join(specsDir, file));
+    }
+  }
+}
+
+function validateDraftedSpecs(runId) {
+  const specsDir = resolveWorkspacePath(path.posix.join('runs', runId, 'generator', 'specs'));
+  const specFiles = fs.readdirSync(specsDir).filter((file) => file.endsWith('.yaml'));
+
+  if (specFiles.length === 0) {
+    throw new Error('Draft step did not write any spec YAML files.');
+  }
+
+  const invalidSpecs = validateSpecFiles(runId, specFiles);
+  if (invalidSpecs.length > 0) {
+    const summary = invalidSpecs.map((item) => `${item.file}: ${item.errors.join('; ')}`).join(' | ');
+    throw new Error(`Drafted spec validation failed: ${summary}`);
+  }
+}
+
+function validateSpecFiles(runId, specFiles, schemaRelativePath = 'schemas/spec.schema.yaml', specsDirRelativePath = path.posix.join('runs', runId, 'generator', 'specs')) {
+  return specFiles
+    .map((file) => {
+      const relativePath = path.posix.join(specsDirRelativePath, file);
+      try {
+        const specPath = resolveWorkspacePath(relativePath);
+        const spec = readAndNormalizeGeneratedSpec(specPath);
+        const validation = validateData(spec, schemaRelativePath, `spec ${file}`, relativePath);
+        return validation.ok ? null : { file, errors: validation.errors };
+      } catch (err) {
+        return { file, errors: [`YAML parse error: ${err.message}`] };
+      }
+    })
+    .filter(Boolean);
+}
+
+function readAndNormalizeGeneratedSpec(specPath) {
+  const originalText = readText(specPath);
+  let parsed;
+  let repairedText = originalText;
+
+  try {
+    parsed = readYamlFile(specPath);
+  } catch (err) {
+    repairedText = repairGeneratedSpecYamlText(originalText);
+    if (repairedText === originalText) {
+      throw err;
+    }
+    parsed = YAML.parse(repairedText, { logLevel: 'error' });
+  }
+
+  const normalized = normalizeGeneratedSpec(parsed);
+  if (JSON.stringify(normalized) !== JSON.stringify(parsed) || repairedText !== originalText) {
+    writeYamlFile(specPath, normalized);
+  }
+
+  return normalized;
+}
+
+function repairGeneratedSpecYamlText(text) {
+  return text
+    .replace(/^([ \t]*-[ \t]+)(?!['"[{>|])(.+\{[^}]*:[ \t]*[^}]*\}.*)$/gm, (_, prefix, value) => `${prefix}'${escapeSingleQuotedYaml(value)}'`)
+    .replace(/^([ \t]*(?:[A-Za-z0-9_-]+|'[^']+'|"[^"]+"):[ \t]+)(?!['"[{>|])(.+\{[^}]*:[ \t]*[^}]*\}.*)$/gm, (_, prefix, value) => `${prefix}'${escapeSingleQuotedYaml(value)}'`);
+}
+
+function escapeSingleQuotedYaml(value) {
+  return String(value).replace(/'/g, "''");
+}
+
+function normalizeGeneratedSpec(spec) {
+  if (!spec || typeof spec !== 'object') return spec;
+
+  const normalized = Array.isArray(spec) ? [...spec] : { ...spec };
+  if (Array.isArray(normalized.evidence_refs)) {
+    normalized.evidence_refs = normalized.evidence_refs.map((ref) => {
+      if (!ref || typeof ref !== 'object' || Array.isArray(ref)) return ref;
+      return {
+        ...ref,
+        covers: normalizeCoverItems(ref.covers),
+      };
+    });
+  }
+
+  return normalized;
+}
+
+function normalizeCoverItems(covers) {
+  if (!Array.isArray(covers)) return covers;
+  return covers.flatMap((cover) => {
+    if (typeof cover === 'string') return cover;
+    if (!cover || typeof cover !== 'object' || Array.isArray(cover)) return String(cover);
+
+    const entries = Object.entries(cover);
+    if (entries.length === 0) return [];
+    if (entries.length === 1) {
+      const [key, value] = entries[0];
+      return `${key}:${formatCoverValue(value)}`;
+    }
+
+    return entries.map(([key, value]) => `${key}:${formatCoverValue(value)}`);
+  });
+}
+
+function formatCoverValue(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return JSON.stringify(value);
+}
+
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function validateInsanityCheck(mutatorOutput, lessons) {
+  if (!lessons || !lessons.lookup) return null;
+  if (!mutatorOutput?.proposed_change?.type) return null;
+
+  const proposedMethod = mutatorOutput.proposed_change.type;
+  const byType = lessons.lookup.by_failure_type || {};
+
+  for (const [failureType, bucket] of Object.entries(byType)) {
+    const methodBucket = bucket.teaching_methods?.[proposedMethod];
+    if (!methodBucket) continue;
+
+    const failedCount = methodBucket.results.FAILED || 0;
+    if (failedCount > 0) {
+      const acknowledgedFailed = mutatorOutput.insanity_check?.method_already_failed === true;
+      const hasJustification = mutatorOutput.insanity_check?.justification ||
+        mutatorOutput.insanity_check?.if_true?.justification ||
+        mutatorOutput.proposed_change?.rationale;
+
+      if (!acknowledgedFailed || !hasJustification) {
+        return `Method "${proposedMethod}" has ${failedCount} FAILED result(s) for failure type "${failureType}", but mutator did not acknowledge or justify.`;
+      }
+    }
+  }
+
+  return null;
 }
 
 async function runMechanicalEvaluation({ specFiles, specsDir, codebasePath, checks }) {
@@ -658,7 +905,18 @@ async function runMechanicalEvaluation({ specFiles, specsDir, codebasePath, chec
 
   for (const specFile of specFiles) {
     const specPath = path.join(specsDir, specFile);
-    const spec = readYamlFile(specPath);
+    let spec = null;
+    try {
+      spec = readYamlFile(specPath);
+    } catch (err) {
+      issues.push({
+        type: 'unparseable_spec',
+        file: specFile,
+        message: `YAML parse error: ${err.message}`,
+      });
+      perSpec[specFile] = { score: 0, issues: [{ type: 'unparseable_spec', file: specFile, message: err.message }] };
+      continue;
+    }
 
     if (!spec) {
       issues.push({
@@ -701,7 +959,7 @@ async function runMechanicalEvaluation({ specFiles, specsDir, codebasePath, chec
   return { score: totalScore, perSpec, issues };
 }
 
-async function runAgentEvaluation({ specFiles, specsDir, codebasePath, prompt, agentRole }) {
+async function runAgentEvaluation({ specFiles, specsDir, codebasePath, prompt, agentRole, savePromptTo }) {
   const reviewPrompt = `${prompt || 'Review these specs for accuracy against the codebase.'}
 
 Specs to review (located in ${specsDir}):
@@ -728,6 +986,7 @@ Output a score (0.0-1.0) and list of issues found.
       perSpec: { type: 'object' },
     },
     agentRole: agentRole || 'spec-reviewer',
+    savePromptTo,
   });
 
   return {
@@ -740,17 +999,43 @@ Output a score (0.0-1.0) and list of issues found.
 async function executeToolStep({ tool, inputs, runId }) {
   switch (tool) {
     case 'schema-validator':
-      // Validate specs against schema
-      return {
-        status: 'complete',
-        valid_specs: [],
-        invalid_specs: [],
-        summary: 'Schema validation placeholder',
-      };
+      return executeSchemaValidator({ inputs, runId });
 
     default:
       throw new Error(`Unknown tool: ${tool}`);
   }
+}
+
+function executeSchemaValidator({ inputs, runId }) {
+  const specsDirInput = renderInputPath(inputs?.specs_dir || path.posix.join('runs', runId, 'generator', 'specs'), runId);
+  const schemaInput = renderInputPath(inputs?.schema || 'schemas/spec.schema.yaml', runId);
+  const specsDir = resolveWorkspacePath(specsDirInput);
+  const specFiles = fs.readdirSync(specsDir).filter((file) => file.endsWith('.yaml'));
+  const invalidSpecs = validateSpecFiles(runId, specFiles, schemaInput, specsDirInput);
+  const invalidSet = new Set(invalidSpecs.map((item) => item.file));
+  const validSpecs = specFiles.filter((file) => !invalidSet.has(file));
+  const allValid = specFiles.length > 0 && invalidSpecs.length === 0;
+
+  const report = {
+    validation_report: {
+      valid_specs: validSpecs,
+      invalid_specs: invalidSpecs,
+      all_valid: allValid,
+    },
+  };
+
+  if (!allValid) {
+    const summary = invalidSpecs.length > 0
+      ? invalidSpecs.map((item) => `${item.file}: ${item.errors.join('; ')}`).join(' | ')
+      : 'No spec YAML files found.';
+    throw new Error(`Schema validation failed: ${summary}`);
+  }
+
+  return report;
+}
+
+function renderInputPath(inputPath, runId) {
+  return String(inputPath).replaceAll('{{run_id}}', runId);
 }
 
 // ─── Main ──────────────────────────────────────────────────────────────────
@@ -777,16 +1062,71 @@ async function main() {
   console.log(`[Orchestrator] Project: ${project.project_id || project.id}`);
   console.log(`[Orchestrator] Codebase: ${project.codebase_path}\n`);
 
+  let lessons = null;
+  try {
+    const lessonsPath = resolveWorkspacePath('lessons/index.yaml');
+    if (fileExists(lessonsPath)) {
+      lessons = readYamlFile(lessonsPath);
+      console.log(`[Orchestrator] Lessons loaded: ${lessons.stats?.total_lessons || 0} total`);
+    }
+  } catch (err) {
+    console.log(`[Orchestrator] Warning: Could not load lessons: ${err.message}`);
+  }
+
+  let evolutionContext = null;
+  try {
+    evolutionContext = loadEvolutionContext();
+  } catch (err) {
+    console.log(`[Orchestrator] Warning: Could not load evolution context: ${err.message}`);
+  }
+
   const phases = ['init', 'freeze', 'generate', 'evaluate', 'analyze', 'mutate', 'register'];
 
   try {
     for (const phaseId of phases) {
-      const result = await executePhase({ phaseId, formula, runId, project, state });
+      const result = await executePhase({ phaseId, formula, runId, project, state, lessons, evolutionContext });
 
       if (result.status === 'failed') {
         console.error(`\n[Orchestrator] Phase ${phaseId} FAILED. Stopping.`);
         process.exit(1);
       }
+    }
+
+    try {
+      const evaluatorPath = resolveWorkspacePath(path.posix.join('runs', runId, 'evaluator', 'output.yaml'));
+      const mutatorPath = resolveWorkspacePath(path.posix.join('runs', runId, 'mutator', 'output.yaml'));
+      const analyzerPath = resolveWorkspacePath(path.posix.join('runs', runId, 'analyzer', 'output.yaml'));
+
+      const evaluatorExists = fileExists(evaluatorPath);
+      const mutatorExists = fileExists(mutatorPath);
+      const analyzerExists = fileExists(analyzerPath);
+
+      if (evaluatorExists && mutatorExists && analyzerExists) {
+        const evalData = readYamlFile(evaluatorPath);
+        const mutatorData = readYamlFile(mutatorPath);
+        const analyzerData = readYamlFile(analyzerPath);
+        const { appendLesson } = require('./lib/lessons');
+
+        const totalScore = evalData.overall_score || 0;
+        const hasMutation = !!mutatorData?.proposed_change;
+        const hasDiagnosis = !!analyzerData?.primary_failure_type;
+        const scoreBelowThreshold = totalScore < 0.85;
+
+        if (hasDiagnosis && hasMutation && scoreBelowThreshold) {
+          appendLesson({
+            failure_type: analyzerData.primary_failure_type,
+            teaching_method: mutatorData.proposed_change?.type || 'unknown',
+            result: 'PARTIAL',
+            scenario: `Run ${runId} completed. Score: ${totalScore}. Analyzer: ${analyzerData.primary_failure_type}. Mutation: ${mutatorData.proposed_change?.type}. Pending human review.`,
+            run_id: runId,
+          });
+          console.log(`[Orchestrator] Lesson recorded for ${runId}: ${analyzerData.primary_failure_type}`);
+        } else {
+          console.log(`[Orchestrator] No lesson recorded for ${runId} — score=${totalScore}, mutation=${hasMutation}, diagnosis=${hasDiagnosis} (gated)`);
+        }
+      }
+    } catch (err) {
+      console.log(`[Orchestrator] Warning: Could not record run completion lesson: ${err.message}`);
     }
 
     console.log(`\n╔══════════════════════════════════════════════════════════════╗`);
@@ -807,4 +1147,10 @@ if (require.main === module) {
   });
 }
 
-module.exports = { executePhase, renderTemplate };
+module.exports = {
+  executePhase,
+  executeSchemaValidator,
+  prepareFormulaCandidateForRegistration,
+  renderTemplate,
+  validateDraftedSpecs,
+};

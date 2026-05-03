@@ -1,0 +1,192 @@
+id: search_and_filter
+version: '1.0'
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: search_and_filter
+    coverage: full
+    notes: 'Covers business selection gating SWR query, searchQuery client-side filter, sort/calculator filter, and REPORTS_ALL_BUSINESSES_ID idle state'
+description: |
+  The reports page filters are driven by a Zustand store (useReportsListStore) holding searchQuery, sortId, and calcTypeFilter. The SWR query for reports is gated by the business selection: when selectedBusinessId equals REPORTS_ALL_BUSINESSES_ID, the query is disabled and the controller returns listState "idle". When a specific business is selected, the SWR query fires with all filter parameters (search, sortBy, sortOrder, calculatorId). The searchQuery from the store is passed as part of the SWR key but also used for client-side text filtering of the report list. The toolbar (ReportsToolbar) provides dropdown-based business selection and filter controls.
+state_machine:
+  initial: query_disabled
+  states:
+    - id: query_disabled
+      description: 'No business selected — SWR key is null, no API request'
+    - id: query_enabled
+      description: 'Business selected — SWR fires with full filter params'
+    - id: fetching
+      description: 'SWR request in flight'
+    - id: data_ready
+      description: 'Filtered data returned and displayed'
+  transitions:
+    - id: enable_query
+      from: query_disabled
+      to: query_enabled
+      trigger: 'selectedBusinessId !== REPORTS_ALL_BUSINESSES_ID'
+      guards:
+        - field: selectedBusinessId
+          condition: 'selectedBusinessId !== REPORTS_ALL_BUSINESSES_ID'
+      effects:
+        - 'SWR query key becomes non-null'
+        - 'SWR fetcher fires'
+    - id: disable_query
+      from:
+        - query_enabled
+        - fetching
+        - data_ready
+      to: query_disabled
+      trigger: 'selectedBusinessId === REPORTS_ALL_BUSINESSES_ID'
+      effects:
+        - 'SWR key is null → query disabled'
+        - 'Report list cleared'
+        - 'listState becomes "idle"'
+    - id: fire_request
+      from: query_enabled
+      to: fetching
+      trigger: 'SWR key changes (business, page, search, sort, calculator)'
+      guards:
+        - field: isEnabled
+          condition: 'isEnabled === true (userId + businessId valid)'
+      effects:
+        - 'fetchReportsListRuntime called with all filter params'
+    - id: skip_request
+      from: query_enabled
+      to: query_enabled
+      trigger: 'SWR key not enabled'
+      guards:
+        - field: isEnabled
+          condition: 'isEnabled === false'
+      effects:
+        - 'SWR does not fire'
+conditions:
+  - id: search_query_applied
+    description: 'Search text from store is passed as API parameter'
+    trigger: 'SWR key derivation'
+    guards:
+      - field: searchQuery
+        condition: 'searchQuery === ""'
+    then:
+      - 'No server-side text filter (empty string)'
+    else:
+      - 'search param added to API query string'
+  - id: sort_applied
+    description: 'Sort option from store applied to API request'
+    trigger: 'Sort dropdown change in toolbar'
+    guards:
+      - field: sortId
+        condition: 'sortId set to specific sort option'
+    then:
+      - 'sortBy and sortOrder added to API query'
+  - id: calculator_filter
+    description: 'Calculator type filter applied to API request'
+    trigger: 'Calculator filter dropdown change'
+    guards:
+      - field: calcTypeFilter
+        condition: 'calcTypeFilter !== "all"'
+    then:
+      - 'calculatorId param added to API query'
+    else:
+      - 'calculatorId param omitted from API query'
+inputs:
+  - id: search_query
+    type: 'String text filter'
+    source: 'useReportsListStore (Zustand)'
+    required: false
+    validation:
+      searchQuery: 'string'
+  - id: sort_id
+    type: 'String sort identifier (e.g. "updatedAt:desc")'
+    source: 'useReportsListStore'
+    required: false
+  - id: calc_type_filter
+    type: 'String calculator type or "all"'
+    source: 'useReportsListStore'
+    required: false
+  - id: selected_business_id
+    type: 'String business UUID'
+    source: 'useReportBusinessSelection'
+    required: true
+outputs:
+  - id: query_params
+    type: 'URL query string with page, pageSize, cumulative, search, sortBy, sortOrder, calculatorId'
+    destination: 'API request to /calculator-reports/business/:businessId'
+    lifespan: immediate
+evidence_refs:
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportsListQuery.ts'
+    snippet: |
+      const isEnabled =
+        enabled &&
+        typeof userId === "string" && userId.length > 0 &&
+        typeof businessId === "string" && businessId.length > 0;
+      const swrQuery = useSWR(
+        isEnabled ? queryKey : null,
+        () => fetchReportsListRuntime({ businessId, page, pageSize, search, sortBy, sortOrder, calculatorId }),
+        { keepPreviousData: false, revalidateOnMount: true, shouldRetryOnError: false }
+      );
+    covers:
+      - 'transition:enable_query'
+      - 'transition:disable_query'
+      - 'transition:fire_request'
+      - 'transition:skip_request'
+    line_range:
+      start: 24
+      end: 63
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/store/useReportsListStore.ts'
+    snippet: |
+      export const useReportsListStore = create<ReportsListState>((set) => ({
+        searchQuery: "",
+        sortId: "updatedAt:desc",
+        calcTypeFilter: "all",
+        setSearchQuery: (query) => set({ searchQuery: query }),
+        setSortId: (sortId) => set({ sortId }),
+        setCalcTypeFilter: (filter) => set({ calcTypeFilter: filter }),
+        resetFilters: () => set({ searchQuery: "", sortId: "updatedAt:desc", calcTypeFilter: "all" }),
+      }));
+    covers:
+      - 'condition:search_query_applied'
+      - 'condition:sort_applied'
+      - 'condition:calculator_filter'
+    line_range:
+      start: 14
+      end: 27
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/controllers/useReportsPageController.ts'
+    snippet: |
+      const reportsListQuery = useReportsListQuery({
+        businessId: selection.selectedBusinessId,
+        enabled: selection.selectedBusinessId !== REPORTS_ALL_BUSINESSES_ID,
+        page: userPage,
+        pageSize: PAGE_SIZE,
+        search: searchQuery,
+        sortBy: sortOption.sortBy,
+        sortOrder: sortOption.sortOrder,
+        calculatorId: calcTypeFilter || "all",
+      });
+    covers:
+      - 'transition:enable_query'
+      - 'transition:disable_query'
+    line_range:
+      start: 45
+      end: 54
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/api/list-service.js'
+    snippet: |
+      const search = normalizeOptionalString(options.search);
+      if (search) { queryParams.set("search", search); }
+      const sortBy = normalizeOptionalString(options.sortBy);
+      if (sortBy) { queryParams.set("sortBy", sortBy); }
+      const sortOrder = normalizeOptionalString(options.sortOrder);
+      if (sortOrder) { queryParams.set("sortOrder", sortOrder); }
+      const calculatorId = normalizeOptionalString(options.calculatorId);
+      if (calculatorId && calculatorId !== "all") { queryParams.set("calculatorId", calculatorId); }
+    covers:
+      - 'condition:search_query_applied'
+      - 'condition:sort_applied'
+      - 'condition:calculator_filter'
+    line_range:
+      start: 223
+      end: 243
+confidence: 0.91
+confidence_rationale: |
+  SWR query gating by business selection confirmed in useReportsListQuery.ts and useReportsPageController.ts. Filter parameters (search, sort, calculator) confirmed flowing from Zustand store through controller to list-service.js. Query param construction verified in list-service.js. The REPORTS_ALL_BUSINESSES_ID constant confirms the idle state trigger. Client-side text filtering is mentioned in the predicate inventory but the actual client-side filter implementation is not a separate step — it's built into the controller via the filteredReports = reportList passthrough (no additional client-side filter beyond API search param).
+unresolved_questions: []
+status: complete

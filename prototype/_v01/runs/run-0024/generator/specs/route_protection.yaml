@@ -1,0 +1,228 @@
+id: route_protection
+version: '1.0'
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: route_protection
+    coverage: full
+    notes: 'Covers Edge middleware auth guard, client AuthGuard spinner/children, useAuthRedirect refresh flow, and v1 rollback gate'
+description: |
+  Route protection operates at two layers. The Edge middleware runs before every matched page request — it resolves the session, attempts silent refresh if a refreshToken cookie exists, then applies authGuard to decide allow/redirect. The client-side AuthGuard wraps all dashboard routes via (dashboard)/layout.tsx, showing a spinner while checking auth state, then rendering children plus AuthSyncBootstrap once verified. The useAuthRedirect hook handles the client-side token check and optional refresh attempt before redirecting to login on failure. A rollback gate checks whether the v2 dashboard should redirect to v1.
+state_machine:
+  initial: middleware_evaluation
+  states:
+    - id: middleware_evaluation
+      description: 'Middleware evaluates request — rollback check, session resolution, auth guard'
+    - id: middleware_allowed
+      description: 'Request forwarded to page'
+    - id: middleware_redirect
+      description: 'HTTP redirect response sent'
+    - id: client_checking
+      description: 'AuthGuard isChecking === true — spinner shown'
+    - id: client_rendering
+      description: 'AuthGuard isChecking === false — children + AuthSyncBootstrap rendered'
+    - id: client_refreshing
+      description: 'useAuthRedirect is attempting token refresh'
+    - id: client_redirecting
+      description: 'useAuthRedirect is redirecting to login'
+  transitions:
+    - id: rollback_v1
+      from: middleware_evaluation
+      to: middleware_redirect
+      trigger: 'resolveRollbackRouteContract returns shouldRedirect: true'
+      guards:
+        - field: rollbackRoute.shouldRedirect
+          condition: 'rollbackRoute.shouldRedirect === true'
+      effects:
+        - 'NextResponse.redirect to v1 destination'
+    - id: middleware_anon_protected
+      from: middleware_evaluation
+      to: middleware_redirect
+      trigger: 'authGuard returns redirect for anonymous user on protected route'
+      guards:
+        - field: resolvedSession
+          condition: '!resolvedSession && protectedRoute'
+      effects:
+        - 'Redirect to /login'
+    - id: middleware_anon_public
+      from: middleware_evaluation
+      to: middleware_allowed
+      trigger: 'authGuard returns allow for anonymous user on public route'
+      guards:
+        - field: resolvedSession
+          condition: '!resolvedSession && !protectedRoute'
+      effects:
+        - 'NextResponse.next()'
+    - id: middleware_auth_login
+      from: middleware_evaluation
+      to: middleware_redirect
+      trigger: 'authGuard redirects authenticated user away from login'
+      guards:
+        - field: resolvedSession
+          condition: 'resolvedSession && resolvedPath === routes.login'
+      effects:
+        - 'Redirect to /companies'
+    - id: middleware_auth_allow
+      from: middleware_evaluation
+      to: middleware_allowed
+      trigger: 'authGuard allows authenticated user on non-login route'
+      guards:
+        - field: resolvedSession
+          condition: 'resolvedSession && resolvedPath !== routes.login'
+      effects:
+        - 'NextResponse.next()'
+    - id: client_spinner_visible
+      from: client_checking
+      to: client_checking
+      trigger: 'AuthGuard renders spinner while isChecking === true'
+      effects:
+        - 'Show full-screen spinner with "Verifying session..." text'
+    - id: client_auth_verified
+      from: client_checking
+      to: client_rendering
+      trigger: 'useAuthRedirect completes check with valid token'
+      guards:
+        - field: hasValidToken
+          condition: 'hasValidToken or (attemptTokenRefresh && refreshResult.success)'
+      effects:
+        - 'Render children + AuthSyncBootstrap'
+    - id: client_refresh_attempt
+      from: client_checking
+      to: client_refreshing
+      trigger: 'No valid token, attemptTokenRefresh is true'
+      guards:
+        - field: attemptTokenRefresh
+          condition: '!hasValidToken && attemptTokenRefresh'
+      effects:
+        - 'Call refreshAccessToken()'
+    - id: client_redirect_login
+      from: client_checking
+      to: client_redirecting
+      trigger: 'No valid token and !attemptTokenRefresh or refresh fails'
+      guards:
+        - field: attemptTokenRefresh
+          condition: '!hasValidToken && (!attemptTokenRefresh || !refreshResult.success)'
+      effects:
+        - 'Call handleAuthError or window.location.replace to /login'
+conditions:
+  - id: silent_refresh
+    description: 'Middleware attempts silent refresh when session missing but refreshToken cookie exists'
+    trigger: 'shouldResolveSession(pathname) === true, no session, hasRefreshToken'
+    guards:
+      - field: hasRefreshToken
+        condition: 'cookieHeader includes "refreshToken=" && !session'
+      - field: shouldResolveSession
+        condition: 'shouldResolveSession(pathname) === true'
+    then:
+      - 'Call POST /auth/refresh with credentials'
+      - 'Set user, csrfToken, refreshToken cookies on response'
+      - 'Re-run authGuard with new session'
+inputs:
+  - id: request_pathname
+    type: 'URL path string'
+    source: 'Next.js request.nextUrl.pathname'
+    required: true
+  - id: session_cookie
+    type: 'JWT token from user cookie'
+    source: 'Browser cookie'
+    required: false
+  - id: refresh_token_cookie
+    type: 'httpOnly refresh token'
+    source: 'Browser cookie'
+    required: false
+  - id: redirect_to
+    type: 'URL path string'
+    source: 'useAuthRedirect prop or constant /login'
+    required: false
+outputs:
+  - id: middleware_response
+    type: 'NextResponse.redirect() or NextResponse.next()'
+    destination: 'Browser'
+    lifespan: immediate
+  - id: client_render
+    type: 'React component tree (spinner or content)'
+    destination: 'DOM'
+    lifespan: immediate
+evidence_refs:
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/middleware.js'
+    snippet: |
+      export async function middleware(request) {
+        const rollbackRoute = resolveRollbackRouteContract({ env: process.env, path: pathname });
+        if (rollbackRoute.shouldRedirect && typeof rollbackRoute.destination === "string") {
+          return NextResponse.redirect(new URL(withBasePath(rollbackRoute.destination), baseRequestUrl));
+        }
+        let session = shouldResolveSession(pathname)
+          ? await fetchSessionByRefresh({ cookieHeader, requestOrigin, fetchImpl: fetch })
+          : null;
+        if (!session && shouldResolveSession(pathname)) {
+          const hasRefreshToken = cookieHeader.includes(`${REFRESH_TOKEN_COOKIE}=`);
+          if (hasRefreshToken) {
+            const refreshResult = await attemptSilentRefresh({ ... });
+            if (refreshResult?.session) { /* set cookies, re-run authGuard */ }
+          }
+        }
+        const decision = await authGuard({ pathname, routes: ROUTES, protectedPaths: PROTECTED_PATHS, session });
+        if (decision.action === "redirect") return NextResponse.redirect(...);
+        return NextResponse.next();
+      }
+    covers:
+      - 'transition:rollback_v1'
+      - 'transition:middleware_anon_protected'
+      - 'transition:middleware_anon_public'
+      - 'transition:middleware_auth_login'
+      - 'transition:middleware_auth_allow'
+      - 'condition:silent_refresh'
+    line_range:
+      start: 401
+      end: 505
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/components/AuthGuard.tsx'
+    snippet: |
+      export function AuthGuard({ children }: AuthGuardProps) {
+        const { isChecking } = useAuthRedirect();
+        if (isChecking) {
+          return (
+            <main className="min-h-screen bg-surface-page flex flex-col items-center justify-center">
+              <div className="w-8 h-8 border-4 border-brand-primary border-t-transparent rounded-full animate-spin" />
+              <p className="text-text-muted">Verifying session...</p>
+            </main>
+          );
+        }
+        return (<><AuthSyncBootstrap />{children}</>);
+      }
+    covers:
+      - 'transition:client_spinner_visible'
+      - 'transition:client_auth_verified'
+    line_range:
+      start: 10
+      end: 29
+  - path: '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/hooks/useAuthRedirect.ts'
+    snippet: |
+      export function useAuthRedirect(options = {}) {
+        const { attemptTokenRefresh = true } = options;
+        const [isChecking, setIsChecking] = useState(true);
+        useEffect(() => {
+          async function checkAuth() {
+            const token = getToken();
+            const hasValidToken = token?._id && token?.accessToken;
+            if (hasValidToken) { setIsChecking(false); return; }
+            if (attemptTokenRefresh) {
+              const refreshResult = await refreshAccessToken();
+              if (refreshResult.success && refreshResult.token) { setIsChecking(false); return; }
+              await handleAuthError({ redirectUrl: withBasePath(redirectTo), reason: "session_expired" });
+            }
+          }
+          checkAuth();
+        }, []);
+        return { isChecking };
+      }
+    covers:
+      - 'transition:client_refresh_attempt'
+      - 'transition:client_redirect_login'
+    line_range:
+      start: 32
+      end: 121
+confidence: 0.94
+confidence_rationale: |
+  All middleware decisions confirmed in middleware.js (401-505). Client guard confirmed in AuthGuard.tsx and useAuthRedirect.ts. Rollback gate confirmed via resolveRollbackRouteContract import. Protected path matchers confirmed (/companies, /reports, /profile). Route matchers in config section verified.
+unresolved_questions: []
+status: complete

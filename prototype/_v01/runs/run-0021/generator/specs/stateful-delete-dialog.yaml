@@ -1,0 +1,98 @@
+id: stateful-delete-dialog
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_delete_dialog
+    coverage: full
+    notes: Delete report confirmation dialog with deletion state tracking
+description: >
+  Delete report confirmation dialog with isOpen, target, and isDeleting
+  states. Semantic actions (open, close, start, stop, finish) manage
+  dialog lifecycle. Radix Dialog with framer-motion animation. Button
+  shows "Deleting..." during deletion.
+conditions:
+  - id: reportId_set
+    description: Dialog is open with target report
+    trigger: User clicks Delete on a report row
+    guards:
+      - field: reportId
+        condition: is set (dialog open)
+    then:
+      - Render Dialog with report name
+      - Show Cancel and Delete buttons
+  - id: reportId_null
+    description: Dialog is closed
+    trigger: User closes dialog or deletion completes
+    guards:
+      - field: reportId
+        condition: is null (dialog closed)
+    then:
+      - Do not render Dialog
+inputs:
+  - id: reportId
+    type: string
+    source: report row
+    required: true
+outputs:
+  - id: dialog_state
+    type: object
+    destination: DeleteReportModal component
+    lifespan: session
+evidence_refs:
+  - path: src/features/reports/hooks/useReportDeleteDialog.ts
+    snippet: |
+      export function useReportDeleteDialog(): UseReportDeleteDialogReturn {
+        const [isOpen, setIsOpen] = useState(false);
+        const [target, setTarget] = useState<DeleteTarget>(null);
+        const [isDeleting, setIsDeleting] = useState(false);
+        const open = useCallback((report: NonNullable<DeleteTarget>) => { setTarget(report); setIsOpen(true); }, []);
+        const close = useCallback(() => { setIsOpen(false); setTarget(null); }, []);
+        const start = useCallback(() => { setIsDeleting(true); }, []);
+        const stop = useCallback(() => { setIsDeleting(false); }, []);
+        const finish = useCallback(() => { setIsDeleting(false); setIsOpen(false); setTarget(null); }, []);
+        return { isOpen, target, isDeleting, open, close, start, stop, finish };
+      }
+    covers:
+      - condition: reportId_set
+      - condition: reportId_null
+    line_range:
+      start: 22
+      end: 52
+  - path: src/features/reports/components/DeleteReportModal.tsx
+    snippet: |
+      export function DeleteReportModal({ isOpen, target, isDeleting, onClose, onStart, onStop, onFinish, onSuccess }) {
+        return (
+          <DialogPrimitive.Root open={isOpen} onOpenChange={(open) => !open && onClose()}>
+            <DialogPrimitive.Portal>
+              <DialogPrimitive.Overlay asChild>
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
+              </DialogPrimitive.Overlay>
+              <DialogPrimitive.Content asChild>
+                <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}>
+                  <DialogPrimitive.Title>Delete Report</DialogPrimitive.Title>
+                  <p>Are you sure you want to delete "{target?.name}"?</p>
+                  <DialogPrimitive.Close asChild>
+                    <Button variant="secondary" disabled={isDeleting}>Cancel</Button>
+                  </DialogPrimitive.Close>
+                  <Button variant="danger" disabled={isDeleting} onClick={handleConfirm}>
+                    {isDeleting ? "Deleting..." : "Delete"}
+                  </Button>
+                </motion.div>
+              </DialogPrimitive.Content>
+            </DialogPrimitive.Portal>
+          </DialogPrimitive.Root>
+        );
+      }
+    covers:
+      - condition: reportId_set
+      - condition: reportId_null
+    line_range:
+      start: 67
+      end: 137
+confidence: 0.85
+confidence_rationale: >
+  Delete dialog fully traced across hook and component. isOpen/target/isDeleting
+  states confirmed. Semantic actions and framer-motion animation verified.
+unresolved_questions: []
+status: complete

@@ -1,0 +1,177 @@
+id: api-client-with-token-refresh
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: api_client_with_token_refresh
+    coverage: full
+    notes: "Automatic JWT refresh and request retry on 401 responses"
+description: >
+  Core HTTP client that automatically handles JWT token injection,
+  CSRF token injection, and automatic token refresh when backend returns
+  401. Coordinates cross-tab refresh to prevent multiple simultaneous
+  refresh attempts.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: "No request in progress"
+    - id: requesting
+      description: "HTTP request in progress"
+    - id: refreshing
+      description: "Token refresh in progress"
+    - id: retrying
+      description: "Retrying original request after refresh"
+  transitions:
+    - id: start_request
+      from: idle
+      to: requesting
+      trigger: "API method called (get, post, patch, delete)"
+      effects:
+        - "Inject Authorization header with JWT"
+        - "Inject CSRF header for state-changing requests"
+    - id: receive_401
+      from: requesting
+      to: refreshing
+      trigger: "Response status is 401 or JWT expired error"
+      guards:
+        - field: statusCode
+          condition: "statusCode === 401 OR message includes 'jwt expired'"
+      effects:
+        - "Call refreshAccessToken()"
+    - id: refresh_success
+      from: refreshing
+      to: retrying
+      trigger: "Token refresh succeeds"
+      guards:
+        - field: refreshResult
+          condition: "refreshResult.success === true AND refreshResult.token exists"
+      effects:
+        - "Update token in memory store"
+        - "Update CSRF token if provided"
+    - id: refresh_failed
+      from: refreshing
+      to: idle
+      trigger: "Token refresh fails"
+      effects:
+        - "Call handleAuthError with redirect to /login"
+    - id: retry_success
+      from: retrying
+      to: idle
+      trigger: "Retried request succeeds"
+      effects:
+        - "Return response to caller"
+    - id: csrf_failure
+      from: requesting
+      to: refreshing
+      trigger: "Response is 403 with CSRF-related message"
+      guards:
+        - field: isCsrfFailure
+          condition: "statusCode === 403 AND message includes 'csrf'"
+      effects:
+        - "Trigger token refresh to get fresh CSRF token"
+conditions:
+  - id: skipTokenRefresh
+    description: "Skips token refresh for specific endpoints"
+    trigger: "Request configuration"
+    guards:
+      - field: skipTokenRefresh
+        condition: "skipTokenRefresh === true"
+    then:
+      - "Do not attempt token refresh on 401"
+      - "Used for /auth/refresh endpoint to prevent infinite loops"
+  - id: skipAuthErrorHandling
+    description: "Skips automatic auth error handling"
+    trigger: "Request configuration"
+    guards:
+      - field: skipAuthErrorHandling
+        condition: "skipAuthErrorHandling === true"
+    then:
+      - "Do not redirect to /login on auth errors"
+      - "Used for auth-related endpoints"
+inputs:
+  - id: path
+    type: string
+    source: "API endpoint path"
+    required: true
+  - id: method
+    type: string
+    source: "HTTP method"
+    required: false
+  - id: body
+    type: unknown
+    source: "Request body"
+    required: false
+  - id: headers
+    type: "Record<string, string>"
+    source: "Custom headers"
+    required: false
+outputs:
+  - id: result
+    type: "ApiResult<T> object"
+    destination: "Caller"
+    lifespan: "Immediate"
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/shared/lib/api/apiClient.ts
+    snippet: |
+      export function createApiClient(options: ApiClientOptions = {}): ApiClient {
+        async function executeRequest<T>(requestOptions, { retriedAfterRefresh = false } = {}) {
+          // ...
+          const shouldRetryAfterRefresh =
+            !retriedAfterRefresh &&
+            !skipRefresh &&
+            !isRefreshEndpoint &&
+            (Number(result.statusCode) === 401 ||
+              (Number(result.statusCode) === 500 && result.message.includes("jwt expired")) ||
+              isCsrfFailure);
+          if (shouldRetryAfterRefresh) {
+            const refreshAccessToken = await getRefreshAccessToken();
+            const refreshResult = await refreshAccessToken({ apiClient: { request, get, post, patch, delete: remove } });
+            if (refreshResult.success && refreshResult.token) {
+              return executeRequest<T>(retryOptions, { retriedAfterRefresh: true });
+            }
+            await handleAuthError({ redirectUrl: "/login", reason: "session_expired", skipRedirect: false });
+          }
+        }
+      }
+    covers:
+      - "transition:receive_401"
+      - "transition:refresh_success"
+      - "transition:refresh_failed"
+      - "transition:retry_success"
+      - "condition:skipTokenRefresh"
+      - "condition:skipAuthErrorHandling"
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/tokenRefresher.js
+    snippet: |
+      export async function refreshAccessToken(options = {}) {
+        if (isRefreshing || refreshPromise) {
+          return refreshPromise || Promise.resolve({ success: false, error: "Refresh in progress", token: null });
+        }
+        isRefreshing = true;
+        refreshPromise = performCoordinatedRefresh(apiClient).finally(() => {
+          isRefreshing = false;
+          refreshPromise = null;
+        });
+        return refreshPromise;
+      }
+      async function performCoordinatedRefresh(apiClient) {
+        const hasLock = acquireRefreshLock();
+        if (!hasLock) {
+          const result = await waitForResult({ storageKey: REFRESH_RESULT_KEY, eventType: "TOKEN_REFRESHED", timeoutMs: 8000 });
+          if (result && result.success) {
+            setToken(result.token);
+            return result;
+          }
+        }
+        // ... perform refresh and broadcast result
+      }
+    covers:
+      - "transition:refreshing"
+confidence: 0.96
+confidence_rationale: >
+  API client explicitly handles 401 retry flow with token refresh.
+  Cross-tab coordination confirmed in tokenRefresher.js.
+  CSRF failure handling verified in apiClient.ts.
+  Promise-based lock prevents duplicate refresh attempts.
+unresolved_questions: []
+status: complete

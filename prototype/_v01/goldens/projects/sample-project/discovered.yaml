@@ -1,263 +1,542 @@
-project_id: sample-project
-ecosystem: frontend
-version: v001
-behaviors:
-  - id: auth.cross-tab-sync
-    description: "Synchronizes authentication state across browser tabs using
-      BroadcastChannel API with localStorage fallback for Safari compatibility.
-      Login events redirect other tabs from /login to /companies, while "
-    evidence_refs: []
-    confidence: 0.91
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: auth.csrf-protection
-    description: Protects state-changing HTTP requests against CSRF attacks by
-      injecting x-csrf-token headers from a cookie value. The system retries
-      requests once if the CSRF token is expired or invalid, providing re
-    evidence_refs: []
-    confidence: 0.9
-    has_state_machine: false
-    status: pending_review
-    discovery_run: run-0019
-  - id: auth.error-handling
-    description: Provides centralized authentication error handling that detects
-      auth failures through multiple signals (status codes, keywords, bucket
-      markers), attempts automatic recovery via token refresh, and clea
-    evidence_refs: []
-    confidence: 0.93
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: auth.login
-    description: Handles user authentication via email and password submission. The
-      login form validates input fields, prevents duplicate submissions during
-      loading, and processes the authentication response. On succe
-    evidence_refs: []
-    confidence: 0.92
-    has_state_machine: true
-    status: approved
-    discovery_run: run-0019
-  - id: auth.logout
-    description: Handles user logout by calling the /auth/logout endpoint, clearing
-      all session state (in-memory, cookies, localStorage), and broadcasting the
-      logout event to other browser tabs. The system handles API
-    evidence_refs: []
-    confidence: 0.94
-    has_state_machine: true
-    status: rejected
-    discovery_run: run-0019
-  - id: auth.middleware-silent-refresh
-    description: Performs silent token refresh in Next.js middleware before
-      enforcing route redirects. When a protected route is accessed without a
-      valid session but a refreshToken cookie exists, the middleware attemp
-    evidence_refs: []
-    confidence: 0.93
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: auth.password-reset
-    description: Handles password reset flow by validating a reset token from the
-      authorization header or URL parameters. The system verifies token validity
-      and expiration before allowing the user to set a new passwor
-    evidence_refs: []
-    confidence: 0.85
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: auth.route-protection
-    description: Protects routes by evaluating authentication state against route
-      requirements. The authGuard function determines redirect decisions based
-      on whether the user has a valid session and whether the reques
-    evidence_refs: []
-    confidence: 0.96
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: auth.session-persistence
-    description: "Manages session persistence through a dual-storage strategy:
-      in-memory authSession for access tokens (XSS-protected) and a readable
-      user cookie for middleware-visible session continuity. The session i"
-    evidence_refs: []
-    confidence: 0.95
-    has_state_machine: false
-    status: pending_review
-    discovery_run: run-0019
-  - id: auth.signup
-    description: Handles new user registration via email and password submission.
-      The signup form validates input fields, prevents duplicate submissions
-      during loading, and processes the registration response. On succ
-    evidence_refs: []
-    confidence: 0.88
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: auth.toa-guard
-    description: Guards actions that require Terms of Agreement acceptance. The
-      system checks if the user has accepted the relevant TOA based on their
-      calculator type. For new users without TOA acceptance, report crea
-    evidence_refs: []
-    confidence: 0.88
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: auth.token-refresh
-    description: Coordinates JWT access token refresh across browser tabs using a
-      localStorage-based mutex lock. When a tab needs a fresh token, it attempts
-      to acquire the lock. If another tab owns the lock, the curre
-    evidence_refs: []
-    confidence: 0.94
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.auth-redirect-state
-    description: "Manages the authentication redirect state during page load. The
-      system checks authentication status, attempts token refresh if needed, and
-      enforces minimum loading delay for UX consistency. Redirects "
-    evidence_refs: []
-    confidence: 0.91
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.business-selection-persistence
-    description: 'Persists the selected business across page navigation and
-      refreshes using URL hash as primary storage with localStorage fallback.
-      Selection priority is: URL hash > localStorage > default "0" (all busi'
-    evidence_refs: []
-    confidence: 0.92
-    has_state_machine: false
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.company-form-state
-    description: Manages company form state for add/edit workflows. Tracks
-      submission loading to prevent duplicate requests, logo upload changes for
-      dirty detection, drag-and-drop state for logo upload UI, and logo er
-    evidence_refs: []
-    confidence: 0.9
-    has_state_machine: false
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.company-modals
-    description: Manages company page modal states through Zustand stores. The
-      add/edit modal handles company creation and editing, the delete modal
-      handles company deletion confirmation, and the create report modal h
-    evidence_refs: []
-    confidence: 0.96
-    has_state_machine: false
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.company-page-state
-    description: "Manages company page UI state through local React state hooks.
-      Includes search input with debounce, sort selection, logo load failure
-      tracking per business ID, and runtime error messages. SWR queries "
-    evidence_refs: []
-    confidence: 0.94
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.create-report-modal-state
-    description: Manages the create report modal's visibility state and default
-      business selection through a Zustand store. The modal can be opened with
-      an optional defaultBusinessId parameter. Closing the modal clear
-    evidence_refs: []
-    confidence: 0.98
-    has_state_machine: false
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.dashboard-shell-state
-    description: >
-      Manages the dashboard shell layout state including sidebar visibility
-      toggle and user email display. The shell provides consistent navigation
-      and layout across all authenticated pages.
-    evidence_refs: []
-    confidence: 0.85
-    has_state_machine: false
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.gate-entry-state-machines
-    description: "Manages page entry through a multi-phase state machine. The system
-      progresses through pending_router, initializing, ready, fallback, and
-      error states. One-shot guards prevent re-entry, rollback gates "
-    evidence_refs: []
-    confidence: 0.87
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.pdf-download-state
-    description: Manages PDF download workflow through an explicit state machine
-      with idle, waiting, finished, and failed states. The state is persisted to
-      localStorage so the workflow survives page refreshes. Polling
-    evidence_refs: []
-    confidence: 0.96
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.report-action-loading-state
-    description: Tracks loading states for per-report actions (download, rename,
-      delete, email) using four keyed Zustand maps. Each map stores boolean
-      flags indexed by report ID. The anyActionInProgress function aggre
-    evidence_refs: []
-    confidence: 0.97
-    has_state_machine: false
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.report-modals
-    description: Manages report modal states through Zustand stores. The email modal
-      handles report emailing with recipient input, the delete modal handles
-      deletion confirmation, and the create report modal handles ne
-    evidence_refs: []
-    confidence: 0.96
-    has_state_machine: false
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.report-row-controller
-    description: Manages report row inline editing state. The controller tracks
-      whether a specific report is in edit mode, monitors time elapsed for
-      auto-save triggers, and tracks focus state for keyboard interactions
-    evidence_refs: []
-    confidence: 0.88
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.reports-list-filter-state
-    description: "Manages report list filtering state through a Zustand store. The
-      store holds search query, sort ID, and calculator type filter values.
-      Changes to these values compose SWR query keys that trigger data "
-    evidence_refs: []
-    confidence: 0.95
-    has_state_machine: false
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.reports-page-controller
-    description: Orchestrates the reports page by connecting filter state, SWR data
-      queries, pagination, and business selection. The controller composes query
-      keys from filter values, manages page-level state transiti
-    evidence_refs: []
-    confidence: 0.94
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.swr-query-layer
-    description: Provides a consistent data fetching layer using SWR with
-      authentication-gated enable logic. Queries only run when a valid auth
-      token is present. Loading, error, and validating states are tracked for U
-    evidence_refs: []
-    confidence: 0.94
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-  - id: stateful-ui.user-data-query
-    description: Manages user data fetching through SWR with authentication-gated
-      enable logic. The query only runs when a valid auth token is present.
-      Loading and error states are tracked for UI feedback and error ha
-    evidence_refs: []
-    confidence: 0.9
-    has_state_machine: true
-    status: pending_review
-    discovery_run: run-0019
-stats:
-  total_discovered: 28
-  approved: 1
-  rejected: 1
-  pending_review: 26
-last_updated: 2026-04-26T09:42:01.888Z
+'project_id': 'sample-project'
+'ecosystem': 'frontend'
+'version': 'v004'
+'behaviors':
+  - 'id': 'auth.cross-tab-sync'
+    'description': 'Synchronizes authentication state across browser tabs using BroadcastChannel API with localStorage fallback for Safari compatibility. Login events redirect other tabs from /login to /companies, while '
+    'evidence_refs': []
+    'confidence': 0.91
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'auth.csrf-protection'
+    'description': 'Protects state-changing HTTP requests against CSRF attacks by injecting x-csrf-token headers from a cookie value. The system retries requests once if the CSRF token is expired or invalid, providing re'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'auth.error-handling'
+    'description': 'Provides centralized authentication error handling that detects auth failures through multiple signals (status codes, keywords, bucket markers), attempts automatic recovery via token refresh, and clea'
+    'evidence_refs': []
+    'confidence': 0.93
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'auth.login'
+    'description': 'Handles user authentication via email and password submission. The login form validates input fields, prevents duplicate submissions during loading, and processes the authentication response. On succe'
+    'evidence_refs': []
+    'confidence': 0.92
+    'has_state_machine': true
+    'status': 'approved'
+    'discovery_run': 'run-0019'
+  - 'id': 'auth.logout'
+    'description': 'Handles user logout by calling the /auth/logout endpoint, clearing all session state (in-memory, cookies, localStorage), and broadcasting the logout event to other browser tabs. The system handles API'
+    'evidence_refs': []
+    'confidence': 0.94
+    'has_state_machine': true
+    'status': 'rejected'
+    'discovery_run': 'run-0019'
+  - 'id': 'auth.middleware-silent-refresh'
+    'description': 'Performs silent token refresh in Next.js middleware before enforcing route redirects. When a protected route is accessed without a valid session but a refreshToken cookie exists, the middleware attemp'
+    'evidence_refs': []
+    'confidence': 0.93
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'auth.password-reset'
+    'description': 'Handles password reset flow by validating a reset token from the authorization header or URL parameters. The system verifies token validity and expiration before allowing the user to set a new passwor'
+    'evidence_refs': []
+    'confidence': 0.85
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'auth.route-protection'
+    'description': 'Protects routes by evaluating authentication state against route requirements. The authGuard function determines redirect decisions based on whether the user has a valid session and whether the reques'
+    'evidence_refs': []
+    'confidence': 0.96
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'auth.session-persistence'
+    'description': 'Manages session persistence through a dual-storage strategy: in-memory authSession for access tokens (XSS-protected) and a readable user cookie for middleware-visible session continuity. The session i'
+    'evidence_refs': []
+    'confidence': 0.95
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'auth.signup'
+    'description': 'Handles new user registration via email and password submission. The signup form validates input fields, prevents duplicate submissions during loading, and processes the registration response. On succ'
+    'evidence_refs': []
+    'confidence': 0.88
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'auth.toa-guard'
+    'description': 'Guards actions that require Terms of Agreement acceptance. The system checks if the user has accepted the relevant TOA based on their calculator type. For new users without TOA acceptance, report crea'
+    'evidence_refs': []
+    'confidence': 0.88
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'auth.token-refresh'
+    'description': 'Coordinates JWT access token refresh across browser tabs using a localStorage-based mutex lock. When a tab needs a fresh token, it attempts to acquire the lock. If another tab owns the lock, the curre'
+    'evidence_refs': []
+    'confidence': 0.94
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.auth-redirect-state'
+    'description': 'Manages the authentication redirect state during page load. The system checks authentication status, attempts token refresh if needed, and enforces minimum loading delay for UX consistency. Redirects '
+    'evidence_refs': []
+    'confidence': 0.91
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.business-selection-persistence'
+    'description': 'Persists the selected business across page navigation and refreshes using URL hash as primary storage with localStorage fallback. Selection priority is: URL hash > localStorage > default "0" (all busi'
+    'evidence_refs': []
+    'confidence': 0.92
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.company-form-state'
+    'description': 'Manages company form state for add/edit workflows. Tracks submission loading to prevent duplicate requests, logo upload changes for dirty detection, drag-and-drop state for logo upload UI, and logo er'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.company-modals'
+    'description': 'Manages company page modal states through Zustand stores. The add/edit modal handles company creation and editing, the delete modal handles company deletion confirmation, and the create report modal h'
+    'evidence_refs': []
+    'confidence': 0.96
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.company-page-state'
+    'description': 'Manages company page UI state through local React state hooks. Includes search input with debounce, sort selection, logo load failure tracking per business ID, and runtime error messages. SWR queries '
+    'evidence_refs': []
+    'confidence': 0.94
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.create-report-modal-state'
+    'description': 'Manages the create report modal''s visibility state and default business selection through a Zustand store. The modal can be opened with an optional defaultBusinessId parameter. Closing the modal clear'
+    'evidence_refs': []
+    'confidence': 0.98
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.dashboard-shell-state'
+    'description': 'Manages the dashboard shell layout state including sidebar visibility toggle and user email display. The shell provides consistent navigation and layout across all authenticated pages.
+
+      '
+    'evidence_refs': []
+    'confidence': 0.85
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.gate-entry-state-machines'
+    'description': 'Manages page entry through a multi-phase state machine. The system progresses through pending_router, initializing, ready, fallback, and error states. One-shot guards prevent re-entry, rollback gates '
+    'evidence_refs': []
+    'confidence': 0.87
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.pdf-download-state'
+    'description': 'Manages PDF download workflow through an explicit state machine with idle, waiting, finished, and failed states. The state is persisted to localStorage so the workflow survives page refreshes. Polling'
+    'evidence_refs': []
+    'confidence': 0.96
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.report-action-loading-state'
+    'description': 'Tracks loading states for per-report actions (download, rename, delete, email) using four keyed Zustand maps. Each map stores boolean flags indexed by report ID. The anyActionInProgress function aggre'
+    'evidence_refs': []
+    'confidence': 0.97
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.report-modals'
+    'description': 'Manages report modal states through Zustand stores. The email modal handles report emailing with recipient input, the delete modal handles deletion confirmation, and the create report modal handles ne'
+    'evidence_refs': []
+    'confidence': 0.96
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.report-row-controller'
+    'description': 'Manages report row inline editing state. The controller tracks whether a specific report is in edit mode, monitors time elapsed for auto-save triggers, and tracks focus state for keyboard interactions'
+    'evidence_refs': []
+    'confidence': 0.88
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.reports-list-filter-state'
+    'description': 'Manages report list filtering state through a Zustand store. The store holds search query, sort ID, and calculator type filter values. Changes to these values compose SWR query keys that trigger data '
+    'evidence_refs': []
+    'confidence': 0.95
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.reports-page-controller'
+    'description': 'Orchestrates the reports page by connecting filter state, SWR data queries, pagination, and business selection. The controller composes query keys from filter values, manages page-level state transiti'
+    'evidence_refs': []
+    'confidence': 0.94
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.swr-query-layer'
+    'description': 'Provides a consistent data fetching layer using SWR with authentication-gated enable logic. Queries only run when a valid auth token is present. Loading, error, and validating states are tracked for U'
+    'evidence_refs': []
+    'confidence': 0.94
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'stateful-ui.user-data-query'
+    'description': 'Manages user data fetching through SWR with authentication-gated enable logic. The query only runs when a valid auth token is present. Loading and error states are tracked for UI feedback and error ha'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0019'
+  - 'id': 'auth-cross-tab-sync'
+    'description': 'Cross-tab login/logout synchronization using BroadcastChannel with localStorage fallback. When a user logs out in one tab, all other tabs clear their session and redirect to /login. Login events redir'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'auth-csrf-protection'
+    'description': 'CSRF token management for state-changing API requests. Reads csrfToken cookie, injects x-csrf-token header on POST/PATCH/DELETE. Proactively refreshes token if missing. Retries once on 403 CSRF failur'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'auth-error-handling'
+    'description': 'Centralized authentication error handling across all API calls. Detects 401, 403, and 500 responses with auth-related messages. Clears session tokens, cookies, and localStorage. Redirects to /login wi'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'auth-login-flow'
+    'description': 'User authentication via email/password login form. Submits credentials to POST /auth/login, bootstraps session from response envelope, stores token in memory, writes user cookie, broadcasts login to o'
+    'evidence_refs': []
+    'confidence': 0.95
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'auth-session-memory-store'
+    'description': 'In-memory session store for the current user''s auth state. Tokens are stored in a JavaScript variable (NOT localStorage) to prevent XSS attacks from accessing them. The refresh token is stored in an H'
+    'evidence_refs': []
+    'confidence': 0.95
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'auth-signup-flow'
+    'description': 'New user registration via email/password signup form. Submits credentials to POST /auth/register, bootstraps session from response envelope, stores token in memory, writes user cookie, broadcasts logi'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'auth-token-refresh'
+    'description': 'Automatic JWT access token refresh with cross-tab coordination. When a 401 is detected, the tab acquires a localStorage lock, calls POST /auth/refresh with HTTP-only cookie, broadcasts the new token t'
+    'evidence_refs': []
+    'confidence': 0.95
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'auth-user-data-fetch'
+    'description': 'User profile data fetching using SWR for caching and revalidation. Reads user ID from in-memory token store, fetches profile from GET /users/:userId with automatic JWT injection. Returns normalized us'
+    'evidence_refs': []
+    'confidence': 0.85
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'feature-photo-editor'
+    'description': 'Photo editor component for company logo uploads. Provides square-crop editor with 256x256 viewport, 200x200 crop zone, zoom slider (1x-3x), drag-to-pan via useDragPan hook, canvas-based crop generatio'
+    'evidence_refs': []
+    'confidence': 0.85
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'feature-profile'
+    'description': 'User profile page with data fetching, view/edit modes, and legacy profile migration. ProfilePageContent component provides read/view/edit UI with form fields for name, company, phone, address, website'
+    'evidence_refs': []
+    'confidence': 0.8
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'feature-reports-templates'
+    'description': 'Report template system for four calculator types: VE (Value Estimate), DE (Discretionary Earnings), VGA (Value Gap Analysis), and NP (Net Proceeds). Each template defines structured question sets. Imp'
+    'evidence_refs': []
+    'confidence': 0.85
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'infrastructure-api-client'
+    'description': 'Core HTTP client wrapping the Fetch API. Provides createApiClient and createDefaultApiClient factories returning typed request methods. Auto-injects JWT Bearer token, CSRF header for state-changing re'
+    'evidence_refs': []
+    'confidence': 0.95
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'infrastructure-contracts'
+    'description': 'Type contracts for API responses, localStorage keys, and query parameters. Shared contracts define Token, AuthHeaders, NormalizedEnvelope interfaces and buildAuthHeaders function. Storage contracts de'
+    'evidence_refs': []
+    'confidence': 0.8
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'infrastructure-qfm'
+    'description': 'Query/Fetch/Mutation (QFM) framework providing failure classification, response normalization, duplicate mutation prevention, localStorage recovery, PDF lifecycle management, and rollback gate for v1 '
+    'evidence_refs': []
+    'confidence': 0.85
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'infrastructure-routing'
+    'description': 'Routing infrastructure including Edge middleware for server-side guards, base path handling for /dashboard prefix, query parameter validation, initialization guards for Strict Mode, and entry contract'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'infrastructure-shared-components'
+    'description': 'Reusable UI component library with 27 components. Uses class-variance-authority (CVA) for variant-driven styling, Radix UI primitives for accessibility, and Framer Motion for animations. Key component'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-company-form'
+    'description': 'Company add/edit form state management with 9+ useState calls for company name, logo file, cropped logo, existing logo URL, logo changes flag, drag state, logo error, and submission state. Logo valida'
+    'evidence_refs': []
+    'confidence': 0.8
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-company-list'
+    'description': 'Company list data fetching with search, sort, and pagination. Uses SWR for server data and useState hooks for local UI state (search query, debounced search, sort, error state, logo failures). Derived'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-company-modals'
+    'description': 'Company page modal state management for three independent modals: add/edit, delete, and create report. Each modal has its own isOpen flag and identity payload. Uses useState hooks with semantic action'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-create-report-modal'
+    'description': 'Create report modal open/close state managed by Zustand store. Stores isOpen flag and optional defaultBusinessId. Modal resets form when opened with a default business ID. Form includes company select'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-dashboard-shell'
+    'description': 'Dashboard shell state for sidebar navigation and page layout. Manages isSidebarOpen and userEmail states. Sidebar toggle/close actions. Logout flow with API call, session clear, toast notification, an'
+    'evidence_refs': []
+    'confidence': 0.8
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-delete-dialog'
+    'description': 'Delete report confirmation dialog with isOpen, target, and isDeleting states. Semantic actions (open, close, start, stop, finish) manage dialog lifecycle. Radix Dialog with framer-motion animation. Bu'
+    'evidence_refs': []
+    'confidence': 0.85
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-email-modal'
+    'description': 'Email report modal with reportId, emailRecipients, emailDraft, and isSending states. Semantic actions (open, close, startSend, stopSend, finishSend) manage modal lifecycle. Recipients input with chip '
+    'evidence_refs': []
+    'confidence': 0.85
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-pdf-download'
+    'description': 'PDF generation state management with Zustand store and localStorage persistence. Tracks generation status (waiting, finished, failed, completed), generation flag, and metadata (pdfKey, cid, publicUrl,'
+    'evidence_refs': []
+    'confidence': 0.95
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-report-actions'
+    'description': 'Per-report action state tracking for download, rename, delete, and email operations. Uses Zustand store with Record<string, boolean> for each action type. Provides semantic selectors (isDownloading, i'
+    'evidence_refs': []
+    'confidence': 0.95
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-reports-list'
+    'description': 'Reports list with Zustand store for filters (search, sort, calc type) and SWR for data fetching. Page controller manages list state with derived states (loading, empty, idle, ready, error). Pagination'
+    'evidence_refs': []
+    'confidence': 0.95
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-reports-page-controller'
+    'description': 'Central controller hook orchestrating reports page state including list state, business selection, pagination, and SWR integration. Manages accumulated reports via useRef, derived listState via useMem'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-reports-toolbar'
+    'description': 'Reports toolbar state managed by Zustand store. Stores searchQuery, sortId, and calcTypeFilter. Toolbar controller provides sort options and calculator type options. Toolbar component renders SelectFi'
+    'evidence_refs': []
+    'confidence': 0.85
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-routing-gates'
+    'description': 'Route entry state management for gate pages (new/edit) with validation. State machine with phases: pending_router, initializing, ready, fallback, error. Rollback gate checks at every entry point. Orig'
+    'evidence_refs': []
+    'confidence': 0.8
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0021'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'auth-flow'
+    'description': 'Manages authentication flow including route protection, token lifecycle, JWT refresh with cross-tab coordination, and session synchronization via BroadcastChannel with localStorage fallback.'
+    'evidence_refs': []
+    'confidence': 0.92
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0022'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-ui'
+    'description': 'Manages stateful UI behavior for reports list including SWR-based data fetching with conditional execution, per-report action states (download, rename, delete, email), inline rename editing with debou'
+    'evidence_refs': []
+    'confidence': 0.88
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0022'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'api-client-with-token-refresh'
+    'description': 'Core HTTP client that automatically handles JWT token injection, CSRF token injection, and automatic token refresh when backend returns 401. Coordinates cross-tab refresh to prevent multiple simultane'
+    'evidence_refs': []
+    'confidence': 0.96
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'browser-storage-utilities'
+    'description': 'Provides try-catch protected utilities for accessing browser storage APIs. Handles SSR environments, private browsing mode, and storage quota errors gracefully by returning null or false instead of th'
+    'evidence_refs': []
+    'confidence': 0.98
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'cross-tab-session-sync'
+    'description': 'Synchronizes authentication state across browser tabs using BroadcastChannel API with localStorage fallback for Safari compatibility. Handles logout events to redirect protected tabs and login events '
+    'evidence_refs': []
+    'confidence': 0.93
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'middleware-auth-guard'
+    'description': 'Server-side route guard that determines whether to allow access, redirect to login, or redirect to companies based on session state. Handles rollback routes, session refresh attempts, and fallback des'
+    'evidence_refs': []
+    'confidence': 0.92
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'report-lifecycle-management'
+    'description': 'Manages report data hydration from either imported data (source parameter) or default values. Determines hydration mode based on presence of source query parameter and loads appropriate data according'
+    'evidence_refs': []
+    'confidence': 0.85
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'routing-contracts'
+    'description': 'Validates routing parameters for gate entry points including edit and new report flows. Checks query parameters, validates allowed origins, and resolves handoff routes with progress mapping.
+
+      '
+    'evidence_refs': []
+    'confidence': 0.88
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stale-response-guards'
+    'description': 'Guards against stale report list responses when user rapidly switches companies or changes filters. Uses versioned intent tokens to determine which response is "latest" and silently discards out-of-or'
+    'evidence_refs': []
+    'confidence': 0.9
+    'has_state_machine': false
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-ui-company-management'
+    'description': 'Manages UI state for company-related modals including add/edit form, delete confirmation, and report creation. Tracks which modal is open and whether an operation is in progress.
+
+      '
+    'evidence_refs': []
+    'confidence': 0.95
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-ui-pdf-generation'
+    'description': 'Manages the PDF generation lifecycle including status polling, celebration animation, download button display, and error handling. Uses localStorage to persist generation state across page refreshes.
+
+      '
+    'evidence_refs': []
+    'confidence': 0.96
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+  - 'id': 'stateful-ui-reports'
+    'description': 'Manages UI state for report-related modals including delete confirmation, email sending, and report creation. Each modal tracks open/close state and operation-in-progress status to prevent duplicate s'
+    'evidence_refs': []
+    'confidence': 0.94
+    'has_state_machine': true
+    'status': 'pending_review'
+    'discovery_run': 'run-0023'
+    'discovered_by': 'spec-writer-agent'
+'stats':
+  'total_discovered': 69
+  'approved': 1
+  'rejected': 1
+  'pending_review': 67
+'last_updated': '2026-04-30T14:21:43.978Z'

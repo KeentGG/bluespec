@@ -1,0 +1,4 @@
+'spec_files':
+  - '/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0022/generator/specs/auth-flow.yaml'
+  - '/Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode/prototype/_v01/runs/run-0022/generator/specs/stateful-ui.yaml'
+'summary': 'Drafted two behavioral specs for auth_flow and stateful_ui behaviors. Auth-flow spec captures route protection, token lifecycle, JWT refresh with cross-tab coordination, and session synchronization. Stateful-ui spec covers SWR data fetching, action state management, inline rename editing with debounce, and download capability. Both specs include state machines where applicable, evidence refs from source code, and confidence scores reflecting verification completeness.'

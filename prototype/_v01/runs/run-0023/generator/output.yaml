@@ -1,0 +1,33 @@
+'run_id': 'run-0023'
+'generator': 'orchestrator'
+'status': 'complete'
+'formula_id': 'frontend-derived'
+'formula_version': 'v004'
+'steps_completed': 4
+'failed_at_step': null
+'error_reason': null
+'overall_confidence': 0.5
+'steps':
+  - 'step_id': 'explore'
+    'step_number': 1
+    'status': 'complete'
+    'confidence': 0.5
+    'summary': ''
+  - 'step_id': 'analyze'
+    'step_number': 2
+    'status': 'complete'
+    'confidence': 0.5
+    'summary': ''
+  - 'step_id': 'draft'
+    'step_number': 3
+    'status': 'complete'
+    'confidence': 0.5
+    'summary': 'Drafted 11 behavioral specs covering the dashboard-v2 codebase. Each spec includes evidence from source files with code snippets and line references. Specs cover authentication flows, route guards, UI state management for reports/company/PDF features, cross-tab synchronization, routing contracts, API client with token refresh, stale response guards, and browser storage utilities. All specs follow the behavioral spec schema with state machines, conditions, inputs/outputs, and confidence scores.
+
+      '
+  - 'step_id': 'verify'
+    'step_number': 4
+    'status': 'complete'
+    'confidence': 0.5
+    'summary': ''
+'generated_at': '2026-04-30T14:21:43.953Z'

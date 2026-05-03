@@ -1,0 +1,142 @@
+id: cross-tab-session-sync
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: cross_tab_session_sync
+    coverage: full
+    notes: "BroadcastChannel with localStorage fallback for cross-tab auth sync"
+description: >
+  Synchronizes authentication state across browser tabs using BroadcastChannel
+  API with localStorage fallback for Safari compatibility. Handles logout
+  events to redirect protected tabs and login events to redirect login page tabs.
+conditions:
+  - id: isBroadcastSupported
+    description: "Determines if BroadcastChannel API is available"
+    trigger: "Module initialization"
+    guards:
+      - field: isBroadcastSupported
+        condition: "isBroadcastSupported() === true"
+    then:
+      - "Use BroadcastChannel for primary communication"
+      - "Always write to localStorage as fallback"
+    else:
+      - "Use localStorage-only fallback mode"
+  - id: isBroadcastNotSupported
+    description: "Fallback mode when BroadcastChannel unavailable"
+    trigger: "Module initialization"
+    guards:
+      - field: isBroadcastSupported
+        condition: "isBroadcastSupported() === false → localStorage fallback"
+    then:
+      - "Use localStorage storage events for cross-tab communication"
+  - id: isProtectedRoute
+    description: "Redirects to login on logout when on protected route"
+    trigger: "Logout event received from another tab"
+    guards:
+      - field: isProtected
+        condition: "isProtected === true → redirect on logout"
+    then:
+      - "Redirect to /login"
+    else:
+      - "Stay on current page"
+  - id: isLoginPage
+    description: "Redirects to companies on login when on login page"
+    trigger: "Login event received from another tab"
+    guards:
+      - field: isLoginPage
+        condition: "isLoginPage === true → redirect on login"
+    then:
+      - "Redirect to /companies"
+    else:
+      - "Refresh auth state only"
+inputs:
+  - id: callback
+    type: "Function"
+    source: "Event handler"
+    required: true
+outputs:
+  - id: cleanup
+    type: "Function"
+    destination: "Event listener cleanup"
+    lifespan: "Until component unmount"
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/lib/crossTab.js
+    snippet: |
+      export function isBroadcastSupported() {
+        const isEdgeRuntime = typeof EdgeRuntime !== "undefined";
+        return (
+          !isEdgeRuntime &&
+          typeof window !== "undefined" &&
+          typeof globalThis.BroadcastChannel !== "undefined"
+        );
+      }
+      export function broadcastMessage({ channelName, eventType, data, storageKey, cleanupMs }) {
+        if (typeof window === "undefined") return;
+        if (isBroadcastSupported()) {
+          const BC = getBroadcastChannelConstructor();
+          if (BC) {
+            const channel = new BC(channelName);
+            channel.postMessage({ type: eventType, data });
+            channel.close();
+          }
+        }
+        if (typeof localStorage !== "undefined") {
+          localStorage.setItem(storageKey, payload);
+          setTimeout(() => localStorage.removeItem(storageKey), cleanupMs);
+        }
+      }
+    covers:
+      - "condition:isBroadcastSupported"
+      - "condition:isBroadcastNotSupported"
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/lib/authBroadcast.js
+    snippet: |
+      export function initLogoutListener(callback) {
+        let broadcastChannel = null;
+        if (isBroadcastSupported()) {
+          broadcastChannel = new BroadcastChannel(CHANNEL_NAME);
+          broadcastChannel.addEventListener("message", (event) => {
+            if (event.data?.type === LOGOUT_EVENT) {
+              handleLogoutEvent(callback);
+            }
+          });
+        }
+        const storageListener = (event) => {
+          if (event.key?.startsWith(LOGOUT_KEY_PREFIX)) {
+            handleLogoutEvent(callback);
+          }
+        };
+        window.addEventListener("storage", storageListener);
+        return () => { /* cleanup */ };
+      }
+      function handleLogoutEvent(callback) {
+        const currentPath = window.location.pathname;
+        const isProtected = currentPath.includes("/companies") || currentPath.includes("/reports");
+        if (isProtected) {
+          window.location.href = loginPath;
+        }
+        if (typeof callback === "function") callback();
+      }
+    covers:
+      - "condition:isProtectedRoute"
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/lib/authBroadcast.js
+    snippet: |
+      function handleLoginEvent(callback) {
+        const currentPath = window.location.pathname;
+        const isLoginPage = currentPath.includes("/login");
+        if (isLoginPage) {
+          window.location.href = companiesPath;
+        }
+        if (typeof callback === "function") callback();
+      }
+    covers:
+      - "condition:isLoginPage"
+confidence: 0.93
+confidence_rationale: >
+  BroadcastChannel and localStorage fallback confirmed in crossTab.js.
+  Logout listener with protected route check verified in authBroadcast.js.
+  Login listener with login page check verified in authBroadcast.js.
+  Debounce protection implemented for redirect loops.
+unresolved_questions:
+  - "Edge Runtime detection specifics may vary by deployment"
+status: complete

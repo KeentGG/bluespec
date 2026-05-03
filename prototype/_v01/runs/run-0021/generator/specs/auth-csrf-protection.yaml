@@ -1,0 +1,149 @@
+id: auth-csrf-protection
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: auth_csrf_protection
+    coverage: full
+    notes: CSRF token management for state-changing requests with proactive refresh
+description: >
+  CSRF token management for state-changing API requests. Reads csrfToken
+  cookie, injects x-csrf-token header on POST/PATCH/DELETE. Proactively
+  refreshes token if missing. Retries once on 403 CSRF failure with fresh token.
+conditions:
+  - id: withBody
+    description: State-changing request needs CSRF header
+    trigger: Request method is POST, PATCH, or DELETE
+    guards:
+      - field: withBody
+        condition: equals true
+    then:
+      - Read csrfToken from cookie
+      - Inject x-csrf-token header
+  - id: noCsrfToken
+    description: CSRF token missing, trigger refresh
+    trigger: hasCsrfToken() returns false
+    guards:
+      - field: hasCsrfToken
+        condition: returns false
+    then:
+      - Trigger token refresh to get new CSRF token
+      - Re-read csrfToken from cookie after refresh
+  - id: invalidCsrfToken
+    description: CSRF token invalid format
+    trigger: isCsrfTokenValid(token) returns false
+    guards:
+      - field: isCsrfTokenValid
+        condition: returns false
+    then:
+      - Trigger token refresh
+  - id: canRetry
+    description: First attempt, allow retry
+    trigger: canRetry() returns true
+    guards:
+      - field: canRetry
+        condition: returns true
+    then:
+      - Retry request with fresh CSRF token
+inputs:
+  - id: method
+    type: string
+    source: HTTP method
+    required: true
+  - id: csrfToken
+    type: string
+    source: csrfToken cookie
+    required: false
+outputs:
+  - id: csrf_header
+    type: string
+    destination: x-csrf-token header
+    lifespan: per-request
+evidence_refs:
+  - path: src/features/auth/api/csrfHelper.js
+    snippet: |
+      export function hasCsrfToken(cookieString) {
+        const token = getCsrfToken(cookieString);
+        return token !== null && token.length > 0;
+      }
+      export function isCsrfTokenValid(token) {
+        if (typeof token !== "string") return false;
+        return token.length >= 10;
+      }
+      export function createCsrfRetryTracker() {
+        let hasRetried = false;
+        return {
+          get hasRetried() { return hasRetried; },
+          markRetried() { hasRetried = true; },
+          canRetry() { return !hasRetried; },
+        };
+      }
+    covers:
+      - condition: noCsrfToken
+      - condition: invalidCsrfToken
+      - condition: canRetry
+    line_range:
+      start: 22
+      end: 74
+  - path: src/features/auth/api/csrfHelper.js
+    snippet: |
+      export function applyCsrfHeaders(baseHeaders = {}, cookieString) {
+        const token = getCsrfToken(cookieString);
+        if (!token) return baseHeaders;
+        return { ...baseHeaders, "x-csrf-token": token };
+      }
+    covers:
+      - condition: withBody
+    line_range:
+      start: 115
+      end: 126
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      if (withBody && !hasHeader(headers, "x-csrf-token") && !skipRefresh && !isRefreshEndpoint) {
+        let csrfToken = getCsrfToken();
+        if (!csrfToken && !retriedAfterRefresh) {
+          const refreshAccessToken = await getRefreshAccessToken();
+          const refreshResult = await refreshAccessToken({ apiClient: { request, get, post, patch, delete: remove } });
+          if (refreshResult.success) {
+            csrfToken = getCsrfToken();
+          }
+        }
+        if (csrfToken) {
+          headers["x-csrf-token"] = csrfToken;
+        }
+      }
+    covers:
+      - condition: withBody
+      - condition: noCsrfToken
+      - condition: invalidCsrfToken
+    line_range:
+      start: 473
+      end: 493
+  - path: src/shared/lib/api/apiClient.ts
+    snippet: |
+      const isCsrfFailure =
+        Number(result.statusCode ?? result.status) === 403 &&
+        typeof result.message === "string" &&
+        result.message.toLowerCase().includes("csrf");
+      if (isCsrfFailure) {
+        const retryHeaders = { ...(retryOptions.headers || {}) };
+        if (refreshResult.csrfToken) {
+          retryHeaders["x-csrf-token"] = refreshResult.csrfToken;
+        } else {
+          delete retryHeaders["x-csrf-token"];
+          delete retryHeaders["X-CSRF-Token"];
+        }
+        retryOptions.headers = retryHeaders;
+      }
+    covers:
+      - condition: canRetry
+    line_range:
+      start: 540
+      end: 583
+confidence: 0.9
+confidence_rationale: >
+  CSRF protection fully traced across csrfHelper.js and apiClient.ts.
+  Cookie reading, header injection, proactive refresh, and retry logic confirmed.
+  MAX_CSRF_RETRIES = 1 prevents infinite loops.
+unresolved_questions: []
+status: complete

@@ -1,0 +1,14 @@
+'primary_failure_type': 'recognition_failure'
+'diagnosis': 'The spec generator found the relevant source files (authGuard.js, tokenRefresher.js) but hallucinated behaviors that do not exist in the actual code. Specifically: (1) middleware-auth-guard spec includes conditions ''hasRefreshTokenNoSession'' and ''refreshResultNotNull'' which are NOT present in authGuard.js. The actual authGuard.js is a simple session-based allow/redirect guard with no refresh token logic. (2) api-client-with-token-refresh spec shows refreshAccessToken with wrong function signature - the actual tokenRefresher.js exports refreshAccessToken(options = {}) which delegates to performCoordinatedRefresh(apiClient), not the direct signature shown. The generator inferred behaviors from related files (tokenRefresher.js) and incorrectly attributed them to authGuard.js. This is a recognition_failure per the decision tree: files were found and specs were produced, but the behaviors were misidentified or fabricated.
+
+  '
+'affected_steps':
+  - 'analyze'
+  - 'draft'
+'suggested_mutation':
+  'type': 'step_management'
+  'target_step': 'draft'
+  'change': 'Add a mandatory verification crosscheck step after draft that forces the spec writer to re-read each evidence_ref file and verify that every condition, guard, and state transition claim in the spec is directly observable in the source code. The step should reject any spec section where a claimed behavior cannot be traced to an exact line in the evidence file. This prevents hallucinated behaviors from being included in specs when the generator infers behaviors from related files rather than observing them directly.
+
+    '
+'confidence': 0.85

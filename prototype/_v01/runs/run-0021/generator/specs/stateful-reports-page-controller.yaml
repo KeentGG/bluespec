@@ -1,0 +1,110 @@
+id: stateful-reports-page-controller
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_reports_page_controller
+    coverage: full
+    notes: Central controller hook orchestrating reports page state
+description: >
+  Central controller hook orchestrating reports page state including list
+  state, business selection, pagination, and SWR integration. Manages
+  accumulated reports via useRef, derived listState via useMemo, and
+  coordinates company selection with report fetching.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: No company selected
+    - id: loading
+      description: Initial data fetch in progress
+    - id: ready
+      description: Reports loaded and displayed
+    - id: empty
+      description: No reports found
+    - id: error
+      description: Data fetch failed
+  transitions:
+    - id: company_selected
+      from: idle
+      to: loading
+      trigger: User selects a company
+      effects:
+        - Set businessId
+        - Enable SWR query
+        - Reset accumulated reports
+    - id: data_loaded
+      from: loading
+      to: ready
+      trigger: SWR returns report list
+      effects:
+        - Append to accumulated reports
+        - Update reportList state
+    - id: no_reports
+      from: loading
+      to: empty
+      trigger: SWR returns empty list
+    - id: fetch_error
+      from: loading
+      to: error
+      trigger: SWR returns error
+      effects:
+        - Set runtimeErrorMessage
+    - id: load_more
+      from: ready
+      to: ready
+      trigger: User clicks Load More
+      effects:
+        - Increment userPage
+        - Append new reports
+inputs:
+  - id: businessId
+    type: string
+    source: company selection
+    required: true
+  - id: userPage
+    type: number
+    source: pagination
+    required: false
+outputs:
+  - id: controller
+    type: object
+    destination: ReportsPageContent component
+    lifespan: session
+evidence_refs:
+  - path: src/features/reports/controllers/useReportsPageController.ts
+    snippet: |
+      export function useReportsPageController() {
+        const [reportList, setReportList] = useState([]);
+        const [runtimeErrorMessage, setRuntimeErrorMessage] = useState(null);
+        const [userPage, setUserPage] = useState(1);
+        const accumulatedReportsRef = useRef([]);
+        const { businessId, companyList, ... } = useReportBusinessSelection();
+        const { data, error, isLoading } = useReportsListQuery({ businessId, page: userPage, ... });
+        const listState = useMemo(() => {
+          if (runtimeErrorMessage) return "error";
+          if (isLoading && !accumulatedReportsRef.current.length) return "loading";
+          if (!businessId) return "idle";
+          if (!accumulatedReportsRef.current.length) return "empty";
+          return "ready";
+        }, [runtimeErrorMessage, isLoading, businessId, accumulatedReportsRef.current.length]);
+        const loadMore = useCallback(() => { setUserPage(p => p + 1); }, []);
+        const hasMore = data?.hasMore ?? false;
+        return { reportList, listState, companyList, businessId, loadMore, hasMore, isLoadingMore: isLoading && userPage > 1, ... };
+      }
+    covers:
+      - state: idle
+      - state: loading
+      - state: ready
+      - state: empty
+      - state: error
+    line_range:
+      start: 1
+      end: 135
+confidence: 0.9
+confidence_rationale: >
+  Reports page controller fully traced. Central orchestration pattern with
+  accumulated reports, derived listState, and pagination confirmed.
+  Integration with company selection and SWR verified.
+unresolved_questions: []
+status: complete

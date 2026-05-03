@@ -1,0 +1,235 @@
+id: stateful-ui-reports
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_ui_reports
+    coverage: full
+    notes: "Modal states for delete, email, and create report operations"
+description: >
+  Manages UI state for report-related modals including delete confirmation,
+  email sending, and report creation. Each modal tracks open/close state
+  and operation-in-progress status to prevent duplicate submissions.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: "No modal open, all operations complete"
+    - id: delete_dialog_open
+      description: "Delete confirmation dialog is visible"
+    - id: deleting
+      description: "Delete operation in progress"
+    - id: email_modal_open
+      description: "Email sending modal is visible"
+    - id: sending_email
+      description: "Email send operation in progress"
+    - id: create_modal_open
+      description: "Report creation modal is visible"
+    - id: creating
+      description: "Report creation in progress"
+  transitions:
+    - id: open_delete
+      from: idle
+      to: delete_dialog_open
+      trigger: "User clicks delete button on report row"
+      effects:
+        - "Set target report for deletion"
+    - id: start_delete
+      from: delete_dialog_open
+      to: deleting
+      trigger: "User confirms deletion"
+      effects:
+        - "Set isDeleting=true"
+    - id: finish_delete
+      from: deleting
+      to: idle
+      trigger: "Delete API call completes"
+      effects:
+        - "Set isDeleting=false, isOpen=false, target=null"
+    - id: open_email
+      from: idle
+      to: email_modal_open
+      trigger: "User clicks email button on report row"
+      effects:
+        - "Set reportId for email"
+    - id: start_send
+      from: email_modal_open
+      to: sending_email
+      trigger: "User submits email form"
+      effects:
+        - "Set isSending=true"
+    - id: finish_send
+      from: sending_email
+      to: idle
+      trigger: "Email API call completes"
+      effects:
+        - "Set isSending=false"
+    - id: open_create
+      from: idle
+      to: create_modal_open
+      trigger: "User clicks create report button"
+      effects:
+        - "Set businessId and calculatorId"
+    - id: start_create
+      from: create_modal_open
+      to: creating
+      trigger: "User submits create form"
+      effects:
+        - "Set isCreating=true"
+    - id: finish_create
+      from: creating
+      to: idle
+      trigger: "Create API call completes"
+      effects:
+        - "Set isCreating=false, isOpen=false"
+conditions:
+  - id: isDeleteDialogOpen
+    description: "Controls visibility of delete confirmation dialog"
+    trigger: "Delete button clicked"
+    guards:
+      - field: isOpen
+        condition: "isOpen === true (delete dialog)"
+    then:
+      - "Render delete confirmation modal"
+    else:
+      - "Hide delete confirmation modal"
+  - id: isDeleting
+    description: "Disables delete button during operation"
+    trigger: "Delete confirmation submitted"
+    guards:
+      - field: isDeleting
+        condition: "isDeleting === true"
+    then:
+      - "Show loading spinner on delete button"
+      - "Disable delete confirmation button"
+  - id: isEmailModalOpen
+    description: "Controls visibility of email sending modal"
+    trigger: "Email button clicked"
+    guards:
+      - field: isOpen
+        condition: "isOpen === true (email modal)"
+    then:
+      - "Render email sending modal"
+    else:
+      - "Hide email sending modal"
+  - id: isSending
+    description: "Disables send button during email operation"
+    trigger: "Email form submitted"
+    guards:
+      - field: isSending
+        condition: "isSending === true"
+    then:
+      - "Show loading spinner on send button"
+      - "Disable send button"
+  - id: isCreateModalOpen
+    description: "Controls visibility of report creation modal"
+    trigger: "Create report button clicked"
+    guards:
+      - field: isOpen
+        condition: "isOpen === true (create report modal)"
+    then:
+      - "Render report creation modal"
+    else:
+      - "Hide report creation modal"
+  - id: isCreating
+    description: "Disables create button during operation"
+    trigger: "Create form submitted"
+    guards:
+      - field: isCreating
+        condition: "isCreating === true"
+    then:
+      - "Show loading spinner on create button"
+      - "Disable create button"
+inputs:
+  - id: reportId
+    type: string
+    source: "Report row click"
+    required: true
+  - id: businessId
+    type: string
+    source: "Company selection"
+    required: true
+  - id: calculatorId
+    type: string
+    source: "Calculator type selection"
+    required: false
+outputs:
+  - id: modalState
+    type: "Modal state object"
+    destination: "Component props"
+    lifespan: "Session duration"
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportDeleteDialog.ts
+    snippet: |
+      export function useReportDeleteDialog(): UseReportDeleteDialogReturn {
+        const [isOpen, setIsOpen] = useState(false);
+        const [target, setTarget] = useState<DeleteTarget>(null);
+        const [isDeleting, setIsDeleting] = useState(false);
+        const open = useCallback((report: NonNullable<DeleteTarget>) => {
+          setTarget(report);
+          setIsOpen(true);
+        }, []);
+        const start = useCallback(() => {
+          setIsDeleting(true);
+        }, []);
+        const finish = useCallback(() => {
+          setIsDeleting(false);
+          setIsOpen(false);
+          setTarget(null);
+        }, []);
+        return { isOpen, target, isDeleting, open, close, start, stop, finish };
+      }
+    covers:
+      - "condition:isDeleteDialogOpen"
+      - "condition:isDeleting"
+      - "transition:open_delete"
+      - "transition:start_delete"
+      - "transition:finish_delete"
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useReportEmailModal.ts
+    snippet: |
+      export function useReportEmailModal(): UseReportEmailModalReturn {
+        const [reportId, setReportId] = useState<string | null>(null);
+        const [isSending, setIsSending] = useState(false);
+        const open = useCallback((id: string) => {
+          setReportId(id);
+          setEmailRecipients([]);
+          setEmailDraft("");
+          setIsSending(false);
+        }, []);
+        const startSend = useCallback(() => {
+          setIsSending(true);
+        }, []);
+        return { reportId, emailRecipients, emailDraft, isSending, open, close, startSend, stopSend, finishSend };
+      }
+    covers:
+      - "condition:isEmailModalOpen"
+      - "condition:isSending"
+      - "transition:open_email"
+      - "transition:start_send"
+      - "transition:finish_send"
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/reports/hooks/useCreateReportModal.ts
+    snippet: |
+      export function useCreateReportModal(options: UseCreateReportModalOptions) {
+        const [reportName, setReportName] = useState("");
+        const [businessId, setBusinessId] = useState(defaultBusinessId);
+        const [calcId, setCalcId] = useState(defaultCalculatorId);
+        const creation = useReportCreation({ onSuccess: handleSuccess });
+        return {
+          reportName, businessId, calcId,
+          handleNameChange, handleBusinessChange, handleCalcChange,
+          isCreating: creation.isCreating, handleSubmit,
+        };
+      }
+    covers:
+      - "condition:isCreateModalOpen"
+      - "condition:isCreating"
+      - "transition:open_create"
+      - "transition:start_create"
+      - "transition:finish_create"
+confidence: 0.94
+confidence_rationale: >
+  All three modal hooks confirmed with explicit state management.
+  Delete, email, and create operations have clear state transitions.
+  Loading states properly tracked to prevent duplicate submissions.
+unresolved_questions: []
+status: complete

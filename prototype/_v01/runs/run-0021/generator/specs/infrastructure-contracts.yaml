@@ -1,0 +1,132 @@
+id: infrastructure-contracts
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: infrastructure_contracts
+    coverage: full
+    notes: Type contracts for API responses, storage, and query patterns
+description: >
+  Type contracts for API responses, localStorage keys, and query parameters.
+  Shared contracts define Token, AuthHeaders, NormalizedEnvelope interfaces
+  and buildAuthHeaders function. Storage contracts define 10 localStorage
+  keys with validation rules and metadata. Query contracts define URL
+  builders and validation functions.
+conditions:
+  - id: api_contract_valid
+    description: API response matches contract
+    trigger: normalizeMixedEnvelope() called
+    guards:
+      - field: response
+        condition: matches NormalizedEnvelope shape
+    then:
+      - Return normalized envelope
+  - id: storage_contract_valid
+    description: localStorage value matches contract
+    trigger: sanitizeDashboardPersistedKey() called
+    guards:
+      - field: value
+        condition: matches expected type
+    then:
+      - Return validated value
+  - id: storage_contract_invalid
+    description: localStorage value corrupted
+    trigger: sanitizeDashboardPersistedKey() called
+    guards:
+      - field: value
+        condition: does not match expected type
+    then:
+      - Replace with safe default
+      - Return recovery report
+inputs:
+  - id: response
+    type: object
+    source: API response
+    required: true
+outputs:
+  - id: normalized
+    type: object
+    destination: calling code
+    lifespan: immediate
+evidence_refs:
+  - path: src/shared/lib/contracts/api-contract.ts
+    snippet: |
+      export interface Token {
+        _id: string;
+        email: string;
+        accessToken: string;
+      }
+      export interface AuthHeaders {
+        Authorization: string;
+        userId: string;
+      }
+      export function buildAuthHeaders(baseHeaders: Record<string, string> = {}, token: Token | null): Record<string, string> {
+        const headers = { ...baseHeaders };
+        if (token && typeof token.accessToken === "string" && token.accessToken.length > 0) {
+          headers.Authorization = `Bearer ${token.accessToken}`;
+          if (typeof token._id === "string" && token._id.length > 0) {
+            headers.userId = token._id;
+          }
+        }
+        return headers;
+      }
+      export function normalizeMixedEnvelope(rawResponse) {
+        if (isAxiosLikeResponse(rawResponse)) {
+          return { statusCode: rawResponse.status, data: rawResponse.data, message: rawResponse.data?.message };
+        }
+        return { statusCode: rawResponse.statusCode, data: rawResponse.data || rawResponse, message: rawResponse.message };
+      }
+    covers:
+      - condition: api_contract_valid
+    line_range:
+      start: 33
+      end: 152
+  - path: src/shared/lib/contracts/storage-contract.js
+    snippet: |
+      export const STORAGE_KEY_CONTRACTS = Object.freeze({
+        user: { medium: "cookie", owners: ["auth"], identityBearing: true },
+        rememberMe: { medium: "localStorage", owners: ["auth"], identityBearing: false },
+        targetId: { medium: "localStorage", owners: ["routing"], identityBearing: false },
+        questionnaireSteps: { medium: "localStorage", owners: ["calculator"], identityBearing: false },
+        downloadingpdf: { medium: "localStorage", owners: ["pdf"], identityBearing: false },
+        downloadPdfKey: { medium: "localStorage", owners: ["pdf"], identityBearing: false },
+      });
+      export function sanitizeDashboardPersistedKey(key, value) {
+        const contract = STORAGE_KEY_CONTRACTS[key];
+        if (!contract) return { valid: false, reason: "unknown_key" };
+        const validationResult = validateValue(value, contract);
+        if (validationResult.valid) return { valid: true, value };
+        return { valid: false, reason: validationResult.reason, defaultValue: getDefaultValue(key) };
+      }
+    covers:
+      - condition: storage_contract_valid
+      - condition: storage_contract_invalid
+    line_range:
+      start: 109
+      end: 401
+  - path: src/shared/lib/contracts/query-contract.js
+    snippet: |
+      export function validateIntroductionCommitmentQuery(searchParams) {
+        const businessId = searchParams.get("businessId");
+        const reportname = searchParams.get("reportname");
+        if (!businessId || typeof businessId !== "string") return { valid: false, reason: "missing_businessId" };
+        if (!reportname || typeof reportname !== "string") return { valid: false, reason: "missing_reportname" };
+        return { valid: true, businessId, reportname };
+      }
+      export function buildGateEditUrl(params) {
+        const basePath = getBasePath();
+        const query = new URLSearchParams({ reportId: params.reportId, target: params.target, source: params.source });
+        return `${basePath}/gate/edit?${query.toString()}`;
+      }
+    covers:
+      - condition: api_contract_valid
+    line_range:
+      start: 197
+      end: 328
+confidence: 0.8
+confidence_rationale: >
+  Contracts fully traced across api-contract, storage-contract, and
+  query-contract. Token/AuthHeaders interfaces, buildAuthHeaders function,
+  and storage key contracts confirmed. Query validation and URL builders verified.
+unresolved_questions: []
+status: complete

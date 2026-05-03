@@ -1,0 +1,350 @@
+'id': 'auth-flow'
+'version': '1.0'
+'type': 'spec'
+'ecosystem': 'frontend'
+'golden_behaviors':
+  - 'id': 'auth_flow'
+    'coverage': 'full'
+    'notes': 'Covers route protection, token management, refresh coordination, and cross-tab sync'
+'description': 'Manages authentication flow including route protection, token lifecycle, JWT refresh with cross-tab coordination, and session synchronization via BroadcastChannel with localStorage fallback.'
+'state_machine':
+  'initial': 'anonymous'
+  'states':
+    - 'id': 'anonymous'
+      'description': 'User not authenticated, no valid token in memory'
+    - 'id': 'authenticating'
+      'description': 'Login/signup request in progress'
+    - 'id': 'authenticated'
+      'description': 'Valid token exists in memory with _id and accessToken'
+    - 'id': 'refreshing'
+      'description': 'Token refresh in progress, may be waiting for cross-tab lock'
+    - 'id': 'error'
+      'description': 'Authentication error occurred, redirect to login'
+  'transitions':
+    - 'id': 'login_submit'
+      'from': 'anonymous'
+      'to': 'authenticating'
+      'trigger': 'User submits credentials'
+      'guards':
+        - 'field': 'credentials_present'
+          'condition': 'Email and password provided'
+      'effects':
+        - 'POST /auth/login'
+        - 'Parse response envelope'
+    - 'id': 'login_success'
+      'from': 'authenticating'
+      'to': 'authenticated'
+      'trigger': 'Login API returns 200 with user data'
+      'guards':
+        - 'field': 'session_payload_valid'
+          'condition': 'Response contains _id and accessToken'
+      'effects':
+        - 'Store token in memory via setToken()'
+        - 'Write user cookie for middleware'
+        - 'Broadcast login to other tabs'
+        - 'Redirect to /companies'
+    - 'id': 'login_failure'
+      'from': 'authenticating'
+      'to': 'error'
+      'trigger': 'Login API returns error or invalid envelope'
+      'effects':
+        - 'Clear any partial session'
+        - 'Redirect to /login with reason'
+    - 'id': 'token_expired'
+      'from': 'authenticated'
+      'to': 'refreshing'
+      'trigger': 'API returns 401 response'
+      'guards':
+        - 'field': 'has_refresh_cookie'
+          'condition': 'HTTP-only refreshToken cookie exists'
+      'effects':
+        - 'Attempt cross-tab lock acquisition'
+    - 'id': 'refresh_success'
+      'from': 'refreshing'
+      'to': 'authenticated'
+      'trigger': 'Refresh API returns new token'
+      'guards':
+        - 'field': 'refresh_result_success'
+          'condition': 'refreshResult.success === true'
+      'effects':
+        - 'Store new token in memory'
+        - 'Broadcast new token to other tabs'
+        - 'Retry original request'
+    - 'id': 'refresh_failure'
+      'from': 'refreshing'
+      'to': 'error'
+      'trigger': 'Refresh fails or times out'
+      'effects':
+        - 'Clear session and cookies'
+        - 'Redirect to /login'
+    - 'id': 'cross_tab_wait'
+      'from': 'refreshing'
+      'to': 'authenticated'
+      'trigger': 'Another tab completes refresh'
+      'guards':
+        - 'field': 'cross_tab_result'
+          'condition': 'Other tab broadcasts successful refresh'
+      'effects':
+        - 'Apply token from other tab'
+    - 'id': 'logout'
+      'from': 'authenticated'
+      'to': 'anonymous'
+      'trigger': 'User logout or logout broadcast from other tab'
+      'effects':
+        - 'Clear token from memory'
+        - 'Clear user cookie'
+        - 'Broadcast logout to other tabs'
+        - 'Redirect to /login'
+'conditions':
+  - 'id': 'route_protection'
+    'description': 'Checks if a path is in protected routes and decides allow/redirect'
+    'trigger': 'Navigation to any route'
+    'guards':
+      - 'field': 'isProtectedRoute'
+        'condition': 'pathname matches /companies or starts with /companies/'
+    'then':
+      - 'If no session: redirect to /login'
+      - 'If session exists: allow navigation'
+    'else':
+      - 'Allow navigation for public routes'
+  - 'id': 'authenticated_redirect'
+    'description': 'Redirects authenticated users away from login page'
+    'trigger': 'Navigation to /login when session exists'
+    'guards':
+      - 'field': 'resolvedPath'
+        'condition': 'pathname equals /login'
+      - 'field': 'normalizedSession'
+        'condition': 'session has valid _id and accessToken'
+    'then':
+      - 'Redirect to /companies'
+  - 'id': 'cross_tab_refresh_coordination'
+    'description': 'Coordinates token refresh across multiple tabs'
+    'trigger': 'Multiple tabs detect 401 simultaneously'
+    'guards':
+      - 'field': 'acquireRefreshLock'
+        'condition': 'localStorage lock acquired or expired'
+      - 'field': 'isBroadcastSupported'
+        'condition': 'BroadcastChannel API available'
+    'then':
+      - 'First tab performs refresh'
+      - 'Other tabs wait for broadcast'
+      - 'Result shared via localStorage and BroadcastChannel'
+    'else':
+      - 'Fallback to individual refresh attempts'
+  - 'id': 'csrf_protection'
+    'description': 'Validates CSRF token for state-changing requests'
+    'trigger': 'POST/PATCH/DELETE requests'
+    'guards':
+      - 'field': 'hasCsrfToken'
+        'condition': 'csrfToken cookie exists'
+      - 'field': 'isCsrfTokenValid'
+        'condition': 'Token length >= 10'
+    'then':
+      - 'Include x-csrf-token header'
+    'else':
+      - 'Trigger CSRF refresh if retry available'
+'inputs':
+  - 'id': 'credentials'
+    'type': 'email and password object'
+    'source': 'login form'
+    'required': true
+    'validation':
+      'email': 'valid email format'
+      'password': 'non-empty string'
+  - 'id': 'pathname'
+    'type': 'string URL path'
+    'source': 'Next.js router'
+    'required': true
+  - 'id': 'session'
+    'type': 'session object with _id and accessToken'
+    'source': 'in-memory token store'
+    'required': false
+'outputs':
+  - 'id': 'session_token'
+    'type': 'JWT access token'
+    'destination': 'in-memory store + user cookie'
+    'lifespan': 'session'
+  - 'id': 'refresh_cookie'
+    'type': 'HTTP-only cookie'
+    'destination': 'browser cookie'
+    'lifespan': '7 days'
+  - 'id': 'csrf_token'
+    'type': 'random string'
+    'destination': 'csrfToken cookie'
+    'lifespan': '7 days'
+'evidence_refs':
+  - 'path': '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/authGuard.js'
+    'snippet': |
+      function isProtectedRoute(pathname, protectedPaths) {
+        return protectedPaths.some((candidate) => pathMatches(pathname, candidate));
+      }
+      
+      export async function authGuard(options = {}) {
+        const {
+          pathname = '/',
+          session = null,
+          routes = DEFAULT_ROUTES,
+          protectedPaths = DEFAULT_PROTECTED_PATHS,
+        } = options;
+        
+        const resolvedPath = normalizePathname(pathname);
+        const resolvedSession = normalizeSession(session);
+        const protectedRoute = isProtectedRoute(resolvedPath, protectedPaths);
+        
+        if (!resolvedSession) {
+          if (protectedRoute) {
+            return redirect(routes.login, 'anonymous_redirect_login', clearSessionCookie);
+          }
+          return allow('anonymous_allow_public', clearSessionCookie);
+        }
+        
+        if (resolvedPath === routes.login) {
+          return redirect(routes.companies, 'authenticated_redirect_companies', clearSessionCookie);
+        }
+        
+        return allow('authenticated_allow_route', clearSessionCookie);
+      }
+    'covers':
+      - 'condition:route_protection'
+      - 'condition:authenticated_redirect'
+      - 'transition:login_success'
+    'line_range':
+      'start': 26
+      'end': 95
+  - 'path': '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/tokenRefresher.js'
+    'snippet': |
+      export async function refreshAccessToken(options = {}) {
+        if (isRefreshing || refreshPromise) {
+          return refreshPromise || Promise.resolve({ success: false, error: 'Refresh in progress', token: null });
+        }
+        
+        isRefreshing = true;
+        refreshPromise = performCoordinatedRefresh(apiClient).finally(() => {
+          isRefreshing = false;
+          refreshPromise = null;
+        });
+        
+        return refreshPromise;
+      }
+      
+      function acquireRefreshLock() {
+        if (typeof window === 'undefined') return true;
+        const now = Date.now();
+        const existing = localStorage.getItem(REFRESH_LOCK_KEY);
+        if (existing) {
+          const { timestamp } = JSON.parse(existing);
+          if (now - timestamp < LOCK_TIMEOUT_MS) {
+            return false;
+          }
+        }
+        localStorage.setItem(REFRESH_LOCK_KEY, JSON.stringify({ timestamp: now, tabId: getTabId() }));
+        return true;
+      }
+    'covers':
+      - 'transition:token_expired'
+      - 'condition:cross_tab_refresh_coordination'
+    'line_range':
+      'start': 139
+      'end': 160
+  - 'path': '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/hooks/useAuthRedirect.ts'
+    'snippet': |
+      const token = getToken();
+      const hasValidToken = token?._id && token?.accessToken;
+      
+      if (hasValidToken) {
+        setIsAuthenticated(true);
+        return;
+      }
+      
+      if (attemptTokenRefresh) {
+        const refreshAccessToken = await getRefreshAccessToken();
+        const refreshResult = await refreshAccessToken();
+        
+        if (refreshResult.success && refreshResult.token) {
+          setIsAuthenticated(true);
+          return;
+        }
+      }
+    'covers':
+      - 'state:authenticated'
+      - 'transition:refresh_success'
+    'line_range':
+      'start': 46
+      'end': 67
+  - 'path': '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/lib/crossTab.js'
+    'snippet': |
+      export function isBroadcastSupported() {
+        const isEdgeRuntime = typeof EdgeRuntime !== 'undefined';
+        return (
+          !isEdgeRuntime &&
+          typeof window !== 'undefined' &&
+          typeof globalThis.BroadcastChannel !== 'undefined'
+        );
+      }
+    'covers':
+      - 'condition:cross_tab_refresh_coordination'
+    'line_range':
+      'start': 16
+      'end': 24
+  - 'path': '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/csrfHelper.js'
+    'snippet': |
+      export function hasCsrfToken(cookieString) {
+        const token = getCsrfToken(cookieString);
+        return token !== null && token.length > 0;
+      }
+      
+      export function isCsrfTokenValid(token) {
+        if (typeof token !== 'string') {
+          return false;
+        }
+        return token.length >= 10;
+      }
+      
+      export function createCsrfRetryTracker() {
+        let hasRetried = false;
+        return {
+          get hasRetried() { return hasRetried; },
+          markRetried() { hasRetried = true; },
+          canRetry() { return !hasRetried; },
+        };
+      }
+    'covers':
+      - 'condition:csrf_protection'
+    'line_range':
+      'start': 22
+      'end': 73
+  - 'path': '/Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/tokenValidator.js'
+    'snippet': |
+      export function parseJwtPayload(accessToken) {
+        if (typeof accessToken !== 'string' || accessToken.length === 0) {
+          return null;
+        }
+        
+        const parts = accessToken.split('.');
+        if (parts.length !== 3) {
+          return null;
+        }
+        
+        try {
+          const base64Payload = parts[1];
+          const base64 = base64Payload.replace(/-/g, '+').replace(/_/g, '/');
+          const padLength = 4 - (base64.length % 4);
+          const paddedBase64 = padLength !== 4 ? base64 + '='.repeat(padLength) : base64;
+          const jsonPayload = atob(paddedBase64);
+          return JSON.parse(jsonPayload);
+        } catch (_error) {
+          return null;
+        }
+      }
+    'covers':
+      - 'transition:token_expired'
+    'line_range':
+      'start': 16
+      'end': 45
+'confidence': 0.92
+'confidence_rationale': 'State transitions confirmed across authGuard.js, tokenRefresher.js, useAuthRedirect.ts. Cross-tab coordination verified in crossTab.js and tokenRefresher.js. CSRF handling confirmed in csrfHelper.js. JWT parsing validated in tokenValidator.js. Minor uncertainty around QFM rollback integration which is in separate routing hooks.'
+'unresolved_questions':
+  - 'QFM rollback integration details not fully visible in auth module'
+  - 'Exact behavior when localStorage is unavailable in some browsers'
+  - 'Token refresh timeout handling edge cases'
+'status': 'complete'

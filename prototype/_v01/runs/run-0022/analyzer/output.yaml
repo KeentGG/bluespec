@@ -1,0 +1,10 @@
+'primary_failure_type': 'recognition_failure'
+'diagnosis': 'The formula discovered broad behavior areas (auth_flow, stateful_ui) with high confidence but failed to identify the specific conditional flows and state-dependent visibility patterns that the golden set expects. The explore step listed files and created coarse-grained behavior candidates without deep-diving into route files, gate contracts, or component visibility logic. The analyze step then worked with these overly broad candidates, producing specs that had high precision (0.976, 0.964) but zero recall (0/4 golden behaviors found). The missed behaviors are all conditional flow patterns: auth-conditional-redirect (gate-based routing), download-button-visibility (state-dependent rendering), toa-gated-first-report-creation (TOA-gated flow), and auth.login (login form behavior). The formula''s explore step treats behavior_shapes as categories to match, not as patterns to discover within files.'
+'affected_steps':
+  - 'explore'
+  - 'analyze'
+'suggested_mutation':
+  'type': 'step_management'
+  'target_step': 'explore'
+  'change': 'Add a conditional-flow-discovery phase to the explore step. After listing files and creating behavior_candidates, add a mandatory subtask that reads key files (route files, gate contracts, component files with conditional rendering) to identify specific conditional flows. The prompt should instruct the agent to look for: (1) route guard patterns (if/then/else in routing), (2) gate contracts that control flow based on state, (3) conditional rendering patterns (hidden/disabled/enabled based on state), and (4) form submission guards. Output a new field conditional_flows_discovered alongside behavior_candidates, with each flow having: id, description, guard_conditions, render_mode, evidence_refs. This provides the analyze step with specific behaviors to spec rather than relying on broad category matching.'
+'confidence': 0.85

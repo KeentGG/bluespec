@@ -26,11 +26,14 @@ function writeText(filePath, content) {
 }
 
 function readYamlFile(filePath) {
-  return YAML.parse(readText(filePath));
+  return YAML.parse(readText(filePath), { logLevel: 'error' });
 }
 
 function writeYamlFile(filePath, data) {
-  writeText(filePath, YAML.stringify(data));
+  writeText(filePath, YAML.stringify(data, {
+    defaultStringType: 'QUOTE_SINGLE',
+    lineWidth: 0,
+  }));
 }
 
 function readJsonLines(filePath) {
@@ -256,6 +259,20 @@ function phasesFrom(phase) {
   return RUN_PHASES.slice(idx);
 }
 
+/**
+ * Saves an agent prompt to the run's prompts directory.
+ * Creates runs/<run-id>/prompts/ if it doesn't exist.
+ *
+ * @param {string} runId - e.g. 'run-0022'
+ * @param {string} filename - e.g. 'generate-step-1-explore.md'
+ * @param {string} content - the full prompt content
+ */
+function savePromptToRun(runId, filename, content) {
+  const promptsDir = resolveWorkspacePath(path.posix.join('runs', runId, 'prompts'));
+  ensureDir(promptsDir);
+  writeText(path.join(promptsDir, filename), content);
+}
+
 module.exports = {
   WORKSPACE_ROOT,
   acquireLock,
@@ -279,6 +296,7 @@ module.exports = {
   resolveFormulaExtends,
   resolveWorkspacePath,
   RUN_PHASES,
+  savePromptToRun,
   timestamp,
   writeCheckpoint,
   writeCurrentState,

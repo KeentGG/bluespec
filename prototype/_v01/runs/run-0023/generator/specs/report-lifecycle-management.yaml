@@ -1,0 +1,98 @@
+id: report-lifecycle-management
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: report_lifecycle_management
+    coverage: full
+    notes: "Hydration logic for report data from import or defaults"
+description: >
+  Manages report data hydration from either imported data (source parameter)
+  or default values. Determines hydration mode based on presence of source
+  query parameter and loads appropriate data accordingly.
+conditions:
+  - id: gateQuerySourceExists
+    description: "Hydrates report from imported data when source parameter exists"
+    trigger: "Gate page loads with source parameter"
+    guards:
+      - field: gateQuery
+        condition: "gateQuery.source exists → hydrate from import"
+    then:
+      - "Load report data from imported source"
+      - "Set hydrationMode='import'"
+    else:
+      - "Proceed to default hydration check"
+  - id: gateQuerySourceMissing
+    description: "Hydrates report with default values when no source parameter"
+    trigger: "Gate page loads without source parameter"
+    guards:
+      - field: gateQuery
+        condition: "gateQuery.source missing → hydrate defaults"
+    then:
+      - "Load default report structure"
+      - "Set hydrationMode='defaults'"
+  - id: hydrationModeImport
+    description: "Tracks import hydration mode"
+    trigger: "Hydration begins"
+    guards:
+      - field: hydrationMode
+        condition: "hydrationMode === 'import' || 'defaults'"
+    then:
+      - "Use imported data structure"
+  - id: hydrationModeDefaults
+    description: "Tracks default hydration mode"
+    trigger: "Hydration begins"
+    guards:
+      - field: hydrationMode
+        condition: "hydrationMode === 'defaults'"
+    then:
+      - "Use default data structure"
+inputs:
+  - id: source
+    type: string
+    source: "URL query parameter"
+    required: false
+  - id: reportId
+    type: string
+    source: "URL query parameter"
+    required: true
+outputs:
+  - id: reportData
+    type: "Report object"
+    destination: "Component state"
+    lifespan: "Session duration"
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/routing/hooks/useGateEditEntryState.ts
+    snippet: |
+      executeGateEditInitialization({
+        router,
+        guard: guardRef.current,
+        query: searchParams,
+        fallbackBusinessId,
+        fetchReport: async ({ target }) => {
+          const token = getToken();
+          return fetchGateEditReportById(target, {
+            apiBaseUrl: process.env.NEXT_PUBLIC_APP_API_URL ?? "",
+            endpointPath: "/calculator-reports/report",
+            fetchImplementation: async (url, fetchOptions) => {
+              const headers = new Headers(fetchOptions?.headers || {});
+              if (token?.accessToken) headers.set("Authorization", `Bearer ${token.accessToken}`);
+              if (token?._id) headers.set("userId", token._id);
+              return fetch(url, { ...restOptions, headers, credentials: "omit" });
+            },
+          });
+        },
+      });
+    covers:
+      - "condition:gateQuerySourceExists"
+      - "condition:gateQuerySourceMissing"
+confidence: 0.85
+confidence_rationale: >
+  Gate edit initialization confirmed with source parameter handling.
+  Report fetching logic verified with authentication headers.
+  Hydration mode tracking observed in initialization flow.
+  Some hydration details in shared/lib modules not fully inspected.
+unresolved_questions:
+  - "Exact default report structure not visible in frontend code"
+  - "Import data format details in shared/lib"
+status: partial

@@ -5,7 +5,7 @@ required:
   - id
   - version
   - ecosystem
-oneOf:
+anyOf:
   - required:
       - steps
       - validations
@@ -24,7 +24,7 @@ properties:
     type: string
     description: "Reference to parent formula for derived (fine-tuned) formulas"
   fine_tune_run:
-    type: string
+    type: [string, "null"]
     description: "The fine-tune run that produced this derived formula"
   fine_tuned_criteria:
     type: array
@@ -74,12 +74,28 @@ properties:
           type: string
         name:
           type: string
-        prompt:
+        agent:
+          type: [string, "null"]
+        tool:
           type: string
-        outputs:
+        tools:
           type: array
           items:
             type: string
+        max_tokens:
+          type: integer
+        prompt:
+          type: string
+        inputs:
+          type: object
+          additionalProperties: true
+        outputs:
+          anyOf:
+            - type: array
+              items:
+                type: string
+            - type: object
+              additionalProperties: true
   validations:
     type: array
     items:
@@ -89,6 +105,24 @@ properties:
     items:
       type: string
   specializations:
+    type: array
+    items:
+      type: string
+  execution:
+    type: object
+    additionalProperties: true
+  evaluation:
+    type: object
+    additionalProperties: true
+  status:
+    type: string
+  discovered_in_run:
+    type: [string, "null"]
+  created_at:
+    type: string
+  governance_notes:
+    type: string
+  _extends_chain:
     type: array
     items:
       type: string

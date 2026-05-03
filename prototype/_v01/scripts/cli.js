@@ -23,6 +23,7 @@ const {
   resolveFormulaExtends,
   resolveWorkspacePath,
   RUN_PHASES,
+  savePromptToRun,
   timestamp,
   writeCheckpoint,
   writeCurrentState,
@@ -30,8 +31,15 @@ const {
   writeText,
   writeYamlFile,
 } = require('./lib/common');
-const { findLessons, refreshLessonIndex, summarizeLessonsForFailureType } = require('./lib/lessons');
+const { appendLesson, buildLessonsContext, findLessons, refreshLessonIndex } = require('./lib/lessons');
 const { validateArtifactsForRun, validateFile } = require('./lib/validation');
+
+const MUTATION_TO_FAILURE = {
+  prompt_tweak: 'prompt_failure',
+  step_management: 'search_failure',
+  schema_change: 'format_failure',
+  rubric_mutation: 'rubric_gap_failure',
+};
 
 /**
  * Spawns an OpenCode agent session for a bounded task.
@@ -111,6 +119,7 @@ function usage() {
   node scripts/cli.js promote_rubric_snapshot [--version v002] [--notes "..."]
   node scripts/cli.js register_formula_candidate --file formulas/candidates/example.yaml
   node scripts/cli.js advance_formula --id frontend-v002 [--notes "..."]
+  node scripts/cli.js record_lesson --failure-type search_failure --teaching-method step_management --result PASSED --scenario "..." [--run-id run-0016] [--works-on conditional_rendering,feature_flags] [--discovered-criterion conditional_flow_documentation]
   node scripts/cli.js validate_seed_rubrics`);
 }
 
@@ -353,6 +362,28 @@ function rejectRubricCandidate(args) {
   queue.pending_promotions.rubric_criteria = queue.pending_promotions.rubric_criteria.filter((id) => id !== args.id);
   writeQueueState(queue);
 
+  if (args.reason && args.id) {
+    const sourceMap = {
+      rubric_gap_failure: { failure_type: 'rubric_gap_failure', teaching_method: 'rubric_candidate_proposal' },
+      contextual_inference: { failure_type: 'recognition_failure', teaching_method: 'rubric_candidate_proposal' },
+      schema_derived: { failure_type: 'format_failure', teaching_method: 'rubric_candidate_proposal' },
+      seed_curation: { failure_type: 'prompt_failure', teaching_method: 'rubric_candidate_proposal' },
+    };
+    const sourceInfo = sourceMap[candidate.source] || {
+      failure_type: 'rubric_gap_failure',
+      teaching_method: 'rubric_candidate_proposal',
+    };
+
+    appendLesson({
+      failure_type: sourceInfo.failure_type,
+      teaching_method: sourceInfo.teaching_method,
+      result: 'FAILED',
+      scenario: `Rubric candidate rejected: ${args.id} (source: ${candidate.source || 'unknown'}). Reason: ${args.reason}`,
+      run_id: candidate.discovered_in_run || null,
+      discovered_criterion: args.id,
+    });
+  }
+
   console.log(`Rejected rubric candidate ${args.id}`);
 }
 
@@ -457,6 +488,35 @@ function registerFormulaCandidate(args) {
 
   writeYamlFile(candidatePath, candidate);
 
+  // Auto-record tentative lesson if candidate has mutation metadata
+  if (candidate.fine_tune_run && candidate.parent) {
+    const runId = candidate.fine_tune_run;
+    const analyzerPath = resolveWorkspacePath(path.posix.join('runs', runId, 'analyzer', 'output.yaml'));
+    let failureType = null;
+
+    if (fileExists(analyzerPath)) {
+      const analyzerOutput = readYamlFile(analyzerPath);
+      failureType = analyzerOutput.primary_failure_type || null;
+    }
+
+    const mutationSource = candidate.consolidated_mutations?.[0];
+    if (!failureType) {
+      failureType = mutationSource ? (MUTATION_TO_FAILURE[mutationSource.type] || 'recognition_failure') : null;
+    }
+
+    if (failureType) {
+      appendLesson({
+        failure_type: failureType,
+        teaching_method: mutationSource?.type || 'unknown',
+        result: 'PARTIAL',
+        scenario: `Candidate registered from ${runId}. Analyzer diagnosed: ${failureType}. Pending human promotion.`,
+        works_on: candidate.specializations || [],
+        run_id: runId,
+        discovered_criterion: null,
+      });
+    }
+  }
+
   const queue = getQueueState();
   queue.pending_promotions = queue.pending_promotions || { formulas: [], rubric_criteria: [] };
   if (!queue.pending_promotions.formulas.includes(candidate.id)) {
@@ -503,7 +563,53 @@ function advanceFormula(args) {
   queue.pending_reviews = (queue.pending_reviews || []).filter((r) => r !== `formula:${args.id}`);
   writeQueueState(queue);
 
+  // Record PASSED lesson on promotion
+  const fineTuneRun = formula.fine_tune_run;
+  const mutations = formula.consolidated_mutations || [];
+
+  if (fineTuneRun && mutations.length > 0) {
+    const analyzerPath = resolveWorkspacePath(path.posix.join('runs', fineTuneRun, 'analyzer', 'output.yaml'));
+    let diagnosedFailureType = null;
+    if (fileExists(analyzerPath)) {
+      const analyzerOutput = readYamlFile(analyzerPath);
+      diagnosedFailureType = analyzerOutput.primary_failure_type || null;
+    }
+
+    for (const mutation of mutations) {
+      const failureType = diagnosedFailureType || MUTATION_TO_FAILURE[mutation.type] || 'recognition_failure';
+
+      appendLesson({
+        failure_type: failureType,
+        teaching_method: mutation.type,
+        result: 'PASSED',
+        scenario: `Formula ${formula.id} v${formula.version} promoted from ${fineTuneRun}. Analyzer diagnosed: ${failureType}. Mutation: ${mutation.change}`,
+        works_on: formula.specializations || [],
+        run_id: fineTuneRun,
+        discovered_criterion: null,
+      });
+    }
+  }
+
   console.log(`Advanced formula ${args.id} to active`);
+}
+
+function recordLesson(args) {
+  const required = ['failure-type', 'teaching-method', 'result', 'scenario'];
+  for (const key of required) {
+    if (!args[key]) throw new Error(`--${key} is required`);
+  }
+
+  appendLesson({
+    failure_type: args['failure-type'],
+    teaching_method: args['teaching-method'],
+    result: args.result.toUpperCase(),
+    scenario: args.scenario,
+    works_on: args['works-on'] ? args['works-on'].split(',').map(s => s.trim()) : [],
+    run_id: args['run-id'] || null,
+    discovered_criterion: args['discovered-criterion'] || null,
+  });
+
+  console.log(`Lesson recorded. Index refreshed.`);
 }
 
 function validateSeedRubrics() {
@@ -627,6 +733,8 @@ Explore the codebase freely and produce specs for behaviors you discover.
 The golden set is a hidden test — the Evaluator will check coverage after you finish.
 `;
 
+  savePromptToRun(runId, 'generator-system.md', systemPrompt);
+
   const trace = {
     run_id: runId,
     provider: providerType,
@@ -676,6 +784,8 @@ artifacts_produced: [<list of output artifacts>]
 unresolved_questions: [<questions this step could not answer>]
 flags_for_analyzer: [<notable observations for the analyzer>]
 `;
+
+    savePromptToRun(runId, `generator-step-${stepNumber}-${step.id}.md`, userPrompt);
 
     let stepResult;
     let stepError = null;
@@ -942,6 +1052,8 @@ Write the official score report to: ${officialOutputPath}
 Write the shadow findings artifact to: ${shadowFindingsPath}
 `;
 
+  savePromptToRun(runId, 'evaluator.md', prompt);
+
   try {
     await spawnAgent({
       role: 'Evaluator',
@@ -997,6 +1109,9 @@ async function runAnalyzer(args) {
   const shadowConsistencyFindings = Array.isArray(evaluatorShadowFindings.consistency_findings) ? evaluatorShadowFindings.consistency_findings : [];
   const shadowRubricGapCandidates = normalizeRubricGapCandidates(evaluatorShadowFindings.rubric_gap_candidates);
 
+  const lessonIndex = refreshLessonIndex();
+  const lessonContext = buildLessonsContext(lessonIndex);
+
   const prompt = `You are the Analyzer agent. Diagnose WHY the formula missed or hallucinated behavior by applying the 5-type failure decision tree.
 
 WORKSPACE: ${resolveWorkspacePath('')}
@@ -1024,6 +1139,15 @@ RUN_ID: ${runId}
 4. **prompt_failure** — Does the formula's own step prompts never ask for this behavior?
 5. **rubric_gap_failure** — Is the criterion ABSENT from rubric.active_criteria AND was surfaced in evaluator shadow findings?
 
+## Lesson History
+${lessonContext}
+
+## Lesson-Aware Diagnosis
+- Check if this failure type has been seen before. What teaching methods have already been tried?
+- If a previous attempt with the same (failure_type, teaching_method) already FAILED, flag it and suggest a different approach.
+- Consider escalating mutation tiers: prompt_tweak → step_management → parent_guideline → schema_change → tool_change → rubric_mutation.
+- **Anti-contamination: Classify the failure TYPE and suggest methodological improvements, NOT specific missed behaviors. The formula must evolve to discover behaviors better, not to be pre-primed with what it missed.**
+
 ## Key rules
 - rubric_gap_failure is ONLY valid when steps 1-4 are FULLY exhausted AND the criterion doesn't appear in rubric.active_criteria
 - Do NOT use rubric_gap_failure as a default — exhaust all other types first
@@ -1050,6 +1174,8 @@ RUN_ID: ${runId}
 ## Output
 Write the diagnosis YAML to: ${outputPath}
 `;
+
+  savePromptToRun(runId, 'analyzer.md', prompt);
 
   try {
     await spawnAgent({
@@ -1079,7 +1205,6 @@ async function runMutator(args) {
   const rubric = readYamlFile(path.join(runRoot, 'inputs', 'rubric.yaml'));
   const lessonIndex = refreshLessonIndex();
   const failureType = analyzerOutput.primary_failure_type || 'unknown';
-  const relevantLessons = summarizeLessonsForFailureType(lessonIndex, failureType);
   const officialEvaluatorScore = typeof officialEvaluatorOutput.overall_score === 'number' ? officialEvaluatorOutput.overall_score : 'unknown';
   const shadowPrecisionFindings = Array.isArray(evaluatorShadowFindings.precision_findings) ? evaluatorShadowFindings.precision_findings : [];
   const shadowRubricGapCandidates = normalizeRubricGapCandidates(evaluatorShadowFindings.rubric_gap_candidates);
@@ -1116,12 +1241,8 @@ Use the lesson index first. Treat proposed_change.type as the teaching method fo
 
 If a similar method already PASSED for this failure_type, prefer building on that approach.
 
-## Indexed lesson summary for failure_type "${failureType}"
-Failed lessons:
-${relevantLessons.failed.length > 0 ? relevantLessons.failed.map((entry) => `- ${entry.teaching_method} (${entry.source_ref})${entry.run_id ? ` [run ${entry.run_id}]` : ''}: ${entry.scenario}`).join('\n') : '- none'}
-
-Learned lessons:
-${relevantLessons.learned.length > 0 ? relevantLessons.learned.map((entry) => `- ${entry.teaching_method} (${entry.source_ref})${entry.run_id ? ` [run ${entry.run_id}]` : ''}: ${entry.scenario}`).join('\n') : '- none'}
+## Lesson History
+${buildLessonsContext(lessonIndex)}
 
 ## Mutation Tiers (try in order)
 1. prompt_tweak — add/refine instructions within an existing step (preferred, low risk)
@@ -1135,6 +1256,7 @@ ${relevantLessons.learned.length > 0 ? relevantLessons.learned.map((entry) => `-
 - rubric_gap_failure: rubric_candidate goes through governed review before ANY scoring impact
 - proposed_change must directly address the ANALYZER's diagnosis, not just symptoms
 - Be specific: "add guidance" is not a proposal. "Add to draft step: enumerate state transitions" is.
+- **Anti-contamination: The lesson history shows failure types and success/failure rates, NOT specific behaviors to hunt for. Do NOT encode specific behavioral findings from past runs into the formula. Improve the exploration METHOD (coverage breadth, pattern recognition, schema compliance), not specific targets.**
 
 ## Formula and rubric context
 - Formula ecosystem: ${formula.ecosystem}
@@ -1199,6 +1321,8 @@ Fields:
 Write the mutation YAML to: ${outputPath}
 ${analyzerOutput.rubric_gap_proposed === true ? `Write the rubric candidate YAML to: ${rubricCandidatePath}` : ''}
 `;
+
+  savePromptToRun(runId, 'mutator.md', prompt);
 
   try {
     await spawnAgent({
@@ -1575,6 +1699,9 @@ function main() {
       break;
     case 'advance_formula':
       advanceFormula(args);
+      break;
+    case 'record_lesson':
+      recordLesson(args);
       break;
     case 'validate_seed_rubrics':
       validateSeedRubrics();

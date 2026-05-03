@@ -1,0 +1,140 @@
+id: stateful-reports-list
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: stateful_reports_list
+    coverage: full
+    notes: Reports listing with search, sort, filter, and pagination via Zustand + SWR
+description: >
+  Reports list with Zustand store for filters (search, sort, calc type) and
+  SWR for data fetching. Page controller manages list state with derived
+  states (loading, empty, idle, ready, error). Pagination via loadMore
+  pattern with accumulated reports.
+state_machine:
+  initial: idle
+  states:
+    - id: idle
+      description: No company selected, show idle state
+    - id: loading
+      description: Initial data fetch in progress
+    - id: ready
+      description: Reports loaded and displayed
+    - id: empty
+      description: No reports found for current filters
+    - id: error
+      description: Data fetch failed
+  transitions:
+    - id: company_selected
+      from: idle
+      to: loading
+      trigger: User selects a company
+      effects:
+        - Enable SWR query with businessId
+    - id: data_loaded
+      from: loading
+      to: ready
+      trigger: SWR returns report list
+      effects:
+        - Populate reportList state
+    - id: no_reports
+      from: loading
+      to: empty
+      trigger: SWR returns empty list
+    - id: fetch_error
+      from: loading
+      to: error
+      trigger: SWR returns error
+      effects:
+        - Set runtimeErrorMessage
+    - id: load_more
+      from: ready
+      to: ready
+      trigger: User clicks Load More
+      effects:
+        - Increment page
+        - Append new reports to accumulated list
+inputs:
+  - id: businessId
+    type: string
+    source: company selection
+    required: true
+  - id: searchQuery
+    type: string
+    source: search input
+    required: false
+  - id: sortId
+    type: string
+    source: sort selector
+    required: false
+  - id: calcTypeFilter
+    type: string
+    source: calculator type filter
+    required: false
+outputs:
+  - id: reportList
+    type: array
+    destination: ReportsTable component
+    lifespan: session
+evidence_refs:
+  - path: src/features/reports/store/useReportsListStore.ts
+    snippet: |
+      export const useReportsListStore = create<ReportsListState>((set) => ({
+        searchQuery: "",
+        sortId: "updatedAt:desc",
+        calcTypeFilter: "all",
+        setSearchQuery: (query) => set({ searchQuery: query }),
+        setSortId: (sortId) => set({ sortId }),
+        setCalcTypeFilter: (filter) => set({ calcTypeFilter: filter }),
+        resetFilters: () => set({ searchQuery: "", sortId: "updatedAt:desc", calcTypeFilter: "all" }),
+      }));
+    covers:
+      - state: ready
+    line_range:
+      start: 14
+      end: 28
+  - path: src/features/reports/controllers/useReportsPageController.ts
+    snippet: |
+      const [reportList, setReportList] = useState([]);
+      const [runtimeErrorMessage, setRuntimeErrorMessage] = useState(null);
+      const [userPage, setUserPage] = useState(1);
+      const listState = useMemo(() => {
+        if (runtimeErrorMessage) return "error";
+        if (swrLoading && !accumulatedReports.length) return "loading";
+        if (!companySelected) return "idle";
+        if (!accumulatedReports.length) return "empty";
+        return "ready";
+      }, [runtimeErrorMessage, swrLoading, companySelected, accumulatedReports.length]);
+    covers:
+      - state: idle
+      - state: loading
+      - state: ready
+      - state: empty
+      - state: error
+    line_range:
+      start: 19
+      end: 120
+  - path: src/features/reports/components/ReportsPageContent.tsx
+    snippet: |
+      if (controller.listState === "loading") return <ReportsTableSkeleton />;
+      if (controller.listState === "empty") return <ReportsEmptyState />;
+      if (controller.listState === "idle") return <ReportsIdleState />;
+      if (controller.listState === "ready" || controller.listState === "error") {
+        return <ReportsTable state={controller.listState} ... />;
+      }
+    covers:
+      - state: loading
+      - state: empty
+      - state: idle
+      - state: ready
+      - state: error
+    line_range:
+      start: 119
+      end: 142
+confidence: 0.95
+confidence_rationale: >
+  Reports list fully traced across Zustand store, page controller, and
+  page component. Five-state derived listState pattern confirmed.
+  Pagination with accumulated reports and loadMore verified.
+unresolved_questions: []
+status: complete

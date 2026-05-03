@@ -1,0 +1,130 @@
+id: middleware-auth-guard
+version: "1.0"
+type: spec
+ecosystem: frontend
+golden_behaviors:
+  - id: middleware_auth_guard
+    coverage: full
+    notes: "Route guard logic for protecting routes and handling session refresh"
+description: >
+  Server-side route guard that determines whether to allow access,
+  redirect to login, or redirect to companies based on session state.
+  Handles rollback routes, session refresh attempts, and fallback destinations.
+conditions:
+  - id: shouldResolveSession
+    description: "Determines if session resolution is needed for the current path"
+    trigger: "Route navigation"
+    guards:
+      - field: pathname
+        condition: "pathname is in protected paths list"
+    then:
+      - "Attempt session resolution"
+    else:
+      - "Allow access without session check"
+  - id: hasRefreshTokenNoSession
+    description: "Attempts token refresh when refresh token exists but no session"
+    trigger: "Session check reveals no active session"
+    guards:
+      - field: hasRefreshToken
+        condition: "hasRefreshToken === true AND session === null"
+    then:
+      - "Call refreshAccessToken to obtain new session"
+  - id: refreshResultNotNull
+    description: "Session established after successful refresh"
+    trigger: "Token refresh completes"
+    guards:
+      - field: refreshResult
+        condition: "refreshResult?.session !== null"
+    then:
+      - "Proceed with authenticated session"
+  - id: decisionActionRedirect
+    description: "Redirect decision when session cannot be established"
+    trigger: "Auth guard evaluation completes"
+    guards:
+      - field: decision
+        condition: "decision.action === 'redirect'"
+    then:
+      - "Redirect to decision.destination"
+  - id: rollbackRouteShouldRedirect
+    description: "Redirect when rollback route is active"
+    trigger: "Gate entry validation"
+    guards:
+      - field: rollbackRoute
+        condition: "rollbackRoute.shouldRedirect === true"
+    then:
+      - "Redirect to rollbackRoute.destination"
+inputs:
+  - id: pathname
+    type: string
+    source: "URL pathname"
+    required: true
+  - id: session
+    type: "Session object or null"
+    source: "Cookie or memory"
+    required: false
+  - id: routes
+    type: "Route config object"
+    source: "Default routes config"
+    required: false
+  - id: protectedPaths
+    type: "Array of path strings"
+    source: "Default protected paths"
+    required: false
+outputs:
+  - id: decision
+    type: "GuardDecision object"
+    destination: "Route handler"
+    lifespan: "Immediate"
+evidence_refs:
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/auth/api/authGuard.js
+    snippet: |
+      export async function authGuard(options = {}) {
+        const {
+          pathname = "/",
+          session = null,
+          routes = DEFAULT_ROUTES,
+          protectedPaths = DEFAULT_PROTECTED_PATHS,
+        } = options;
+        const resolvedPath = normalizePathname(pathname);
+        const resolvedSession = normalizeSession(session);
+        const protectedRoute = isProtectedRoute(resolvedPath, protectedPaths);
+        if (!resolvedSession) {
+          if (protectedRoute) {
+            return redirect(routes.login, "anonymous_redirect_login", clearSessionCookie);
+          }
+          return allow("anonymous_allow_public", clearSessionCookie);
+        }
+        if (resolvedPath === routes.login) {
+          return redirect(routes.companies, "authenticated_redirect_companies", clearSessionCookie);
+        }
+        return allow("authenticated_allow_route", clearSessionCookie);
+      }
+    covers:
+      - "condition:shouldResolveSession"
+      - "condition:decisionActionRedirect"
+  - path: /Volumes/Keen/Desk/Career/Valhalla/EOYT/dashboard-v2/src/features/routing/hooks/useGateEditEntryState.ts
+    snippet: |
+      const rollbackRoute = resolveRollbackRouteContract({
+        env: process.env,
+        storage: resolveBrowserStorage(),
+        path: "/gate/edit",
+      });
+      if (rollbackRoute.shouldRedirect && rollbackRoute.destination) {
+        setPhase("fallback");
+        const rollbackDestination = withBasePath(rollbackRoute.destination);
+        if (window.location.pathname !== rollbackDestination) {
+          window.location.replace(rollbackDestination);
+        }
+        return undefined;
+      }
+    covers:
+      - "condition:rollbackRouteShouldRedirect"
+confidence: 0.92
+confidence_rationale: >
+  Route guard logic confirmed in authGuard.js with clear allow/redirect decisions.
+  Rollback route handling verified in useGateEditEntryState.ts.
+  Session refresh integration observed in useAuthRedirect.ts.
+unresolved_questions:
+  - "Middleware implementation details not visible in frontend code"
+  - "Exact cookie handling for refresh tokens requires backend verification"
+status: complete

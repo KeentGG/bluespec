@@ -1,7 +1,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
-const { fileExists, readText, resolveWorkspacePath } = require('./common');
+const { fileExists, readText, resolveWorkspacePath, writeText, ensureDir } = require('./common');
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 5000;
@@ -35,7 +35,7 @@ process.on('exit', () => {
   killAllChildren();
 });
 
-async function executeAgentStep({ stepId, prompt, tools, outputSchema, maxTokens, agentRole, codebasePath }) {
+async function executeAgentStep({ stepId, prompt, tools, outputSchema, maxTokens, agentRole, codebasePath, savePromptTo }) {
   return new Promise((resolve, reject) => {
     let attempt = 0;
     let currentChild = null;
@@ -46,6 +46,12 @@ async function executeAgentStep({ stepId, prompt, tools, outputSchema, maxTokens
 
       const outputFile = path.join(resolveWorkspacePath(''), '.tmp', `agent-output-${stepId}-${Date.now()}.yaml`);
       const agentPrompt = buildAgentPrompt({ stepId, prompt, tools, outputSchema, maxTokens, outputFile, codebasePath });
+
+      if (savePromptTo) {
+        ensureDir(path.dirname(savePromptTo));
+        writeText(savePromptTo, agentPrompt);
+        console.log(`[Agent] Prompt saved to ${savePromptTo}`);
+      }
 
       fs.mkdirSync(path.dirname(outputFile), { recursive: true });
 
@@ -159,6 +165,8 @@ ${outputFile}
 - Use tools to explore the codebase as needed.
 - Write your final structured output to the file specified above.
 - Do NOT write comments in YAML output (no # lines). Pure YAML only.
+- YAML safety is mandatory: quote every string value that contains ': ', '|', '>', '{', '}', '[', ']', '#', quotes, or type-union text. Prefer single-quoted strings and escape embedded single quotes by doubling them.
+- Do not assemble ambiguous plain scalars such as notes: A: B or type: "a" | "b"; write them as quoted strings.
 - Be concise but thorough.
 - If you cannot complete the step, set status: "failed" and explain in failure_reason.
 `;
