@@ -1,0 +1,86 @@
+id: frontend-seed
+version: v001
+ecosystem: frontend
+behavior_shapes:
+  - stateful_ui
+  - conditional_flow
+steps:
+  - id: explore
+    name: Explore codebase structure
+    prompt: |
+      Explore the codebase at {{project.codebase_path}}.
+      Focus on: {{project.behavior_shapes}}
+      List all source files, identify behavioral areas, map evidence files.
+    outputs:
+      file_tree:
+        type: array
+        items:
+          type: string
+      behavior_candidates:
+        type: array
+        items:
+          type: object
+          properties:
+            id:
+              type: string
+            description:
+              type: string
+            evidence_refs:
+              type: array
+              items:
+                type: string
+          required:
+            - id
+            - description
+            - evidence_refs
+  - id: analyze
+    name: Analyze behaviors
+    prompt: |
+      Analyze these behavior candidates from exploration:
+      {{prior_outputs.explore.behavior_candidates}}
+      Filter to high-confidence, produce predicate inventory.
+    outputs:
+      predicate_inventory:
+        type: array
+        items:
+          type: object
+          properties:
+            behavior_id:
+              type: string
+            predicates:
+              type: array
+              items:
+                type: string
+      behaviors_to_spec:
+        type: array
+        items:
+          type: string
+  - id: draft
+    name: Draft specs
+    prompt: |
+      Draft specs for these behaviors:
+      {{prior_outputs.analyze.behaviors_to_spec}}
+      Use schema: schemas/spec.schema.yaml
+    outputs:
+      spec_files:
+        type: array
+        items:
+          type: string
+  - id: verify
+    name: Verify specs
+    prompt: |
+      Validate all specs against schemas/spec.schema.yaml.
+    outputs:
+      validation_report:
+        type: object
+        properties:
+          valid_specs:
+            type: array
+            items:
+              type: string
+          invalid_specs:
+            type: array
+            items:
+              type: object
+          all_valid:
+            type: boolean

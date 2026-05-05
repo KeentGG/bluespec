@@ -1,0 +1,6 @@
+project_id: sample-project
+ecosystem: frontend
+codebase_path: /Volumes/Keen/Desk/Career/Personal/Playground/FrameworksAI/blueprint-mode
+behavior_shapes:
+  - stateful_ui
+  - conditional_flow

@@ -1,0 +1,26 @@
+registered_at: 2026-05-03T00:00:00.000Z
+run_id: run-0001
+candidates:
+  - type: formula_mutation
+    target_step: explore
+    source_run: run-0001
+    candidate_file: runs/run-0001/mutator/output.yaml
+    status: pending_review
+    rationale: >
+      Mutation addresses 2 search failures and 1 prompt failure identified
+      in run-0001. Adds entry-point tracing and conditional logic scanning
+      techniques. Passes contamination guardrail.
+  - type: exploration_rubric_criterion
+    criterion: entry_point_tracing
+    description: >
+      Exploration should trace from application entry points through
+      imports/references to discover the full behavioral surface
+    source_run: run-0001
+    status: pending_review
+  - type: exploration_rubric_criterion
+    criterion: conditional_logic_scanning
+    description: >
+      Exploration should scan for state/data-driven decisions that
+      determine UI element visibility, enablement, or routing
+    source_run: run-0001
+    status: pending_review

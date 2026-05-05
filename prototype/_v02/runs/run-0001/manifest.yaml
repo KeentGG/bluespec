@@ -1,0 +1,6 @@
+run_id: run-0001
+created_at: '2026-05-04T00:00:00.000Z'
+formula_ref: formulas/seed/frontend.yaml
+project_ref: config/prototype.yaml
+golden_set_ref: goldens/projects/sample-project/behaviors.yaml
+status: initialized

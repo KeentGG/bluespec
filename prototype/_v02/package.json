@@ -1,0 +1,16 @@
+{
+  "name": "blueprint-evolution-prototype-v02",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Thin Node CLI for the Blueprint Mode v02 prototype",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "init": "node scripts/cli.js init",
+    "freeze": "node scripts/cli.js freeze"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
+  }
+}

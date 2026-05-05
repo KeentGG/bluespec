@@ -1,0 +1,22 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "harness": {
+      "description": "Blueprint Mode evolution cycle orchestrator",
+      "mode": "primary",
+      "permission": {
+        "edit": "allow",
+        "bash": {
+          "node scripts/cli.js *": "allow",
+          "*": "deny"
+        },
+        "task": {
+          "*": "allow"
+        },
+        "skill": {
+          "blueprint-harness": "allow"
+        }
+      }
+    }
+  }
+}

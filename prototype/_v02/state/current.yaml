@@ -1,0 +1,5 @@
+current_formula_ref: formulas/seed/frontend.yaml
+current_project_ref: config/prototype.yaml
+current_golden_set_ref: goldens/projects/sample-project/behaviors.yaml
+next_run_id: run-0002
+last_prepared_run_id: run-0001
